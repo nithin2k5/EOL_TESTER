@@ -1,555 +1,446 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk
+import mysql.connector
+import os
+import re
+from datetime import datetime
+import logging
+import configparser
 
-class WorkspaceApp:
+class ModelSettings:
     def __init__(self, root):
         self.root = root
         self.root.title("EOL Tester - Model Settings")
-        
-        # Make it full screen
         self.root.state('zoomed')
         
-        # Track placed labels
-        self.placed_labels = {}
-        self.original_positions = {}
-        
         # Initialize variables
-        self.current_label = None
-        self.moving_label = None
-        self.image_label = None
-        self.workspace_image = None
-        self.textboxes = {}
-        self.spec_entries = {}
+        self.part_labels_list = []
+        self.used_plc_addresses = []
+        self.program_selection_array = []
+        self.barcode_print_files_array = []
+        self.action = None
+        self.selected_part_number = None
+        self.user = ""
+        self.label_positions = {}
+        self.selected_label = None
+        self.image_loaded = False
         
-        # Set minimum size for quadrants
-        self.min_quadrant_size = (500, 400)
+        # Setup logging
+        logging.basicConfig(
+            filename='model_settings.log',
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
         
-        # Style configuration
-        self.style = ttk.Style()
-        self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
-        self.style.configure("Custom.TEntry", padding=5)
+        # Database connection
+        self.db = self.setup_database_connection()
         
+        # Load configuration
+        self.config = self.load_config()
+        
+        # Setup UI components
         self.setup_ui()
+        
+        # Show login dialog
+        self.show_login_dialog()
+
+    def setup_database_connection(self):
+        try:
+            return mysql.connector.connect(
+                host='localhost',
+                database='eol_tester_db',
+                user='root',
+                password='password'
+            )
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to connect to database: {err}")
+            return None
+
+    def load_config(self):
+        config = configparser.ConfigParser()
+        if os.path.exists('config.ini'):
+            config.read('config.ini')
+        return config
 
     def setup_ui(self):
         # Create main container
         self.main_container = tk.Frame(self.root)
         self.main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Create top navigation frame
+        # Create navigation bar
         self.create_navigation()
         
-        # Create header with labels
-        self.create_header()
+        # Create main content area with quadrants
+        self.create_quadrants()
         
-        # Create main workspace
-        self.create_workspace()
+        # Create status bar
+        self.create_status_bar()
+        
+        # Load initial data
+        self.load_part_labels()
+        self.load_plc_addresses()
+        self.load_barcode_print_files()
 
     def create_navigation(self):
         nav_frame = tk.Frame(self.main_container, bg="lightgray", height=40)
         nav_frame.pack(fill=tk.X)
-
-        buttons = ["PORT SETTINGS", "LABEL MAKER", "MODEL SETTINGS", 
-                  "TEST", "WORK DATA", "ADMIN", "HELP", "EXIT"]
         
-        for btn_text in buttons:
-            btn = tk.Button(nav_frame, text=btn_text, bg="white", 
-                          relief=tk.FLAT, padx=10, pady=5)
+        buttons = [
+            ("PORT SETTINGS", self.port_settings),
+            ("LABEL MAKER", self.label_maker),
+            ("MODEL SETTINGS", self.model_settings),
+            ("TEST", self.test),
+            ("WORK DATA", self.work_data),
+            ("ADMIN", self.admin),
+            ("HELP", self.help),
+            ("EXIT", self.exit_app)
+        ]
+        
+        for btn_text, command in buttons:
+            btn = tk.Button(nav_frame, text=btn_text, bg="white",
+                          relief=tk.FLAT, padx=10, pady=5,
+                          command=command)
             btn.pack(side=tk.LEFT, padx=2, pady=2)
 
-    def create_header(self):
-        # Header frame
-        header_frame = tk.Frame(self.main_container, height=100)
-        header_frame.pack(fill=tk.X, padx=5, pady=5)
+    def create_quadrants(self):
+        # Create frame for quadrants
+        self.workspace = tk.Frame(self.main_container)
+        self.workspace.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Labels frame
-        self.labels_frame = tk.Frame(header_frame)
-        self.labels_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Create moveable labels
-        self.create_moveable_labels()
-        
-        # Buttons frame
-        self.buttons_frame = tk.Frame(header_frame)
-        self.buttons_frame.pack(side=tk.RIGHT)
-        
-        # Create buttons
-        self.create_buttons()
-
-    def create_workspace(self):
-        # Create workspace frame
-        self.workspace_frame = tk.Frame(self.main_container)
-        self.workspace_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Configure grid
+        self.workspace.grid_columnconfigure(0, weight=1)
+        self.workspace.grid_columnconfigure(1, weight=1)
+        self.workspace.grid_rowconfigure(0, weight=1)
+        self.workspace.grid_rowconfigure(1, weight=1)
         
         # Create quadrants
-        self.create_quadrants()
+        self.q1 = self.create_first_quadrant()
+        self.q2 = self.create_second_quadrant()
+        self.q3 = self.create_third_quadrant()
+        self.q4 = self.create_fourth_quadrant()
+        
+        # Place quadrants in grid
+        self.q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        self.q2.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+        self.q3.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
+        self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
 
-    def create_quadrants(self):
-        self.quadrants = []
+    def create_first_quadrant(self):
+        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
         
-        # Create first two quadrants normally (top row)
-        for i in range(2):
-            frame = tk.Frame(self.workspace_frame,
-                           relief="groove",
-                           borderwidth=1,
-                           bg='white',
-                           width=self.min_quadrant_size[0],
-                           height=self.min_quadrant_size[1])
-            frame.grid(row=0, column=i, sticky="nsew")
-            frame.grid_propagate(False)
-            self.quadrants.append(frame)
+        # Header
+        header = tk.Label(frame, text="MODEL NAME / PART NAME - PART NUMBER",
+                         bg="navy", fg="white", font=("Arial", 12, "bold"))
+        header.pack(fill=tk.X)
         
-        # Create bottom row container
-        bottom_container = tk.Frame(self.workspace_frame)
-        bottom_container.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        # Label strip (L0-L15)
+        label_frame = tk.Frame(frame)
+        label_frame.pack(fill=tk.X, pady=5)
         
-        # Create three sections in the bottom row with headers
-        self.create_bottom_sections(bottom_container)
+        self.label_widgets = {}
+        for i in range(16):
+            label = tk.Label(label_frame, text=f"L{i}", width=4,
+                           relief="raised", bg="lightgray")
+            label.pack(side=tk.LEFT, padx=2)
+            self.label_widgets[f"L{i}"] = label
+            
+            # Bind drag events
+            label.bind("<Button-1>", self.start_label_drag)
+            label.bind("<B1-Motion>", self.on_label_drag)
+            label.bind("<ButtonRelease-1>", self.stop_label_drag)
         
-        # Configure main grid weights
-        self.workspace_frame.grid_rowconfigure(0, weight=1)
-        self.workspace_frame.grid_rowconfigure(1, weight=1)
-        self.workspace_frame.grid_columnconfigure(0, weight=1)
-        self.workspace_frame.grid_columnconfigure(1, weight=1)
+        # Image area
+        self.image_area = tk.Frame(frame, bg="white")
+        self.image_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Image label
+        self.image_label = tk.Label(self.image_area, bg="white")
+        self.image_label.pack(fill=tk.BOTH, expand=True)
+        
+        # Browse button
+        self.browse_btn = tk.Button(frame, text="Browse Image",
+                                  command=self.browse_image)
+        self.browse_btn.pack(side=tk.BOTTOM, pady=5)
+        
+        return frame
 
-        # Add content to second quadrant
-        self.create_second_quadrant_content()
-
-    def create_bottom_sections(self, container):
-        # Headers
-        headers = ["SPECIFICATIONS", "LABEL DETAILS", "PARTS LIST"]
-        sections = []
+    def create_second_quadrant(self):
+        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
         
-        for i, header in enumerate(headers):
-            section_frame = tk.Frame(container, relief="groove", borderwidth=1)
-            section_frame.grid(row=0, column=i, sticky="nsew", padx=1, pady=1)
-            container.grid_columnconfigure(i, weight=1)
+        # Header
+        header = tk.Label(frame, text="PART DETAILS",
+                         bg="#00BFFF", fg="black", 
+                         font=("Arial", 12, "bold"))
+        header.pack(fill=tk.X)
+        
+        # Part details form
+        form_frame = tk.Frame(frame)
+        form_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create form fields
+        fields = [
+            ("Part Number:", "part_number"),
+            ("Model Name:", "model_name"),
+            ("ALC Code:", "alc_code"),
+            ("PLC Address:", "plc_address"),
+            ("Barcode Print File:", "barcode_file"),
+            ("Vendor Code:", "vendor_code"),
+            ("EO Number:", "eo_number"),
+            ("Special Data:", "special_data"),
+            ("Initial ID:", "initial_id"),
+            ("Supplier Section:", "supplier_section")
+        ]
+        
+        self.entries = {}
+        for i, (text, key) in enumerate(fields):
+            label = tk.Label(form_frame, text=text)
+            label.grid(row=i, column=0, sticky="e", padx=5, pady=2)
             
-            # Header
-            header_label = tk.Label(section_frame, 
-                                  text=header,
-                                  bg="navy",
-                                  fg="white",
-                                  font=("Arial", 12, "bold"))
-            header_label.pack(fill=tk.X)
-            
-            # Content frame
-            content_frame = tk.Frame(section_frame)
-            content_frame.pack(fill=tk.BOTH, expand=True)
-            
-            if i == 0:
-                self.create_specifications_section(content_frame)
-            elif i == 1:
-                self.create_label_details_section(content_frame)
+            if key in ["plc_address", "barcode_file"]:
+                entry = ttk.Combobox(form_frame)
             else:
-                self.create_parts_list_section(content_frame)
-                
-            sections.append(section_frame)
-    def create_specifications_section(self, frame):
-        # Input fields frame
-        input_frame = tk.Frame(frame)
+                entry = tk.Entry(form_frame)
+            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=2)
+            self.entries[key] = entry
+        
+        return frame
+
+    def create_third_quadrant(self):
+        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        
+        # Create sections
+        sections = [
+            ("SPECIFICATIONS", self.create_specifications_section),
+            ("LABEL DETAILS", self.create_label_details_section),
+            ("PARTS LIST", self.create_parts_list_section)
+        ]
+        
+        for title, create_func in sections:
+            section_frame = tk.LabelFrame(frame, text=title,
+                                        font=("Arial", 10, "bold"))
+            section_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            create_func(section_frame)
+        
+        return frame
+
+    def create_fourth_quadrant(self):
+        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        
+        # Header
+        columns = ["LOT NUMBER", "L1", "P1", "P2", "RESULT"]
+        header_frame = tk.Frame(frame, bg="#00BFFF")
+        header_frame.pack(fill=tk.X)
+        
+        for col in columns:
+            label = tk.Label(header_frame, text=col, bg="#00BFFF",
+                           font=("Arial", 10, "bold"))
+            label.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        
+        # Grid view
+        self.results_tree = ttk.Treeview(frame, columns=columns,
+                                       show="headings", height=10)
+        for col in columns:
+            self.results_tree.heading(col, text=col)
+            self.results_tree.column(col, width=100)
+        
+        self.results_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Bottom frame
+        bottom_frame = tk.Frame(frame)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=2)
+        
+        # Next model button
+        next_btn = tk.Button(bottom_frame, 
+                           text="CLICK HERE TO MOVE TO NEXT MODEL",
+                           bg="yellow")
+        next_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 1))
+        
+        # ALC CODE entry
+        self.alc_entry = tk.Entry(bottom_frame, bg="yellow",
+                                justify="center")
+        self.alc_entry.insert(0, "ALC CODE")
+        self.alc_entry.pack(side=tk.RIGHT, padx=(1, 2), ipady=1)
+        
+        return frame
+
+    def create_specifications_section(self, parent):
+        # Input fields
+        input_frame = tk.Frame(parent)
         input_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Create input fields
-        entries = [
-            ("Description", 0, 0, 2),  # spans 2 columns
+        fields = [
+            ("Description", 0, 0, 2),
             ("Device", 1, 0, 1),
             ("Unit", 1, 1, 1),
-            ("Master Min", 0, 2, 1),
-            ("Master Max", 0, 3, 1),
-            ("Normal Min", 1, 2, 1),
-            ("Normal Max", 1, 3, 1)
+            ("Master Min", 2, 0, 1),
+            ("Master Max", 2, 1, 1),
+            ("Normal Min", 3, 0, 1),
+            ("Normal Max", 3, 1, 1)
         ]
         
         self.spec_entries = {}
-        for label_text, row, col, span in entries:
-            label = tk.Label(input_frame, text=label_text, anchor='w')
-            label.grid(row=row*2, column=col, columnspan=span, sticky='w', padx=5)
+        for label_text, row, col, span in fields:
+            label = tk.Label(input_frame, text=label_text)
+            label.grid(row=row*2, column=col, columnspan=span, sticky="w")
             
             entry = tk.Entry(input_frame)
-            entry.grid(row=row*2+1, column=col, columnspan=span, sticky='ew', padx=5, pady=2)
+            entry.grid(row=row*2+1, column=col, columnspan=span, sticky="ew")
             self.spec_entries[label_text] = entry
-
-        # Buttons frame
-        button_frame = tk.Frame(frame)
-        button_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        tk.Button(button_frame, text="ADD", bg="green", fg="white", width=10,
+        # Buttons
+        btn_frame = tk.Frame(input_frame)
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=5)
+        
+        tk.Button(btn_frame, text="ADD", bg="green", fg="white",
                  command=self.add_specification).pack(side=tk.LEFT, padx=5)
-        tk.Button(button_frame, text="REMOVE", bg="red", fg="white", width=10,
+        tk.Button(btn_frame, text="REMOVE", bg="red", fg="white",
                  command=self.remove_specification).pack(side=tk.LEFT, padx=5)
+        
+        # Specifications table
+        self.spec_tree = ttk.Treeview(parent, height=6)
+        self.spec_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Specifications Treeview
-        columns = ('description', 'device', 'unit', 'master_min', 'master_max', 'normal_min', 'normal_max')
-        self.spec_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+    def create_label_details_section(self, parent):
+        columns = ("Label", "ON Status", "OFF Status")
+        self.label_tree = ttk.Treeview(parent, columns=columns,
+                                     show="headings", height=6)
         
-        # Define headings
-        headings = {
-            'description': 'DESCRIPTION',
-            'device': 'DEVICE',
-            'unit': 'UNIT',
-            'master_min': 'MASTER\nMIN',
-            'master_max': 'MASTER\nMAX',
-            'normal_min': 'NORMAL\nMIN',
-            'normal_max': 'NORMAL\nMAX'
-        }
+        for col in columns:
+            self.label_tree.heading(col, text=col)
+            self.label_tree.column(col, width=100)
         
-        for col, heading in headings.items():
-            self.spec_tree.heading(col, text=heading)
-            self.spec_tree.column(col, width=100, anchor='center')
-
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.spec_tree.yview)
-        self.spec_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack the treeview and scrollbar
-        self.spec_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
-
-    def create_label_details_section(self, frame):
-        # Label Details Treeview
-        columns = ('label', 'on_status', 'off_status')
-        self.label_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
-        
-        # Define headings
-        headings = {
-            'label': 'LABEL',
-            'on_status': 'ON STATUS',
-            'off_status': 'OFF STATUS'
-        }
-        
-        for col, heading in headings.items():
-            self.label_tree.heading(col, text=heading)
-            self.label_tree.column(col, width=100, anchor='center')
-
-        # Enable editing on double click
-        self.label_tree.bind('<Double-1>', self.on_double_click)
+        self.label_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.label_tree.yview)
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL,
+                                command=self.label_tree.yview)
         self.label_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack the treeview and scrollbar
-        self.label_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Add sample data
-        for i in range(1, 17):
-            self.label_tree.insert('', tk.END, values=(f'L{i}', 'OFF', 'ON'))         
-    def create_parts_list_section(self, frame):
-        # Parts List Treeview
-        columns = ('sl_no', 'alc', 'part_number', 'model_part_name')
-        self.parts_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+    def create_parts_list_section(self, parent):
+        columns = ("Sl.No", "ALC", "Part Number", "Model & Part Name")
+        self.parts_tree = ttk.Treeview(parent, columns=columns,
+                                     show="headings", height=6)
         
-        # Define headings
-        headings = {
-            'sl_no': 'Sl. No.',
-            'alc': 'ALC',
-            'part_number': 'PART NUMBER',
-            'model_part_name': 'MODEL & PART NAME'
-        }
+        for col in columns:
+            self.parts_tree.heading(col, text=col)
         
-        # Set column widths
-        widths = {
-            'sl_no': 60,
-            'alc': 100,
-            'part_number': 150,
-            'model_part_name': 200
-        }
+        self.parts_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        for col, heading in headings.items():
-            self.parts_tree.heading(col, text=heading)
-            self.parts_tree.column(col, width=widths[col], anchor='center')
-
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.parts_tree.yview)
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL,
+                                command=self.parts_tree.yview)
         self.parts_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack the treeview and scrollbar
-        self.parts_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-    def create_second_quadrant_content(self):
-        second_quadrant = self.quadrants[1]
-        
-        # Header
-        header_frame = tk.Frame(second_quadrant, bg='#00BFFF')  # Light blue background
-        header_frame.pack(fill=tk.X)
-        
-        header_label = tk.Label(header_frame, 
-                              text="PART DETAILS",
-                              font=('Arial', 14, 'bold'),
-                              bg='#00BFFF',
-                              fg='navy')
-        header_label.pack(pady=5)
+    def create_status_bar(self):
+        self.status_bar = tk.Label(self.root, text="Ready",
+                                 bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Main content frame
-        content_frame = tk.Frame(second_quadrant, bg='white')
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        # Left side frame for input fields
-        left_frame = tk.Frame(content_frame, bg='white')
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-
-        # Right side frame for buttons
-        right_frame = tk.Frame(content_frame, bg='white')
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
-
-        # Input fields configuration
-        fields = [
-            ("Vendor Code", 0, 0),
-            ("EO Number", 0, 1),
-            ("Special Data", 1, 0),
-            ("Initial ID", 1, 1),
-            ("Part Number", 2, 0, 2),  # spans 2 columns
-            ("Model & Part Name", 3, 0, 2),  # spans 2 columns
-            ("Image File Path", 4, 0, 2),  # spans 2 columns
-            ("ALC Code", 5, 0),
-            ("Supplier Section", 2, 1)
-        ]
-
-        self.textboxes = {}
-        
-        # Create and arrange input fields
-        for field in fields:
-            label_text = field[0]
-            row = field[1]
-            col = field[2]
-            colspan = field[3] if len(field) > 3 else 1
-
-            # Label
-            label = tk.Label(left_frame, 
-                           text=label_text,
-                           bg='white',
-                           anchor='w')
-            label.grid(row=row*2, column=col, 
-                      columnspan=colspan,
-                      sticky='w', 
-                      padx=5, 
-                      pady=(5,0))
-
-            # Entry
-            entry = tk.Entry(left_frame, width=30 if colspan > 1 else 20)
-            entry.grid(row=row*2+1, column=col,
-                      columnspan=colspan,
-                      sticky='ew',
-                      padx=5,
-                      pady=(0,5))
-
-            # Store reference to entry widget
-            self.textboxes[label_text] = entry
-
-            # Special handling for Image File Path
-            if label_text == "Image File Path":
-                entry.config(state='readonly')
-                browse_btn = tk.Button(left_frame, 
-                                     text="📂",
-                                     command=self.upload_image)
-                browse_btn.grid(row=row*2+1, column=col+colspan, padx=(0,5))
-
-        # Configure grid
-        left_frame.grid_columnconfigure(0, weight=1)
-        left_frame.grid_columnconfigure(1, weight=1)
-
-        # Create buttons in right frame
-        buttons = [
-            ("NEW", "red"),
-            ("EDIT", "navy"),
-            ("SAVE", "green"),
-            ("CLEAR", "gray"),
-            ("DELETE", "red")
-        ]
-
-        for text, color in buttons:
-            btn = tk.Button(right_frame,
-                           text=text,
-                           bg=color,
-                           fg='white',
-                           width=10,
-                           height=2)
-            btn.pack(pady=5)              
-
-    def create_moveable_labels(self):
-        # Create 16 moveable labels
-        self.moveable_labels = []
-        for i in range(16):
-            label = tk.Label(self.labels_frame, 
-                           text=f"L{i+1}", 
-                           width=4, 
-                           relief="raised",
-                           bg="lightgray")
-            label.pack(side=tk.LEFT, padx=2)
-            label.bind("<Button-1>", self.start_move)
-            self.original_positions[f"L{i+1}"] = label
-            self.moveable_labels.append(label)
-
-    def create_buttons(self):
-        # Reset button
-        self.reset_btn = tk.Button(self.buttons_frame, 
-                                 text="RESET",
-                                 bg="red",
-                                 fg="white",
-                                 width=10,
-                                 height=2,
-                                 command=self.reset_labels)
-        self.reset_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Update button
-        self.update_btn = tk.Button(self.buttons_frame,
-                                  text="UPDATE",
-                                  bg="green",
-                                  fg="white",
-                                  width=10,
-                                  height=2,
-                                  command=self.update_positions)
-        self.update_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Upload image button
-        self.upload_btn = tk.Button(self.buttons_frame,
-                                  text="Upload Image",
-                                  width=10,
-                                  height=2,
-                                  command=self.upload_image)
-        self.upload_btn.pack(side=tk.LEFT, padx=5)
-
-    def start_move(self, event):
-        widget = event.widget
-        widget.startX = event.x
-        widget.startY = event.y
-        self.current_label = widget
-
-    def on_motion(self, event):
-        if self.current_label:
-            x = self.current_label.winfo_x() + event.x - self.current_label.startX
-            y = self.current_label.winfo_y() + event.y - self.current_label.startY
-            self.current_label.place(x=x, y=y)
-
-    def stop_move(self, event):
-        self.current_label = None
-
-    def on_double_click(self, event):
-        try:
-            item = self.label_tree.selection()[0]
-            column = self.label_tree.identify_column(event.x)
-            if column in ('#2', '#3'):
-                self.edit_cell(item, column)
-        except IndexError:
-            pass
-
-    def edit_cell(self, item, column):
-        current_value = self.label_tree.item(item, 'values')
-        edit_window = tk.Toplevel(self.root)
-        edit_window.title('Edit Status')
-        
-        x = self.root.winfo_x() + self.label_tree.winfo_x() + 50
-        y = self.root.winfo_y() + self.label_tree.winfo_y() + 50
-        edit_window.geometry(f'+{x}+{y}')
-        
-        entry = tk.Entry(edit_window)
-        entry.insert(0, current_value[int(column[1])-1])
-        entry.pack(padx=10, pady=5)
-        
-        def save_changes():
-            new_value = entry.get()
-            values = list(current_value)
-            values[int(column[1])-1] = new_value
-            self.label_tree.item(item, values=values)
-            edit_window.destroy()
-        
-        save_btn = tk.Button(edit_window, text='Save', command=save_changes)
-        save_btn.pack(pady=5)
-        entry.focus_set()
-
-    def add_specification(self):
-        values = []
-        for label in ['Description', 'Device', 'Unit', 'Master Min', 'Master Max', 'Normal Min', 'Normal Max']:
-            value = self.spec_entries[label].get()
-            if not value:
-                messagebox.showerror("Error", f"{label} cannot be empty!")
-                return
-            values.append(value)
-        self.spec_tree.insert('', tk.END, values=values)
-        for entry in self.spec_entries.values():
-            entry.delete(0, tk.END)
-
-    def remove_specification(self):
-        selected_items = self.spec_tree.selection()
-        if not selected_items:
-            messagebox.showwarning("Warning", "Please select an item to remove!")
+    # Event handlers and utility methods
+    def start_label_drag(self, event):
+        if not self.image_loaded:
             return
-        if messagebox.askyesno("Confirm", "Are you sure you want to remove the selected item(s)?"):
-            for item in selected_items:
-                self.spec_tree.delete(item)
+        self.selected_label = event.widget
+        self.selected_label._drag_start_x = event.x
+        self.selected_label._drag_start_y = event.y
 
-    def reset_labels(self):
-        if messagebox.askyesno("Reset", "Are you sure you want to reset all labels?"):
-            for label in self.placed_labels.values():
-                label.destroy()
-            self.placed_labels.clear()
-            for label in self.original_positions.values():
-                label.config(bg="lightgray")
-
-    def update_positions(self):
-        positions = {}
-        for label_text, label_widget in self.placed_labels.items():
-            positions[label_text] = {
-                'x': label_widget.winfo_x(),
-                'y': label_widget.winfo_y()
-            }
-        print("Label positions updated:", positions)
-        messagebox.showinfo("Success", "Label positions updated successfully!")
-
-    def update_image_path(self, path):
-        if "Image File Path" in self.textboxes:
-            entry = self.textboxes["Image File Path"]
-            entry.config(state='normal')
-            entry.delete(0, tk.END)
-            entry.insert(0, path)
-            entry.config(state='readonly')
-
-    def upload_image(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.ico")]
-        )
+    def on_label_drag(self, event):
+        if not self.selected_label or not self.image_loaded:
+            return
         
+        x = self.selected_label.winfo_x() + event.x - self.selected_label._drag_start_x
+        y = self.selected_label.winfo_y() + event.y - self.selected_label._drag_start_y
+        
+        # Keep within image area bounds
+        x = max(0, min(x, self.image_area.winfo_width() - self.selected_label.winfo_width()))
+        y = max(0, min(y, self.image_area.winfo_height() - self.selected_label.winfo_height()))
+        
+        self.selected_label.place(x=x, y=y)
+
+    def stop_label_drag(self, event):
+        if self.selected_label and self.image_loaded:
+            self.label_positions[self.selected_label.cget("text")] = (
+                self.selected_label.winfo_x(),
+                self.selected_label.winfo_y()
+            )
+        self.selected_label = None
+
+    def browse_image(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp")]
+        )
         if file_path:
             try:
-                first_quadrant = self.quadrants[0]
                 image = Image.open(file_path)
+                # Calculate scaling to fit
+                image_width, image_height = image.size
+                area_width = self.image_area.winfo_width()
+                area_height = self.image_area.winfo_height()
                 
-                quad_width = first_quadrant.winfo_width()
-                quad_height = first_quadrant.winfo_height()
+                scale = min(area_width/image_width, area_height/image_height)
+                new_width = int(image_width * scale)
+                new_height = int(image_height * scale)
                 
-                width_ratio = quad_width / image.size[0]
-                height_ratio = quad_height / image.size[1]
-                scale_factor = min(width_ratio, height_ratio)
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(image)
                 
-                new_width = int(image.size[0] * scale_factor)
-                new_height = int(image.size[1] * scale_factor)
-                
-                resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(resized_image)
-                
-                if self.image_label:
-                    self.image_label.destroy()
-                
-                self.image_label = tk.Label(first_quadrant, image=photo, bg='white')
+                self.image_label.configure(image=photo)
                 self.image_label.image = photo
-                
-                x_pos = (quad_width - new_width) // 2
-                y_pos = (quad_height - new_height) // 2
-                self.image_label.place(x=x_pos, y=y_pos)
-                
-                self.update_image_path(file_path)
+                self.image_loaded = True
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
 
-def main():
-    root = tk.Tk()
-    app = WorkspaceApp(root)
-    root.mainloop()
+    def add_specification(self):
+        # Get values from entries
+        values = [self.spec_entries[key].get() for key in self.spec_entries]
+        if all(values):
+            self.spec_tree.insert("", tk.END, values=values)
+            # Clear entries
+            for entry in self.spec_entries.values():
+                entry.delete(0, tk.END)
+        else:
+            messagebox.showwarning("Warning", "Please fill all specification fields")
+
+    def remove_specification(self):
+        selected_item = self.spec_tree.selection()
+        if selected_item:
+            self.spec_tree.delete(selected_item)
+
+    def show_login_dialog(self):
+        # Implement login dialog
+        pass
+
+    # Navigation button commands
+    def port_settings(self):
+        pass
+
+    def label_maker(self):
+        pass
+
+    def model_settings(self):
+        pass
+
+    def test(self):
+        pass
+
+    def work_data(self):
+        pass
+
+    def admin(self):
+        pass
+
+    def help(self):
+        pass
+
+    def exit_app(self):
+        if messagebox.askokcancel("Exit", "Do you want to exit?"):
+            self.root.quit()
 
 if __name__ == "__main__":
-    main()        
+    root = tk.Tk()
+    app = ModelSettings(root)
+    root.mainloop()        
