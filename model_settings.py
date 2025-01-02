@@ -1,446 +1,294 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from PIL import Image, ImageTk
-import mysql.connector
+import sqlite3
 import os
-import re
 from datetime import datetime
-import logging
-import configparser
 
-class ModelSettings:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("EOL Tester - Model Settings")
-        self.root.state('zoomed')
+class ModelSettings(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Model Settings")
+        self.geometry("800x600")
         
-        # Initialize variables
         self.part_labels_list = []
         self.used_plc_addresses = []
         self.program_selection_array = []
-        self.barcode_print_files_array = []
+        self.barcode_print_file_names_array = []
+        
         self.action = None
         self.selected_part_number = None
-        self.user = ""
-        self.label_positions = {}
-        self.selected_label = None
-        self.image_loaded = False
+        self.user = "TestUser"  # Placeholder for user
         
-        # Setup logging
-        logging.basicConfig(
-            filename='model_settings.log',
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
+        self.plc_address_data = []
+        self.barcode_print_file_names_data = []
         
-        # Database connection
-        self.db = self.setup_database_connection()
+        # Define the directory path for text files
+        self.text_files_path = "/Users/nithink/Developer/python/EOL_TESTER/txt_files"  # Update this path
         
-        # Load configuration
-        self.config = self.load_config()
-        
-        # Setup UI components
-        self.setup_ui()
-        
-        # Show login dialog
-        self.show_login_dialog()
+        self.create_widgets()
+        self.load_data()
 
-    def setup_database_connection(self):
-        try:
-            return mysql.connector.connect(
-                host='localhost',
-                database='eol_tester_db',
-                user='root',
-                password='password'
-            )
-        except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Failed to connect to database: {err}")
-            return None
+    def create_widgets(self):
+        # Create GUI components
+        self.lbl_mac_id = tk.Label(self, text="Machine ID: ")
+        self.lbl_mac_id.pack(pady=5)
+        
+        self.cb_plc_address = ttk.Combobox(self)
+        self.cb_plc_address.pack(pady=5)
+        
+        self.cb_print_file_list = ttk.Combobox(self)
+        self.cb_print_file_list.pack(pady=5)
+        
+        self.txt_part_number = tk.Entry(self)
+        self.txt_part_number.pack(pady=5)
+        
+        self.txt_model_name = tk.Entry(self)
+        self.txt_model_name.pack(pady=5)
+        
+        self.txt_alc = tk.Entry(self)
+        self.txt_alc.pack(pady=5)
+        
+        self.txt_image_file_path = tk.Entry(self)
+        self.txt_image_file_path.pack(pady=5)
+        
+        self.btn_browse = tk.Button(self, text="Browse", command=self.browse_image)
+        self.btn_browse.pack(pady=5)
+        
+        self.btn_new_part = tk.Button(self, text="New Part", command=self.new_part)
+        self.btn_new_part.pack(pady=5)
+        
+        self.btn_save = tk.Button(self, text="Save", command=self.save_data)
+        self.btn_save.pack(pady=5)
+        
+        self.btn_edit = tk.Button(self, text="Edit", command=self.edit_data)
+        self.btn_edit.pack(pady=5)
+        
+        self.btn_delete = tk.Button(self, text="Delete", command=self.delete_data)
+        self.btn_delete.pack(pady=5)
+        
+        self.dGV_parts = ttk.Treeview(self, columns=("Part Number", "Model Name", "ALC Code"), show="headings")
+        self.dGV_parts.heading("Part Number", text="Part Number")
+        self.dGV_parts.heading("Model Name", text="Model Name")
+        self.dGV_parts.heading("ALC Code", text="ALC Code")
+        self.dGV_parts.pack(pady=5, fill=tk.BOTH, expand=True)
+        
+        self.dGV_parts.bind("<ButtonRelease-1>", self.on_part_select)
 
-    def load_config(self):
-        config = configparser.ConfigParser()
-        if os.path.exists('config.ini'):
-            config.read('config.ini')
-        return config
-
-    def setup_ui(self):
-        # Create main container
-        self.main_container = tk.Frame(self.root)
-        self.main_container.pack(fill=tk.BOTH, expand=True)
-        
-        # Create navigation bar
-        self.create_navigation()
-        
-        # Create main content area with quadrants
-        self.create_quadrants()
-        
-        # Create status bar
-        self.create_status_bar()
-        
-        # Load initial data
+    def load_data(self):
+        # Load data from files or database
+        self.load_barcode_print_file_names_list()
+        self.load_plc_addresses_combo()
         self.load_part_labels()
-        self.load_plc_addresses()
-        self.load_barcode_print_files()
+        self.display_parts()
 
-    def create_navigation(self):
-        nav_frame = tk.Frame(self.main_container, bg="lightgray", height=40)
-        nav_frame.pack(fill=tk.X)
-        
-        buttons = [
-            ("PORT SETTINGS", self.port_settings),
-            ("LABEL MAKER", self.label_maker),
-            ("MODEL SETTINGS", self.model_settings),
-            ("TEST", self.test),
-            ("WORK DATA", self.work_data),
-            ("ADMIN", self.admin),
-            ("HELP", self.help),
-            ("EXIT", self.exit_app)
-        ]
-        
-        for btn_text, command in buttons:
-            btn = tk.Button(nav_frame, text=btn_text, bg="white",
-                          relief=tk.FLAT, padx=10, pady=5,
-                          command=command)
-            btn.pack(side=tk.LEFT, padx=2, pady=2)
+    def load_barcode_print_file_names_list(self):
+        # Load barcode print file names
+        try:
+            file_path = os.path.join(self.text_files_path, "BarcodePrintFileNames.txt")
+            with open(file_path, "r") as file:
+                barcode_print_file_names = file.read()
+                if barcode_print_file_names:
+                    self.barcode_print_file_names_array = barcode_print_file_names.split(',')
+                    self.barcode_print_file_names_data = [(" - - Select Barcode Print File Name ", "0")]
+                    for item in self.barcode_print_file_names_array:
+                        if item not in self.barcode_print_file_names_data:
+                            self.barcode_print_file_names_data.append((item, item))
+                    self.cb_print_file_list['values'] = [item[0] for item in self.barcode_print_file_names_data]
+                    self.cb_print_file_list.current(0)
+                else:
+                    messagebox.showwarning("Warning", "Barcode Print File Names text file is either missing or empty!")
+        except FileNotFoundError:
+            messagebox.showerror("Error", "Barcode Print File Names text file not found!")
 
-    def create_quadrants(self):
-        # Create frame for quadrants
-        self.workspace = tk.Frame(self.main_container)
-        self.workspace.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Configure grid
-        self.workspace.grid_columnconfigure(0, weight=1)
-        self.workspace.grid_columnconfigure(1, weight=1)
-        self.workspace.grid_rowconfigure(0, weight=1)
-        self.workspace.grid_rowconfigure(1, weight=1)
-        
-        # Create quadrants
-        self.q1 = self.create_first_quadrant()
-        self.q2 = self.create_second_quadrant()
-        self.q3 = self.create_third_quadrant()
-        self.q4 = self.create_fourth_quadrant()
-        
-        # Place quadrants in grid
-        self.q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-        self.q2.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-        self.q3.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
-        self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+    def load_plc_addresses_combo(self):
+        # Load PLC addresses
+        try:
+            file_path = os.path.join(self.text_files_path, "ProgramSelectionInPLC.txt")
+            with open(file_path, "r") as file:
+                program_selection = file.read()
+                if program_selection:
+                    self.program_selection_array = program_selection.split(',')
+                    self.plc_address_data = [(" - - Select PLC Address ", "0")]
+                    for item in self.program_selection_array:
+                        if item not in self.used_plc_addresses:
+                            self.plc_address_data.append((item, item))
+                    self.cb_plc_address['values'] = [item[0] for item in self.plc_address_data]
+                    self.cb_plc_address.current(0)
+                else:
+                    messagebox.showwarning("Warning", "Program Selection text file is either missing or empty!")
+        except FileNotFoundError:
+            messagebox.showerror("Error", "Program Selection text file not found!")
 
-    def create_first_quadrant(self):
-        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
-        # Header
-        header = tk.Label(frame, text="MODEL NAME / PART NAME - PART NUMBER",
-                         bg="navy", fg="white", font=("Arial", 12, "bold"))
-        header.pack(fill=tk.X)
-        
-        # Label strip (L0-L15)
-        label_frame = tk.Frame(frame)
-        label_frame.pack(fill=tk.X, pady=5)
-        
-        self.label_widgets = {}
-        for i in range(16):
-            label = tk.Label(label_frame, text=f"L{i}", width=4,
-                           relief="raised", bg="lightgray")
-            label.pack(side=tk.LEFT, padx=2)
-            self.label_widgets[f"L{i}"] = label
-            
-            # Bind drag events
-            label.bind("<Button-1>", self.start_label_drag)
-            label.bind("<B1-Motion>", self.on_label_drag)
-            label.bind("<ButtonRelease-1>", self.stop_label_drag)
-        
-        # Image area
-        self.image_area = tk.Frame(frame, bg="white")
-        self.image_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Image label
-        self.image_label = tk.Label(self.image_area, bg="white")
-        self.image_label.pack(fill=tk.BOTH, expand=True)
-        
-        # Browse button
-        self.browse_btn = tk.Button(frame, text="Browse Image",
-                                  command=self.browse_image)
-        self.browse_btn.pack(side=tk.BOTTOM, pady=5)
-        
-        return frame
+    def load_part_labels(self):
+        # Load part labels
+        try:
+            file_path = os.path.join(self.text_files_path, "partlabels.txt")
+            with open(file_path, "r") as file:
+                part_labels = file.read()
+                if self.label_validation(part_labels):
+                    part_labels_array = part_labels.split(',')
+                    self.part_labels_list.clear()
+                    for i, part_label in enumerate(part_labels_array):
+                        self.part_labels_list.append(part_label)
+                        # Additional logic to handle part labels
+                else:
+                    messagebox.showwarning("Warning", "Please verify and correct the Part Labels text file and then relaunch the settings screen...")
+        except FileNotFoundError:
+            messagebox.showerror("Error", "Part Labels text file not found!")
 
-    def create_second_quadrant(self):
-        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
-        # Header
-        header = tk.Label(frame, text="PART DETAILS",
-                         bg="#00BFFF", fg="black", 
-                         font=("Arial", 12, "bold"))
-        header.pack(fill=tk.X)
-        
-        # Part details form
-        form_frame = tk.Frame(frame)
-        form_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Create form fields
-        fields = [
-            ("Part Number:", "part_number"),
-            ("Model Name:", "model_name"),
-            ("ALC Code:", "alc_code"),
-            ("PLC Address:", "plc_address"),
-            ("Barcode Print File:", "barcode_file"),
-            ("Vendor Code:", "vendor_code"),
-            ("EO Number:", "eo_number"),
-            ("Special Data:", "special_data"),
-            ("Initial ID:", "initial_id"),
-            ("Supplier Section:", "supplier_section")
-        ]
-        
-        self.entries = {}
-        for i, (text, key) in enumerate(fields):
-            label = tk.Label(form_frame, text=text)
-            label.grid(row=i, column=0, sticky="e", padx=5, pady=2)
-            
-            if key in ["plc_address", "barcode_file"]:
-                entry = ttk.Combobox(form_frame)
+    def label_validation(self, part_labels):
+        # Validate part labels
+        if part_labels:
+            part_labels_array = part_labels.split(',')
+            if len(part_labels_array) == 16 and len(part_labels_array) == len(set(part_labels_array)):
+                if all(len(label.strip()) == 3 for label in part_labels_array):
+                    return True
+                else:
+                    messagebox.showwarning("Warning", "All Label Names in Part Labels text file MUST BE ONLY 3 CHARACTERS long.")
             else:
-                entry = tk.Entry(form_frame)
-            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=2)
-            self.entries[key] = entry
-        
-        return frame
-
-    def create_third_quadrant(self):
-        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
-        # Create sections
-        sections = [
-            ("SPECIFICATIONS", self.create_specifications_section),
-            ("LABEL DETAILS", self.create_label_details_section),
-            ("PARTS LIST", self.create_parts_list_section)
-        ]
-        
-        for title, create_func in sections:
-            section_frame = tk.LabelFrame(frame, text=title,
-                                        font=("Arial", 10, "bold"))
-            section_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            create_func(section_frame)
-        
-        return frame
-
-    def create_fourth_quadrant(self):
-        frame = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
-        # Header
-        columns = ["LOT NUMBER", "L1", "P1", "P2", "RESULT"]
-        header_frame = tk.Frame(frame, bg="#00BFFF")
-        header_frame.pack(fill=tk.X)
-        
-        for col in columns:
-            label = tk.Label(header_frame, text=col, bg="#00BFFF",
-                           font=("Arial", 10, "bold"))
-            label.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        
-        # Grid view
-        self.results_tree = ttk.Treeview(frame, columns=columns,
-                                       show="headings", height=10)
-        for col in columns:
-            self.results_tree.heading(col, text=col)
-            self.results_tree.column(col, width=100)
-        
-        self.results_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Bottom frame
-        bottom_frame = tk.Frame(frame)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=2)
-        
-        # Next model button
-        next_btn = tk.Button(bottom_frame, 
-                           text="CLICK HERE TO MOVE TO NEXT MODEL",
-                           bg="yellow")
-        next_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 1))
-        
-        # ALC CODE entry
-        self.alc_entry = tk.Entry(bottom_frame, bg="yellow",
-                                justify="center")
-        self.alc_entry.insert(0, "ALC CODE")
-        self.alc_entry.pack(side=tk.RIGHT, padx=(1, 2), ipady=1)
-        
-        return frame
-
-    def create_specifications_section(self, parent):
-        # Input fields
-        input_frame = tk.Frame(parent)
-        input_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        fields = [
-            ("Description", 0, 0, 2),
-            ("Device", 1, 0, 1),
-            ("Unit", 1, 1, 1),
-            ("Master Min", 2, 0, 1),
-            ("Master Max", 2, 1, 1),
-            ("Normal Min", 3, 0, 1),
-            ("Normal Max", 3, 1, 1)
-        ]
-        
-        self.spec_entries = {}
-        for label_text, row, col, span in fields:
-            label = tk.Label(input_frame, text=label_text)
-            label.grid(row=row*2, column=col, columnspan=span, sticky="w")
-            
-            entry = tk.Entry(input_frame)
-            entry.grid(row=row*2+1, column=col, columnspan=span, sticky="ew")
-            self.spec_entries[label_text] = entry
-        
-        # Buttons
-        btn_frame = tk.Frame(input_frame)
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=5)
-        
-        tk.Button(btn_frame, text="ADD", bg="green", fg="white",
-                 command=self.add_specification).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="REMOVE", bg="red", fg="white",
-                 command=self.remove_specification).pack(side=tk.LEFT, padx=5)
-        
-        # Specifications table
-        self.spec_tree = ttk.Treeview(parent, height=6)
-        self.spec_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-    def create_label_details_section(self, parent):
-        columns = ("Label", "ON Status", "OFF Status")
-        self.label_tree = ttk.Treeview(parent, columns=columns,
-                                     show="headings", height=6)
-        
-        for col in columns:
-            self.label_tree.heading(col, text=col)
-            self.label_tree.column(col, width=100)
-        
-        self.label_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL,
-                                command=self.label_tree.yview)
-        self.label_tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-    def create_parts_list_section(self, parent):
-        columns = ("Sl.No", "ALC", "Part Number", "Model & Part Name")
-        self.parts_tree = ttk.Treeview(parent, columns=columns,
-                                     show="headings", height=6)
-        
-        for col in columns:
-            self.parts_tree.heading(col, text=col)
-        
-        self.parts_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL,
-                                command=self.parts_tree.yview)
-        self.parts_tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-    def create_status_bar(self):
-        self.status_bar = tk.Label(self.root, text="Ready",
-                                 bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
-    # Event handlers and utility methods
-    def start_label_drag(self, event):
-        if not self.image_loaded:
-            return
-        self.selected_label = event.widget
-        self.selected_label._drag_start_x = event.x
-        self.selected_label._drag_start_y = event.y
-
-    def on_label_drag(self, event):
-        if not self.selected_label or not self.image_loaded:
-            return
-        
-        x = self.selected_label.winfo_x() + event.x - self.selected_label._drag_start_x
-        y = self.selected_label.winfo_y() + event.y - self.selected_label._drag_start_y
-        
-        # Keep within image area bounds
-        x = max(0, min(x, self.image_area.winfo_width() - self.selected_label.winfo_width()))
-        y = max(0, min(y, self.image_area.winfo_height() - self.selected_label.winfo_height()))
-        
-        self.selected_label.place(x=x, y=y)
-
-    def stop_label_drag(self, event):
-        if self.selected_label and self.image_loaded:
-            self.label_positions[self.selected_label.cget("text")] = (
-                self.selected_label.winfo_x(),
-                self.selected_label.winfo_y()
-            )
-        self.selected_label = None
+                messagebox.showwarning("Warning", "Part Labels text file MUST CONTAIN exactly 16 comma separated label names and MUST NOT end with any character - comma, full stop, etc...")
+        else:
+            messagebox.showwarning("Warning", "Part Labels text file is either missing or empty!!")
+        return False
 
     def browse_image(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp")]
-        )
+        # Browse for image file
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp")])
         if file_path:
-            try:
-                image = Image.open(file_path)
-                # Calculate scaling to fit
-                image_width, image_height = image.size
-                area_width = self.image_area.winfo_width()
-                area_height = self.image_area.winfo_height()
-                
-                scale = min(area_width/image_width, area_height/image_height)
-                new_width = int(image_width * scale)
-                new_height = int(image_height * scale)
-                
-                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
-                
-                self.image_label.configure(image=photo)
-                self.image_label.image = photo
-                self.image_loaded = True
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Error loading image: {str(e)}")
+            self.txt_image_file_path.delete(0, tk.END)
+            self.txt_image_file_path.insert(0, file_path)
 
-    def add_specification(self):
-        # Get values from entries
-        values = [self.spec_entries[key].get() for key in self.spec_entries]
-        if all(values):
-            self.spec_tree.insert("", tk.END, values=values)
-            # Clear entries
-            for entry in self.spec_entries.values():
-                entry.delete(0, tk.END)
-        else:
-            messagebox.showwarning("Warning", "Please fill all specification fields")
+    def new_part(self):
+        # New part action
+        self.action = "ADD"
+        self.enable_components(self.action)
+        self.clear_form()
 
-    def remove_specification(self):
-        selected_item = self.spec_tree.selection()
+    def save_data(self):
+        # Save data to database
+        if self.validate_part_details():
+            conn = sqlite3.connect('eol_tester.db')
+            cursor = conn.cursor()
+            cursor.execute("CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (MM_PART_NUMBER TEXT, MM_MODEL_NAME TEXT, MM_ALC_CODE TEXT, MM_PLC_ADDRESS TEXT, MM_BARCODE_PRN_FILE_NAME TEXT, MM_IMAGE_PATH TEXT, MM_VENDOR_CODE TEXT, MM_EO_NUMBER TEXT, MM_SPECIAL_DATA TEXT, MM_INITIAL_ID TEXT, MM_SUPPLIER_SECTION TEXT, MM_CREATED_BY TEXT, MM_CREATED_DATE TEXT, MM_MODIFIED_BY TEXT, MM_MODIFIED_DATE TEXT, MM_STATUS INTEGER)")
+            if self.action == "ADD":
+                if not self.is_part_or_alc_exists():
+                    cursor.execute("INSERT INTO TBL_MODEL_MASTER (MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, MM_BARCODE_PRN_FILE_NAME, MM_IMAGE_PATH, MM_VENDOR_CODE, MM_EO_NUMBER, MM_SPECIAL_DATA, MM_INITIAL_ID, MM_SUPPLIER_SECTION, MM_CREATED_BY, MM_CREATED_DATE, MM_MODIFIED_BY, MM_MODIFIED_DATE, MM_STATUS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                   (self.txt_part_number.get(), self.txt_model_name.get(), self.txt_alc.get().upper(), self.cb_plc_address.get(), self.cb_print_file_list.get(), self.txt_image_file_path.get(), "", "", "", "", "", self.user, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.user, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 1))
+                    conn.commit()
+                    messagebox.showinfo("Success", "Record Inserted Successfully")
+                else:
+                    messagebox.showwarning("Warning", "Part Number/ALC Code already exists in the database")
+            elif self.action == "EDIT":
+                cursor.execute("UPDATE TBL_MODEL_MASTER SET MM_MODEL_NAME = ?, MM_PLC_ADDRESS = ?, MM_BARCODE_PRN_FILE_NAME = ?, MM_IMAGE_PATH = ?, MM_VENDOR_CODE = ?, MM_EO_NUMBER = ?, MM_SPECIAL_DATA = ?, MM_INITIAL_ID = ?, MM_SUPPLIER_SECTION = ?, MM_MODIFIED_BY = ?, MM_MODIFIED_DATE = ? WHERE MM_PART_NUMBER = ?",
+                               (self.txt_model_name.get(), self.cb_plc_address.get(), self.cb_print_file_list.get(), self.txt_image_file_path.get(), "", "", "", "", "", self.user, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.txt_part_number.get()))
+                conn.commit()
+                messagebox.showinfo("Success", "Record Updated Successfully")
+            conn.close()
+            self.display_parts()
+            self.disable_components()
+            self.clear_form()
+
+    def edit_data(self):
+        # Edit data action
+        self.action = "EDIT"
+        self.enable_components(self.action)
+
+    def delete_data(self):
+        # Delete data from database
+        if self.selected_part_number:
+            result = messagebox.askokcancel("Confirm Deletion", f"Are you sure, you want to delete {self.selected_part_number} Part Number from the database?")
+            if result:
+                conn = sqlite3.connect('eol_tester.db')
+                cursor = conn.cursor()
+                cursor.execute("UPDATE TBL_MODEL_MASTER SET MM_STATUS = 0 WHERE MM_PART_NUMBER = ?", (self.selected_part_number,))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("Success", "Record Deleted Successfully")
+                self.display_parts()
+                self.clear_form()
+
+    def on_part_select(self, event):
+        # Handle part selection from Treeview
+        selected_item = self.dGV_parts.selection()
         if selected_item:
-            self.spec_tree.delete(selected_item)
+            item = self.dGV_parts.item(selected_item)
+            self.selected_part_number = item['values'][0]
+            self.txt_part_number.delete(0, tk.END)
+            self.txt_part_number.insert(0, item['values'][0])
+            self.txt_model_name.delete(0, tk.END)
+            self.txt_model_name.insert(0, item['values'][1])
+            self.txt_alc.delete(0, tk.END)
+            self.txt_alc.insert(0, item['values'][2])
+            self.disable_components()
 
-    def show_login_dialog(self):
-        # Implement login dialog
-        pass
+    def enable_components(self, action):
+        # Enable components based on action
+        if action == "ADD":
+            self.txt_part_number.config(state=tk.NORMAL)
+            self.txt_model_name.config(state=tk.NORMAL)
+            self.txt_alc.config(state=tk.NORMAL)
+            self.cb_print_file_list.config(state=tk.NORMAL)
+            self.cb_plc_address.config(state=tk.NORMAL)
+            self.btn_save.config(state=tk.NORMAL)
+            self.btn_edit.config(state=tk.DISABLED)
+            self.btn_delete.config(state=tk.DISABLED)
+        elif action == "EDIT":
+            self.txt_model_name.config(state=tk.NORMAL)
+            self.cb_print_file_list.config(state=tk.NORMAL)
+            self.cb_plc_address.config(state=tk.NORMAL)
+            self.btn_save.config(state=tk.NORMAL)
+            self.btn_edit.config(state=tk.DISABLED)
+            self.btn_delete.config(state=tk.DISABLED)
 
-    # Navigation button commands
-    def port_settings(self):
-        pass
+    def disable_components(self):
+        # Disable components
+        self.txt_part_number.config(state=tk.DISABLED)
+        self.txt_model_name.config(state=tk.DISABLED)
+        self.txt_alc.config(state=tk.DISABLED)
+        self.cb_print_file_list.config(state=tk.DISABLED)
+        self.cb_plc_address.config(state=tk.DISABLED)
+        self.btn_save.config(state=tk.DISABLED)
+        self.btn_edit.config(state=tk.NORMAL)
+        self.btn_delete.config(state=tk.NORMAL)
 
-    def label_maker(self):
-        pass
+    def clear_form(self):
+        # Clear form fields
+        self.txt_part_number.delete(0, tk.END)
+        self.txt_model_name.delete(0, tk.END)
+        self.txt_alc.delete(0, tk.END)
+        self.txt_image_file_path.delete(0, tk.END)
+        self.cb_print_file_list.current(0)
+        self.cb_plc_address.current(0)
 
-    def model_settings(self):
-        pass
+    def validate_part_details(self):
+        # Validate part details
+        if not self.txt_part_number.get() or not self.txt_model_name.get() or not self.txt_alc.get() or not self.txt_image_file_path.get() or self.cb_plc_address.current() < 1 or self.cb_print_file_list.current() < 1:
+            messagebox.showwarning("Warning", "Please make sure all details are properly filled under Part Details section...")
+            return False
+        return True
 
-    def test(self):
-        pass
+    def is_part_or_alc_exists(self):
+        # Check if part number or ALC code exists
+        conn = sqlite3.connect('eol_tester.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM TBL_MODEL_MASTER")
+        rows = cursor.fetchall()
+        conn.close()
+        part_number_exists = any(row[0].upper() == self.txt_part_number.get().upper() for row in rows)
+        alc_exists = any(row[2].upper() == self.txt_alc.get().upper() for row in rows)
+        return part_number_exists or alc_exists
 
-    def work_data(self):
-        pass
-
-    def admin(self):
-        pass
-
-    def help(self):
-        pass
-
-    def exit_app(self):
-        if messagebox.askokcancel("Exit", "Do you want to exit?"):
-            self.root.quit()
+    def display_parts(self):
+        # Display parts in Treeview
+        self.dGV_parts.delete(*self.dGV_parts.get_children())
+        conn = sqlite3.connect('eol_tester.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE FROM TBL_MODEL_MASTER WHERE MM_STATUS = 1")
+        rows = cursor.fetchall()
+        for row in rows:
+            self.dGV_parts.insert("", tk.END, values=row)
+        conn.close()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = ModelSettings(root)
-    root.mainloop()        
+    app = ModelSettings()
+    app.mainloop()        
