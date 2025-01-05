@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
+import json
 
 class WorkspaceApp:
     def __init__(self, root):
@@ -29,6 +30,8 @@ class WorkspaceApp:
         self.style = ttk.Style()
         self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
         self.style.configure("Custom.TEntry", padding=5)
+        
+        self.image_uploaded = False  # Flag to track image upload
         
         self.setup_ui()
 
@@ -88,31 +91,50 @@ class WorkspaceApp:
     def create_quadrants(self):
         self.quadrants = []
         
-        # Create first two quadrants normally (top row)
-        for i in range(2):
-            frame = tk.Frame(self.workspace_frame,
-                           relief="groove",
-                           borderwidth=1,
-                           bg='white',
-                           width=self.min_quadrant_size[0],
-                           height=self.min_quadrant_size[1])
-            frame.grid(row=0, column=i, sticky="nsew")
-            frame.grid_propagate(False)
-            self.quadrants.append(frame)
+        # Create first quadrant (image quadrant)
+        self.image_quadrant = tk.Frame(self.workspace_frame,
+                                     relief="groove",
+                                     borderwidth=1,
+                                     bg='white',
+                                     width=self.min_quadrant_size[0],
+                                     height=self.min_quadrant_size[1])
+        self.image_quadrant.grid(row=0, column=0, sticky="nsew")
+        self.image_quadrant.grid_propagate(False)
+        
+        # Create second quadrant
+        self.second_quadrant = tk.Frame(self.workspace_frame,
+                                      relief="groove",
+                                      borderwidth=1,
+                                      bg='white',
+                                      width=self.min_quadrant_size[0],
+                                      height=self.min_quadrant_size[1])
+        self.second_quadrant.grid(row=0, column=1, sticky="nsew")
+        self.second_quadrant.grid_propagate(False)
+        
+        # Add both quadrants to the list
+        self.quadrants.append(self.image_quadrant)
+        self.quadrants.append(self.second_quadrant)
+        
+        # Create coordinate display label
+        self.coord_label = tk.Label(self.image_quadrant, 
+                                  text="Coordinates: ", 
+                                  bg='white',
+                                  font=('Arial', 10))
+        self.coord_label.place(relx=0.02, rely=0.95)
         
         # Create bottom row container
         bottom_container = tk.Frame(self.workspace_frame)
         bottom_container.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        
-        # Create three sections in the bottom row with headers
-        self.create_bottom_sections(bottom_container)
         
         # Configure main grid weights
         self.workspace_frame.grid_rowconfigure(0, weight=1)
         self.workspace_frame.grid_rowconfigure(1, weight=1)
         self.workspace_frame.grid_columnconfigure(0, weight=1)
         self.workspace_frame.grid_columnconfigure(1, weight=1)
-
+        
+        # Create three sections in the bottom row with headers
+        self.create_bottom_sections(bottom_container)
+        
         # Add content to second quadrant
         self.create_second_quadrant_content()
 
@@ -296,17 +318,17 @@ class WorkspaceApp:
         right_frame = tk.Frame(content_frame, bg='white')
         right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
 
-        # Input fields configuration
+        # Input fields configuration with placeholders
         fields = [
-            ("Vendor Code", 0, 0),
-            ("EO Number", 0, 1),
-            ("Special Data", 1, 0),
-            ("Initial ID", 1, 1),
-            ("Part Number", 2, 0, 2),  # spans 2 columns
-            ("Model & Part Name", 3, 0, 2),  # spans 2 columns
-            ("Image File Path", 4, 0, 2),  # spans 2 columns
-            ("ALC Code", 5, 0),
-            ("Supplier Section", 2, 1)
+            ("Vendor Code", "Enter vendor code", 0, 0),
+            ("EO Number", "Enter EO number", 0, 1),
+            ("Special Data", "Enter special data", 1, 0),
+            ("Initial ID", "Enter initial ID", 1, 1),
+            ("Part Number", "Enter part number", 2, 0, 2),  # spans 2 columns
+            ("Model & Part Name", "Enter model & part name", 3, 0, 2),  # spans 2 columns
+            ("Image File Path", "No image selected", 4, 0, 2),  # spans 2 columns
+            ("ALC Code", "Enter ALC code", 5, 0),
+            ("Supplier Section", "Enter supplier section", 5, 1)
         ]
 
         self.textboxes = {}
@@ -314,9 +336,10 @@ class WorkspaceApp:
         # Create and arrange input fields
         for field in fields:
             label_text = field[0]
-            row = field[1]
-            col = field[2]
-            colspan = field[3] if len(field) > 3 else 1
+            placeholder = field[1]
+            row = field[2]
+            col = field[3]
+            colspan = field[4] if len(field) > 4 else 1
 
             # Label
             label = tk.Label(left_frame, 
@@ -329,8 +352,17 @@ class WorkspaceApp:
                       padx=5, 
                       pady=(5,0))
 
-            # Entry
+            # Entry with placeholder
             entry = tk.Entry(left_frame, width=30 if colspan > 1 else 20)
+            entry.insert(0, placeholder)
+            entry.config(fg='white')
+            
+            # Bind focus events for placeholder behavior
+            entry.bind('<FocusIn>', lambda e, entry=entry, placeholder=placeholder: 
+                      self.on_entry_focus_in(e, entry, placeholder))
+            entry.bind('<FocusOut>', lambda e, entry=entry, placeholder=placeholder: 
+                      self.on_entry_focus_out(e, entry, placeholder))
+
             entry.grid(row=row*2+1, column=col,
                       columnspan=colspan,
                       sticky='ew',
@@ -343,7 +375,7 @@ class WorkspaceApp:
             # Special handling for Image File Path
             if label_text == "Image File Path":
                 entry.config(state='readonly')
-                browse_btn = tk.Button(left_frame, 
+                browse_btn = tk.Button(left_frame,fg="white",background="black" ,
                                      text="📂",
                                      command=self.upload_image)
                 browse_btn.grid(row=row*2+1, column=col+colspan, padx=(0,5))
@@ -364,11 +396,23 @@ class WorkspaceApp:
         for text, color in buttons:
             btn = tk.Button(right_frame,
                            text=text,
-                           bg=color,
-                           fg='white',
+                           bg="white",
+                           fg='black',
                            width=10,
                            height=2)
-            btn.pack(pady=5)              
+            btn.pack(pady=5)
+
+    def on_entry_focus_in(self, event, entry, placeholder):
+        """Handle entry field focus in - remove placeholder text"""
+        if entry.get() == placeholder:
+            entry.delete(0, tk.END)
+            entry.config(fg='black')
+
+    def on_entry_focus_out(self, event, entry, placeholder):
+        """Handle entry field focus out - restore placeholder if empty"""
+        if entry.get() == '':
+            entry.insert(0, placeholder)
+            entry.config(fg='grey')
 
     def create_moveable_labels(self):
         # Create 16 moveable labels
@@ -381,6 +425,8 @@ class WorkspaceApp:
                            bg="lightgray")
             label.pack(side=tk.LEFT, padx=2)
             label.bind("<Button-1>", self.start_move)
+            label.bind("<B1-Motion>", self.on_motion)  # Bind motion event
+            label.bind("<ButtonRelease-1>", self.stop_move)  # Bind release event
             self.original_positions[f"L{i+1}"] = label
             self.moveable_labels.append(label)
 
@@ -389,7 +435,7 @@ class WorkspaceApp:
         self.reset_btn = tk.Button(self.buttons_frame, 
                                  text="RESET",
                                  bg="red",
-                                 fg="white",
+                                 fg="black",
                                  width=10,
                                  height=2,
                                  command=self.reset_labels)
@@ -399,7 +445,7 @@ class WorkspaceApp:
         self.update_btn = tk.Button(self.buttons_frame,
                                   text="UPDATE",
                                   bg="green",
-                                  fg="white",
+                                  fg="black",
                                   width=10,
                                   height=2,
                                   command=self.update_positions)
@@ -414,28 +460,125 @@ class WorkspaceApp:
         self.upload_btn.pack(side=tk.LEFT, padx=5)
 
     def start_move(self, event):
+        if not self.image_uploaded:
+            messagebox.showwarning("Warning", "Please upload an image first!")
+            return
+        
         widget = event.widget
-        widget.startX = event.x
-        widget.startY = event.y
-        self.current_label = widget
+        
+        # Create a copy of the label in the first quadrant if it's from the header
+        if widget.winfo_parent() == str(self.labels_frame):
+            # Get the original label text
+            label_text = widget.cget("text")
+            
+            # Check if this label is already placed
+            if label_text in self.placed_labels:
+                return
+            
+            # Create new label in the image quadrant
+            new_label = tk.Label(self.image_quadrant, 
+                               text=label_text,
+                               width=4,
+                               relief="raised",
+                               bg="lightblue")
+            
+            # Get the cursor position relative to the image quadrant
+            x = event.x_root - self.image_quadrant.winfo_rootx() - (new_label.winfo_reqwidth() // 2)
+            y = event.y_root - self.image_quadrant.winfo_rooty() - (new_label.winfo_reqheight() // 2)
+            
+            # Ensure the label stays within the quadrant boundaries
+            x = max(0, min(x, self.image_quadrant.winfo_width() - new_label.winfo_reqwidth()))
+            y = max(0, min(y, self.image_quadrant.winfo_height() - new_label.winfo_reqheight()))
+            
+            new_label.place(x=x, y=y)
+            
+            # Bind motion and release events to the new label
+            new_label.bind("<Button-1>", self.start_move)
+            new_label.bind("<B1-Motion>", self.on_motion)
+            new_label.bind("<ButtonRelease-1>", self.stop_move)
+            
+            # Store initial coordinates
+            self.original_positions[label_text] = (x, y)
+            
+            # Store the new label
+            self.placed_labels[label_text] = new_label
+            
+            # Change original label color to indicate it's been placed
+            widget.config(bg="lightgray")
+            
+            # Set current label and drag start position
+            self.current_label = new_label
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+            
+            self.update_coordinate_display(label_text, x, y)
+            
+            # After placing the label, update the treeview
+            self.update_treeview()
+        else:
+            self.current_label = widget
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
 
     def on_motion(self, event):
-        if self.current_label:
-            x = self.current_label.winfo_x() + event.x - self.current_label.startX
-            y = self.current_label.winfo_y() + event.y - self.current_label.startY
-            self.current_label.place(x=x, y=y)
+        if not self.current_label:
+            return
+        
+        # Get the current cursor position relative to the image quadrant
+        x = event.x_root - self.image_quadrant.winfo_rootx() - (self.current_label.winfo_reqwidth() // 2)
+        y = event.y_root - self.image_quadrant.winfo_rooty() - (self.current_label.winfo_reqheight() // 2)
+        
+        # Ensure the label stays within the quadrant boundaries
+        x = max(0, min(x, self.image_quadrant.winfo_width() - self.current_label.winfo_reqwidth()))
+        y = max(0, min(y, self.image_quadrant.winfo_height() - self.current_label.winfo_reqheight()))
+        
+        # Update label position
+        self.current_label.place(x=x, y=y)
+        
+        # Update coordinates in the display
+        self.update_coordinate_display(self.current_label.cget("text"), x, y)
 
     def stop_move(self, event):
+        if self.current_label:
+            label_text = self.current_label.cget("text")
+            x = self.current_label.winfo_x()
+            y = self.current_label.winfo_y()
+            self.update_coordinate_display(label_text, x, y)
         self.current_label = None
+        self.drag_start_x = None
+        self.drag_start_y = None
+
+    def update_coordinate_display(self, label_text, x, y):
+        """Update the coordinate display label with current position"""
+        self.coord_label.config(text=f"Label {label_text}: ({x}, {y})")
+        print(f"Label {label_text} position: ({x}, {y})")
 
     def on_double_click(self, event):
-        try:
-            item = self.label_tree.selection()[0]
-            column = self.label_tree.identify_column(event.x)
-            if column in ('#2', '#3'):
-                self.edit_cell(item, column)
-        except IndexError:
-            pass
+        # Get the item that was clicked
+        item = self.tree.selection()[0]
+        column = self.tree.identify_column(event.x)
+        values = self.tree.item(item)['values']
+        label_text = values[0]  # "Label X"
+        label_num = label_text.split()[1]  # Extract number from "Label X"
+        
+        # Handle Status column (column #2)
+        if column == '#2' and label_num in self.placed_labels:
+            current_status = self.label_status[label_num]['status']
+            # Toggle status
+            new_status = 'off' if current_status == 'on' else 'on'
+            self.label_status[label_num]['status'] = new_status
+            
+            # Update treeview
+            current_values = list(values)
+            current_values[1] = "ON" if new_status == 'on' else "OFF"
+            self.tree.item(item, values=current_values)
+            
+            # Update status display
+            self.update_status_display()
+        
+        # Handle Details column (column #3)
+        elif column == '#3' and label_num in self.placed_labels:
+            self.create_edit_popup(item, label_num)
 
     def edit_cell(self, item, column):
         current_value = self.label_tree.item(item, 'values')
@@ -484,11 +627,23 @@ class WorkspaceApp:
 
     def reset_labels(self):
         if messagebox.askyesno("Reset", "Are you sure you want to reset all labels?"):
+            # Remove all placed labels
             for label in self.placed_labels.values():
                 label.destroy()
             self.placed_labels.clear()
+            
+            # Reset original labels' appearance
             for label in self.original_positions.values():
-                label.config(bg="lightgray")
+                if isinstance(label, tk.Label):
+                    label.config(bg="lightgray")
+            
+            # Clear stored positions
+            self.original_positions = {key: label for key, label in self.original_positions.items() 
+                                    if isinstance(label, tk.Label)}
+            
+            # Reset coordinate display
+            self.coord_label.config(text="Coordinates: ")
+            print("All labels reset and positions cleared")
 
     def update_positions(self):
         positions = {}
@@ -516,6 +671,12 @@ class WorkspaceApp:
         if file_path:
             try:
                 first_quadrant = self.quadrants[0]
+                
+                # Create a frame to hold the image and labels
+                if not hasattr(self, 'image_frame'):
+                    self.image_frame = tk.Frame(first_quadrant, bg='white')
+                    self.image_frame.place(relwidth=1, relheight=1)
+                
                 image = Image.open(file_path)
                 
                 quad_width = first_quadrant.winfo_width()
@@ -534,7 +695,7 @@ class WorkspaceApp:
                 if self.image_label:
                     self.image_label.destroy()
                 
-                self.image_label = tk.Label(first_quadrant, image=photo, bg='white')
+                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
                 self.image_label.image = photo
                 
                 x_pos = (quad_width - new_width) // 2
@@ -542,9 +703,162 @@ class WorkspaceApp:
                 self.image_label.place(x=x_pos, y=y_pos)
                 
                 self.update_image_path(file_path)
+                self.image_uploaded = True  # Set flag to True after image upload
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
+
+    def update_coordinates(self):
+        if not self.placed_labels:
+            messagebox.showwarning("Warning", "No labels have been placed!")
+            return
+        
+        # Update the original_positions dictionary with current positions
+        for label_text, label_widget in self.placed_labels.items():
+            x = label_widget.winfo_x()
+            y = label_widget.winfo_y()
+            self.original_positions[label_text] = (x, y)
+            
+            # Update the coordinates display
+            self.update_coordinate_display(label_text, x, y)
+        
+        # Save to JSON file
+        coordinates_data = {
+            'image_path': self.current_image_path,
+            'coordinates': self.original_positions
+        }
+        
+        try:
+            with open('coordinates.json', 'w') as f:
+                json.dump(coordinates_data, f, indent=4)
+            messagebox.showinfo("Success", "Coordinates saved successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save coordinates: {str(e)}")
+
+    def reset_positions(self):
+        # Remove all placed labels from the image quadrant
+        for label in self.placed_labels.values():
+            label.destroy()
+        
+        # Reset the placed_labels dictionary
+        self.placed_labels.clear()
+        
+        # Reset the original_positions dictionary
+        self.original_positions.clear()
+        
+        # Reset the colors of all labels in the labels_frame back to original
+        for child in self.labels_frame.winfo_children():
+            if isinstance(child, tk.Label):
+                child.config(bg="lightblue")  # Reset to original color
+        
+        # Clear the coordinates display
+        self.coordinates_text.delete(1.0, tk.END)
+        
+        # Clear the treeview
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Reset label details
+        for label_num in self.label_details:
+            self.label_details[label_num]['details'] = ''
+        
+        messagebox.showinfo("Reset", "All labels have been reset!")
+
+    def create_treeview(self):
+        # Create Treeview frame
+        self.tree_frame = ttk.Frame(self.parts_frame)
+        self.tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create Treeview
+        self.tree = ttk.Treeview(self.tree_frame, columns=('Label', 'Status', 'Details'), show='headings')
+        self.tree.heading('Label', text='Label')  
+        self.tree.heading('Status', text='Status')
+        self.tree.heading('Details', text='Details')
+        
+        # Bind double-click event for editing
+        self.tree.bind('<Double-1>', self.on_double_click)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(self.tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Add Clear Details button
+        self.clear_button = tk.Button(self.tree_frame, text="Clear Details", command=self.clear_label_details)
+        self.clear_button.pack(side=tk.BOTTOM, pady=5)
+        
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def update_treeview(self):
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Add current labels and their status
+        for label_num, status in self.label_status.items():
+            # Only show labels that are placed on the image
+            if label_num in self.placed_labels:
+                status_str = "ON" if status['status'] == 'on' else "OFF"
+                details = self.label_details[label_num]['details']
+                self.tree.insert('', 'end', values=(f"Label {label_num}", status_str, details))
+
+    def create_edit_popup(self, item, label_num):
+        popup = tk.Toplevel(self)
+        popup.title(f"Edit Label {label_num} Details")
+        popup.geometry("300x150")
+        
+        # Add entry widget
+        label = tk.Label(popup, text="Enter details:")
+        label.pack(pady=5)
+        
+        entry = tk.Entry(popup, width=40)
+        current_details = self.label_details[label_num]['details']
+        entry.insert(0, current_details)
+        entry.pack(pady=5)
+        
+        # Add status toggle
+        status_var = tk.StringVar(value=self.label_status[label_num]['status'])
+        status_frame = tk.Frame(popup)
+        status_frame.pack(pady=5)
+        
+        tk.Label(status_frame, text="Status:").pack(side=tk.LEFT)
+        on_radio = tk.Radiobutton(status_frame, text="ON", variable=status_var, value='on')
+        off_radio = tk.Radiobutton(status_frame, text="OFF", variable=status_var, value='off')
+        on_radio.pack(side=tk.LEFT, padx=5)
+        off_radio.pack(side=tk.LEFT)
+        
+        def save_details():
+            new_details = entry.get()
+            new_status = status_var.get()
+            
+            # Update details and status
+            self.label_details[label_num]['details'] = new_details
+            self.label_status[label_num]['status'] = new_status
+            
+            # Update treeview
+            current_values = list(self.tree.item(item)['values'])
+            current_values[1] = "ON" if new_status == 'on' else "OFF"
+            current_values[2] = new_details
+            self.tree.item(item, values=current_values)
+            
+            # Update status display
+            self.update_status_display()
+            
+            popup.destroy()
+        
+        # Add save button
+        save_button = tk.Button(popup, text="Save", command=save_details)
+        save_button.pack(pady=10)
+
+    def clear_label_details(self):
+        # Clear details for all labels
+        for label_num in self.label_details:
+            self.label_details[label_num]['details'] = ''
+        
+        # Update the treeview to reflect the changes
+        self.update_treeview()
+        
+        messagebox.showinfo("Success", "All label details have been cleared!")
 
 def main():
     root = tk.Tk()
