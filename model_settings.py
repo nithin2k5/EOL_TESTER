@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import json
+import mysql.connector
+from datetime import datetime
 
 class WorkspaceApp:
     def __init__(self, root):
@@ -25,6 +27,8 @@ class WorkspaceApp:
         
         # Set minimum size for quadrants
         self.min_quadrant_size = (500, 400)
+
+        
         
         # Style configuration
         self.style = ttk.Style()
@@ -32,6 +36,21 @@ class WorkspaceApp:
         self.style.configure("Custom.TEntry", padding=5)
         
         self.image_uploaded = False  # Flag to track image upload
+        
+        # Initialize label tracking dictionaries
+        self.label_status = {str(i+1): {'status': 'OFF'} for i in range(16)}
+        self.label_details = {str(i+1): {'details': ''} for i in range(16)}
+        
+        # Database configuration
+        self.db_config = {
+            'host': 'localhost',
+            'user': 'your_username',
+            'password': 'your_password',
+            'database': 'your_database'
+        }
+        
+        # Initialize database connection and create table if not exists
+        self.init_database()
         
         self.setup_ui()
 
@@ -232,7 +251,7 @@ class WorkspaceApp:
     def create_label_details_section(self, frame):
         # Label Details Treeview
         columns = ('label', 'on_status', 'off_status')
-        self.label_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        self.tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
         
         # Define headings
         headings = {
@@ -242,55 +261,56 @@ class WorkspaceApp:
         }
         
         for col, heading in headings.items():
-            self.label_tree.heading(col, text=heading)
-            self.label_tree.column(col, width=100, anchor='center')
+            self.tree.heading(col, text=heading)
+            self.tree.column(col, width=100, anchor='center')
 
+        # Create initial entries for all labels (1-16)
+        for i in range(1, 17):
+            label_text = f'L{i}'
+            self.tree.insert('', 'end', values=(label_text, '', ''))
+        
         # Enable editing on double click
-        self.label_tree.bind('<Double-1>', self.on_double_click)
+        self.tree.bind('<Double-1>', self.on_double_click)
+        
+        # Add tooltip to show editing instructions
+        tooltip_text = "Double-click ON/OFF status to edit (only for placed labels)"
+        tooltip = tk.Label(frame, text=tooltip_text, bg='lightyellow')
+        tooltip.pack(pady=(0, 5))
         
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.label_tree.yview)
-        self.label_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
         
         # Pack the treeview and scrollbar
-        self.label_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
 
-        # Add sample data
-        for i in range(1, 17):
-            self.label_tree.insert('', tk.END, values=(f'L{i}', 'OFF', 'ON'))         
     def create_parts_list_section(self, frame):
-        # Parts List Treeview
-        columns = ('sl_no', 'alc', 'part_number', 'model_part_name')
-        self.parts_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        # Part List Treeview
+        columns = ('part_number', 'model_name', 'created_date')
+        self.part_list_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
         
         # Define headings
         headings = {
-            'sl_no': 'Sl. No.',
-            'alc': 'ALC',
-            'part_number': 'PART NUMBER',
-            'model_part_name': 'MODEL & PART NAME'
-        }
-        
-        # Set column widths
-        widths = {
-            'sl_no': 60,
-            'alc': 100,
-            'part_number': 150,
-            'model_part_name': 200
+            'part_number': 'Part Number',
+            'model_name': 'Model Name',
+            'created_date': 'Created Date'
         }
         
         for col, heading in headings.items():
-            self.parts_tree.heading(col, text=heading)
-            self.parts_tree.column(col, width=widths[col], anchor='center')
-
+            self.part_list_tree.heading(col, text=heading)
+            self.part_list_tree.column(col, width=100, anchor='center')
+        
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.parts_tree.yview)
-        self.parts_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
+        self.part_list_tree.configure(yscrollcommand=scrollbar.set)
         
         # Pack the treeview and scrollbar
-        self.parts_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        
+        # Load existing records
+        self.update_part_list_view()
 
     def create_second_quadrant_content(self):
         second_quadrant = self.quadrants[1]
@@ -466,9 +486,7 @@ class WorkspaceApp:
         
         widget = event.widget
         
-        # Create a copy of the label in the first quadrant if it's from the header
         if widget.winfo_parent() == str(self.labels_frame):
-            # Get the original label text
             label_text = widget.cget("text")
             
             # Check if this label is already placed
@@ -513,12 +531,28 @@ class WorkspaceApp:
             
             self.update_coordinate_display(label_text, x, y)
             
-            # After placing the label, update the treeview
-            self.update_treeview()
+            # Update only the status of the specific label
+            self.update_label_status(label_text)
+            
+            # After placing the label, update the label details treeview
+            self.label_tree.insert('', tk.END, values=(
+                label_text,
+                self.label_status[label_text[1:]]['status'],
+                self.label_details[label_text[1:]]['details']
+            ))
+            
+            # Update the label details treeview for the placed label
+            for item in self.label_tree.get_children():
+                if self.label_tree.item(item)['values'][0] == label_text:
+                    self.label_tree.item(item, values=(label_text, 'OFF', 'ON'))
+                    break
         else:
             self.current_label = widget
             self.drag_start_x = event.x
             self.drag_start_y = event.y
+
+        # Update the treeview after placing the label
+        self.update_treeview()
 
     def on_motion(self, event):
         if not self.current_label:
@@ -554,31 +588,83 @@ class WorkspaceApp:
         print(f"Label {label_text} position: ({x}, {y})")
 
     def on_double_click(self, event):
-        # Get the item that was clicked
         item = self.tree.selection()[0]
         column = self.tree.identify_column(event.x)
-        values = self.tree.item(item)['values']
-        label_text = values[0]  # "Label X"
-        label_num = label_text.split()[1]  # Extract number from "Label X"
         
-        # Handle Status column (column #2)
-        if column == '#2' and label_num in self.placed_labels:
-            current_status = self.label_status[label_num]['status']
-            # Toggle status
-            new_status = 'off' if current_status == 'on' else 'on'
-            self.label_status[label_num]['status'] = new_status
-            
-            # Update treeview
-            current_values = list(values)
-            current_values[1] = "ON" if new_status == 'on' else "OFF"
-            self.tree.item(item, values=current_values)
-            
-            # Update status display
-            self.update_status_display()
+        # Get label text from the selected item
+        label_text = self.tree.item(item)['values'][0]
         
-        # Handle Details column (column #3)
-        elif column == '#3' and label_num in self.placed_labels:
-            self.create_edit_popup(item, label_num)
+        # Handle OFF status name editing (column #3)
+        if label_text in self.placed_labels and column == '#3':
+            x, y, w, h = self.tree.bbox(item, column)
+            
+            # Create entry widget for name editing
+            entry = tk.Entry(self.tree)
+            entry.place(x=x, y=y, width=w, height=h)
+            
+            # Get current value
+            current_values = self.tree.item(item)['values']
+            current_name = current_values[2] if len(current_values) > 2 else ''
+            entry.insert(0, current_name)
+            
+            def update_label_name(event=None):
+                new_name = entry.get()
+                
+                # Update the label text and size on the image
+                if label_text in self.placed_labels:
+                    label_widget = self.placed_labels[label_text]
+                    if new_name:
+                        # Update label with just the new name
+                        label_widget.config(text=new_name)
+                        # Adjust label size
+                        label_widget.config(width=len(new_name) + 2)
+                        
+                        # Update tree view with the new name
+                        values = list(self.tree.item(item)['values'])
+                        values[2] = new_name  # Update OFF status column
+                        self.tree.item(item, values=tuple(values))
+                    else:
+                        # If no name entered, revert to original label number
+                        label_widget.config(text=label_text)
+                        label_widget.config(width=len(label_text) + 2)
+                
+                entry.destroy()
+            
+            entry.bind('<Return>', update_label_name)
+            entry.bind('<FocusOut>', update_label_name)
+            entry.focus()
+        
+        # Handle ON/OFF status editing (columns #2 and #3)
+        elif label_text in self.placed_labels and column in ('#2', '#3'):
+            x, y, w, h = self.tree.bbox(item, column)
+            
+            # Create combobox for status selection
+            combo = ttk.Combobox(self.tree, values=['ON', 'OFF'], width=8)
+            combo.place(x=x, y=y, width=w, height=h)
+            
+            # Get current value
+            current_value = self.tree.item(item)['values'][int(column[1])-1]
+            combo.set(current_value if current_value else 'OFF')
+            
+            def on_combo_select(event):
+                selected_value = combo.get()
+                values = list(self.tree.item(item)['values'])
+                
+                # Update the selected column
+                col_idx = int(column[1])-1
+                values[col_idx] = selected_value
+                
+                # Update opposite column
+                other_col = 2 if col_idx == 1 else 1
+                values[other_col] = 'OFF' if selected_value == 'ON' else 'ON'
+                
+                # Update the tree
+                self.tree.item(item, values=tuple(values))
+                combo.destroy()
+            
+            combo.bind('<<ComboboxSelected>>', on_combo_select)
+            combo.bind('<FocusOut>', lambda e: combo.destroy())
+            combo.focus()
 
     def edit_cell(self, item, column):
         current_value = self.label_tree.item(item, 'values')
@@ -637,7 +723,12 @@ class WorkspaceApp:
                 if isinstance(label, tk.Label):
                     label.config(bg="lightgray")
             
-            # Clear stored positions
+            # Reset all label statuses in treeview
+            for item in self.tree.get_children():
+                label_text = self.tree.item(item)['values'][0]
+                self.tree.item(item, values=(label_text, '', ''))
+            
+            # Reset stored positions
             self.original_positions = {key: label for key, label in self.original_positions.items() 
                                     if isinstance(label, tk.Label)}
             
@@ -790,17 +881,33 @@ class WorkspaceApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     def update_treeview(self):
-        # Clear existing items
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        existing_labels = set()
         
-        # Add current labels and their status
-        for label_num, status in self.label_status.items():
-            # Only show labels that are placed on the image
-            if label_num in self.placed_labels:
-                status_str = "ON" if status['status'] == 'on' else "OFF"
-                details = self.label_details[label_num]['details']
-                self.tree.insert('', 'end', values=(f"Label {label_num}", status_str, details))
+        # Get existing labels from treeview
+        for item in self.tree.get_children():
+            label_text = self.tree.item(item)['values'][0]
+            existing_labels.add(label_text)
+        
+        # Update or add entries
+        for i in range(1, 17):
+            label_text = f'L{i}'
+            if label_text in self.placed_labels:
+                on_status = 'OFF'
+                off_status = 'ON'
+            else:
+                on_status = ''
+                off_status = ''
+            
+            # If label exists, update it. If not, create new entry
+            if label_text in existing_labels:
+                # Find and update existing item
+                for item in self.tree.get_children():
+                    if self.tree.item(item)['values'][0] == label_text:
+                        self.tree.item(item, values=(label_text, on_status, off_status))
+                        break
+            else:
+                # Create new entry only if it doesn't exist
+                self.tree.insert('', 'end', values=(label_text, on_status, off_status))
 
     def create_edit_popup(self, item, label_num):
         popup = tk.Toplevel(self)
@@ -859,6 +966,159 @@ class WorkspaceApp:
         self.update_treeview()
         
         messagebox.showinfo("Success", "All label details have been cleared!")
+
+    def update_label_status(self, label_text):
+        # Find the item for this label
+        for item in self.tree.get_children():
+            if self.tree.item(item)['values'][0] == label_text:
+                current_values = self.tree.item(item)['values']
+                # Preserve any existing OFF status name when updating status
+                off_status_name = current_values[2] if len(current_values) > 2 else 'ON'
+                self.tree.item(item, values=(label_text, 'OFF', off_status_name))
+                
+                # Update label on image with just the OFF status name if it exists
+                if label_text in self.placed_labels:
+                    if off_status_name and off_status_name != 'ON':
+                        self.placed_labels[label_text].config(text=off_status_name)
+                    else:
+                        self.placed_labels[label_text].config(text=label_text)
+                break
+
+    def init_database(self):
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Create table if it doesn't exist
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS part_list (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    part_number VARCHAR(50),
+                    model_name VARCHAR(100),
+                    created_date DATETIME,
+                    label_data JSON
+                )
+            ''')
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to initialize database: {err}")
+
+    def save_to_database(self):
+        if not self.placed_labels:
+            messagebox.showwarning("Warning", "No labels placed to save!")
+            return
+            
+        try:
+            # Collect label data
+            label_data = {}
+            for item in self.tree.get_children():
+                values = self.tree.item(item)['values']
+                label_num = values[0]
+                if label_num in self.placed_labels:
+                    label_widget = self.placed_labels[label_num]
+                    label_data[label_num] = {
+                        'name': values[2] if len(values) > 2 else '',
+                        'position': {
+                            'x': label_widget.winfo_x(),
+                            'y': label_widget.winfo_y()
+                        }
+                    }
+            
+            # Get model name from entry
+            model_name = self.model_name_entry.get().strip()
+            if not model_name:
+                messagebox.showwarning("Warning", "Please enter a model name!")
+                return
+            
+            # Get part number from entry
+            part_number = self.part_number_entry.get().strip()
+            if not part_number:
+                messagebox.showwarning("Warning", "Please enter a part number!")
+                return
+            
+            # Connect to database and save
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            query = '''
+                INSERT INTO part_list (part_number, model_name, created_date, label_data)
+                VALUES (%s, %s, %s, %s)
+            '''
+            
+            cursor.execute(query, (
+                part_number,
+                model_name,
+                datetime.now(),
+                json.dumps(label_data)
+            ))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            # Update part list tree view
+            self.update_part_list_view()
+            
+            messagebox.showinfo("Success", "Data saved successfully!")
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to save data: {err}")
+
+    def update_part_list_view(self):
+        try:
+            # Clear existing items
+            for item in self.part_list_tree.get_children():
+                self.part_list_tree.delete(item)
+            
+            # Fetch and display records
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT part_number, model_name, created_date 
+                FROM part_list 
+                ORDER BY created_date DESC
+            ''')
+            
+            for record in cursor.fetchall():
+                self.part_list_tree.insert('', 'end', values=record)
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to fetch records: {err}")
+
+    def create_part_list_section(self, frame):
+        # Part List Treeview
+        columns = ('part_number', 'model_name', 'created_date')
+        self.part_list_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        
+        # Define headings
+        headings = {
+            'part_number': 'Part Number',
+            'model_name': 'Model Name',
+            'created_date': 'Created Date'
+        }
+        
+        for col, heading in headings.items():
+            self.part_list_tree.heading(col, text=heading)
+            self.part_list_tree.column(col, width=100, anchor='center')
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
+        self.part_list_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack the treeview and scrollbar
+        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        
+        # Load existing records
+        self.update_part_list_view()
 
 def main():
     root = tk.Tk()
