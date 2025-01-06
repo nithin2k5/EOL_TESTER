@@ -44,9 +44,9 @@ class WorkspaceApp:
         # Database configuration
         self.db_config = {
             'host': 'localhost',
-            'user': 'your_username',
-            'password': 'your_password',
-            'database': 'your_database'
+            'user': 'root',
+            'password': 'nk446420',
+            'database': 'EOL'
         }
         
         # Initialize database connection and create table if not exists
@@ -286,28 +286,31 @@ class WorkspaceApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
 
     def create_parts_list_section(self, frame):
-        # Part List Treeview
+        # Create Part List section
+        part_list_frame = ttk.LabelFrame(frame, text="Part List")
+        part_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create Treeview
         columns = ('part_number', 'model_name', 'created_date')
-        self.part_list_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        self.part_list_tree = ttk.Treeview(part_list_frame, columns=columns, show='headings', height=10)
         
-        # Define headings
-        headings = {
-            'part_number': 'Part Number',
-            'model_name': 'Model Name',
-            'created_date': 'Created Date'
-        }
+        # Configure columns
+        self.part_list_tree.heading('part_number', text='Part Number')
+        self.part_list_tree.heading('model_name', text='Model Name')
+        self.part_list_tree.heading('created_date', text='Created Date')
         
-        for col, heading in headings.items():
-            self.part_list_tree.heading(col, text=heading)
-            self.part_list_tree.column(col, width=100, anchor='center')
+        # Set column widths
+        self.part_list_tree.column('part_number', width=100)
+        self.part_list_tree.column('model_name', width=150)
+        self.part_list_tree.column('created_date', width=150)
         
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
+        scrollbar = ttk.Scrollbar(part_list_frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
         self.part_list_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Pack the treeview and scrollbar
-        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        # Pack widgets
+        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Load existing records
         self.update_part_list_view()
@@ -1008,11 +1011,16 @@ class WorkspaceApp:
             messagebox.showerror("Database Error", f"Failed to initialize database: {err}")
 
     def save_to_database(self):
-        if not self.placed_labels:
-            messagebox.showwarning("Warning", "No labels placed to save!")
-            return
-            
         try:
+            # Get model name and part number
+            model_name = self.model_name_var.get().strip()
+            part_number = self.part_number_var.get().strip()
+            
+            # Validate inputs
+            if not model_name or not part_number:
+                messagebox.showwarning("Warning", "Please enter both Model Name and Part Number!")
+                return
+            
             # Collect label data
             label_data = {}
             for item in self.tree.get_children():
@@ -1021,38 +1029,35 @@ class WorkspaceApp:
                 if label_num in self.placed_labels:
                     label_widget = self.placed_labels[label_num]
                     label_data[label_num] = {
-                        'name': values[2] if len(values) > 2 else '',
+                        'name': label_widget.cget('text'),  # Get current label text
                         'position': {
                             'x': label_widget.winfo_x(),
                             'y': label_widget.winfo_y()
-                        }
+                        },
+                        'on_status': values[1],
+                        'off_status': values[2]
                     }
             
-            # Get model name from entry
-            model_name = self.model_name_entry.get().strip()
-            if not model_name:
-                messagebox.showwarning("Warning", "Please enter a model name!")
-                return
-            
-            # Get part number from entry
-            part_number = self.part_number_entry.get().strip()
-            if not part_number:
-                messagebox.showwarning("Warning", "Please enter a part number!")
-                return
-            
-            # Connect to database and save
-            conn = mysql.connector.connect(**self.db_config)
+            # Connect to database
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="",
+                database="label_db"
+            )
             cursor = conn.cursor()
             
-            query = '''
-                INSERT INTO part_list (part_number, model_name, created_date, label_data)
+            # Insert data
+            query = """
+                INSERT INTO part_list 
+                (part_number, model_name, created_date, label_data) 
                 VALUES (%s, %s, %s, %s)
-            '''
+            """
             
             cursor.execute(query, (
                 part_number,
                 model_name,
-                datetime.now(),
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 json.dumps(label_data)
             ))
             
@@ -1060,7 +1065,11 @@ class WorkspaceApp:
             cursor.close()
             conn.close()
             
-            # Update part list tree view
+            # Clear input fields
+            self.model_name_var.set('')
+            self.part_number_var.set('')
+            
+            # Update the part list view
             self.update_part_list_view()
             
             messagebox.showinfo("Success", "Data saved successfully!")
@@ -1074,18 +1083,26 @@ class WorkspaceApp:
             for item in self.part_list_tree.get_children():
                 self.part_list_tree.delete(item)
             
-            # Fetch and display records
-            conn = mysql.connector.connect(**self.db_config)
+            # Connect to database
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="label_db"
+            )
             cursor = conn.cursor()
             
-            cursor.execute('''
-                SELECT part_number, model_name, created_date 
+            # Fetch all records
+            cursor.execute("""
+                SELECT id, part_number, model_name, created_date 
                 FROM part_list 
                 ORDER BY created_date DESC
-            ''')
+            """)
             
-            for record in cursor.fetchall():
-                self.part_list_tree.insert('', 'end', values=record)
+            # Insert records into treeview
+            for row in cursor.fetchall():
+                formatted_date = row[3].strftime('%Y-%m-%d %H:%M:%S')
+                self.part_list_tree.insert('', 'end', values=(row[1], row[2], formatted_date))
             
             cursor.close()
             conn.close()
@@ -1094,31 +1111,103 @@ class WorkspaceApp:
             messagebox.showerror("Database Error", f"Failed to fetch records: {err}")
 
     def create_part_list_section(self, frame):
-        # Part List Treeview
+        # Create Part List section
+        part_list_frame = ttk.LabelFrame(frame, text="Part List")
+        part_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create Treeview
         columns = ('part_number', 'model_name', 'created_date')
-        self.part_list_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        self.part_list_tree = ttk.Treeview(part_list_frame, columns=columns, show='headings', height=10)
         
-        # Define headings
-        headings = {
-            'part_number': 'Part Number',
-            'model_name': 'Model Name',
-            'created_date': 'Created Date'
-        }
+        # Configure columns
+        self.part_list_tree.heading('part_number', text='Part Number')
+        self.part_list_tree.heading('model_name', text='Model Name')
+        self.part_list_tree.heading('created_date', text='Created Date')
         
-        for col, heading in headings.items():
-            self.part_list_tree.heading(col, text=heading)
-            self.part_list_tree.column(col, width=100, anchor='center')
+        # Set column widths
+        self.part_list_tree.column('part_number', width=100)
+        self.part_list_tree.column('model_name', width=150)
+        self.part_list_tree.column('created_date', width=150)
         
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
+        scrollbar = ttk.Scrollbar(part_list_frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
         self.part_list_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Pack the treeview and scrollbar
-        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+        # Pack widgets
+        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Load existing records
         self.update_part_list_view()
+
+    def insert_specification(self, data):
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            
+            query = """
+            INSERT INTO TBL_MODEL_SPECIFICATION 
+            (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            cursor.execute(query, data)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            print("Data inserted successfully!")
+            
+        except mysql.connector.Error as err:
+            print(f"Error: {err}")
+
+def insert_specification(data):
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="your_password",
+            database="your_database"
+        )
+        cursor = conn.cursor()
+        
+        query = """
+        INSERT INTO TBL_MODEL_SPECIFICATION 
+        (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        cursor.execute(query, data)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("Data inserted successfully!")
+        
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+
+def on_add_button_click(part_number_entry, description_entry, device_entry, unit_entry, master_min_entry, master_max_entry, normal_min_entry, normal_max_entry, tree):
+    # Capture the input data
+    data = (
+        part_number_entry.get(),
+        description_entry.get(),
+        device_entry.get(),
+        unit_entry.get(),
+        master_min_entry.get(),
+        master_max_entry.get(),
+        normal_min_entry.get(),
+        normal_max_entry.get()
+    )
+    
+    # Call the insert_specification function to store the data
+    insert_specification(data)
+
+    # Insert the data into the tree view
+    tree.insert('', 'end', values=data)
 
 def main():
     root = tk.Tk()
