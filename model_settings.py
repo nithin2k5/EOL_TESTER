@@ -4,6 +4,8 @@ from PIL import Image, ImageTk
 import json
 import mysql.connector
 from datetime import datetime
+from mysql.connector import Error
+import threading
 
 class WorkspaceApp:
     def __init__(self, root):
@@ -28,8 +30,6 @@ class WorkspaceApp:
         # Set minimum size for quadrants
         self.min_quadrant_size = (500, 400)
 
-        
-        
         # Style configuration
         self.style = ttk.Style()
         self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
@@ -187,6 +187,7 @@ class WorkspaceApp:
                 self.create_parts_list_section(content_frame)
                 
             sections.append(section_frame)
+
     def create_specifications_section(self, frame):
         # Input fields frame
         input_frame = tk.Frame(frame)
@@ -217,9 +218,9 @@ class WorkspaceApp:
         button_frame.pack(fill=tk.X, padx=5, pady=5)
         
         tk.Button(button_frame, text="ADD", bg="green", fg="white", width=10,
-                 command=self.add_specification).pack(side=tk.LEFT, padx=5)
+                 command=lambda: self.on_add_button_click(self.spec_entries.values(), self.spec_tree)).pack(side=tk.LEFT, padx=5)
         tk.Button(button_frame, text="REMOVE", bg="red", fg="white", width=10,
-                 command=self.remove_specification).pack(side=tk.LEFT, padx=5)
+                 command=lambda: self.on_remove_button_click(self.spec_tree)).pack(side=tk.LEFT, padx=5)
 
         # Specifications Treeview
         columns = ('description', 'device', 'unit', 'master_min', 'master_max', 'normal_min', 'normal_max')
@@ -376,9 +377,9 @@ class WorkspaceApp:
                       pady=(5,0))
 
             # Entry with placeholder
-            entry = tk.Entry(left_frame, width=30 if colspan > 1 else 20)
+            entry = tk.Entry(left_frame, bg='black',fg='gray',width=30 if colspan > 1 else 20)
             entry.insert(0, placeholder)
-            entry.config(fg='white')
+            entry.config(fg='gray')
             
             # Bind focus events for placeholder behavior
             entry.bind('<FocusIn>', lambda e, entry=entry, placeholder=placeholder: 
@@ -409,20 +410,21 @@ class WorkspaceApp:
 
         # Create buttons in right frame
         buttons = [
-            ("NEW", "red"),
-            ("EDIT", "navy"),
-            ("SAVE", "green"),
-            ("CLEAR", "gray"),
-            ("DELETE", "red")
+            ("NEW", "red", None),  # Add None for buttons without a command
+            ("EDIT", "navy", None),
+            ("SAVE", "green", self.save_specifications_to_db),  # Add command to SAVE button
+            ("CLEAR", "gray", None),
+            ("DELETE", "red", None)
         ]
 
-        for text, color in buttons:
+        for text, color, command in buttons:
             btn = tk.Button(right_frame,
                            text=text,
                            bg="white",
                            fg='black',
                            width=10,
-                           height=2)
+                           height=2,
+                           command=command)  # Assign command to button
             btn.pack(pady=5)
 
     def on_entry_focus_in(self, event, entry, placeholder):
@@ -693,26 +695,25 @@ class WorkspaceApp:
         save_btn.pack(pady=5)
         entry.focus_set()
 
-    def add_specification(self):
-        values = []
-        for label in ['Description', 'Device', 'Unit', 'Master Min', 'Master Max', 'Normal Min', 'Normal Max']:
-            value = self.spec_entries[label].get()
-            if not value:
-                messagebox.showerror("Error", f"{label} cannot be empty!")
-                return
-            values.append(value)
-        self.spec_tree.insert('', tk.END, values=values)
-        for entry in self.spec_entries.values():
-            entry.delete(0, tk.END)
+    def on_add_button_click(self, entries, tree):
+        def add_specification():
+            data = tuple(entry.get() for entry in entries)
+            self.insert_specification(data)
+            tree.insert('', 'end', values=data)
 
-    def remove_specification(self):
-        selected_items = self.spec_tree.selection()
-        if not selected_items:
-            messagebox.showwarning("Warning", "Please select an item to remove!")
-            return
-        if messagebox.askyesno("Confirm", "Are you sure you want to remove the selected item(s)?"):
-            for item in selected_items:
-                self.spec_tree.delete(item)
+        # Run the add_specification function in a separate thread
+        threading.Thread(target=add_specification).start()
+
+    def on_remove_button_click(self, tree):
+        def remove_specification():
+            selected_item = tree.selection()
+            if selected_item:
+                part_number = tree.item(selected_item, 'values')[0]
+                self.remove_specification(part_number)
+                tree.delete(selected_item)
+
+        # Run the remove_specification function in a separate thread
+        threading.Thread(target=remove_specification).start()
 
     def reset_labels(self):
         if messagebox.askyesno("Reset", "Are you sure you want to reset all labels?"):
@@ -1142,6 +1143,9 @@ class WorkspaceApp:
 
     def insert_specification(self, data):
         try:
+            # Debugging: Print the data being inserted
+            print("Inserting data:", data)
+            
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
@@ -1150,10 +1154,11 @@ class WorkspaceApp:
             )
             cursor = conn.cursor()
             
+            # Ensure the number of placeholders matches the number of data elements
             query = """
             INSERT INTO TBL_MODEL_SPECIFICATION 
-            (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
             
             cursor.execute(query, data)
@@ -1163,51 +1168,46 @@ class WorkspaceApp:
             print("Data inserted successfully!")
             
         except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            messagebox.showerror("Database Error", f"Failed to insert data: {err}")
+        except Exception as e:
+            print(f"Error: {e}")
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+
+    def remove_specification(self, part_number):
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            query = "DELETE FROM TBL_MODEL_SPECIFICATION WHERE MS_PART_NUMBER = %s"
+            cursor.execute(query, (part_number,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            print("Specification data removed successfully!")
+        except mysql.connector.Error as err:
             print(f"Error: {err}")
 
-def insert_specification(data):
-    try:
-        conn = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="your_password",
-            database="your_database"
-        )
-        cursor = conn.cursor()
-        
-        query = """
-        INSERT INTO TBL_MODEL_SPECIFICATION 
-        (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        
-        cursor.execute(query, data)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("Data inserted successfully!")
-        
-    except mysql.connector.Error as err:
-        print(f"Error: {err}")
-
-def on_add_button_click(part_number_entry, description_entry, device_entry, unit_entry, master_min_entry, master_max_entry, normal_min_entry, normal_max_entry, tree):
-    # Capture the input data
-    data = (
-        part_number_entry.get(),
-        description_entry.get(),
-        device_entry.get(),
-        unit_entry.get(),
-        master_min_entry.get(),
-        master_max_entry.get(),
-        normal_min_entry.get(),
-        normal_max_entry.get()
-    )
-    
-    # Call the insert_specification function to store the data
-    insert_specification(data)
-
-    # Insert the data into the tree view
-    tree.insert('', 'end', values=data)
+    def save_specifications_to_db(self):
+        """Save specifications data to the database."""
+        try:
+            # Collect data from spec_entries
+            data = tuple(entry.get() for entry in self.spec_entries.values())
+            
+            # Debugging: Print the collected data
+            print("Collected data for saving:", data)
+            
+            # Insert data into the database
+            self.insert_specification(data)
+            
+            messagebox.showinfo("Success", "Specifications saved successfully!")
+        except Exception as e:
+            print(f"Error: {e}")
+            messagebox.showerror("Error", f"Failed to save specifications: {str(e)}")
 
 def main():
     root = tk.Tk()
