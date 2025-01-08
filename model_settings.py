@@ -1154,14 +1154,18 @@ class WorkspaceApp:
             )
             cursor = conn.cursor()
             
+            # Add part number to the data tuple
+            part_number = self.textboxes["Part Number"].get()
+            data_with_part_number = (part_number,) + data
+            
             # Ensure the number of placeholders matches the number of data elements
             query = """
             INSERT INTO TBL_MODEL_SPECIFICATION 
-            (MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
             
-            cursor.execute(query, data)
+            cursor.execute(query, data_with_part_number)
             conn.commit()
             cursor.close()
             conn.close()
@@ -1196,18 +1200,68 @@ class WorkspaceApp:
         """Save specifications data to the database."""
         try:
             # Collect data from spec_entries
-            data = tuple(entry.get() for entry in self.spec_entries.values())
+            spec_data = tuple(entry.get() for entry in self.spec_entries.values())
             
             # Debugging: Print the collected data
-            print("Collected data for saving:", data)
+            print("Collected data for saving:", spec_data)
             
-            # Insert data into the database
-            self.insert_specification(data)
+            # Insert data into the TBL_MODEL_SPECIFICATION table
+            self.insert_specification(spec_data)
             
-            messagebox.showinfo("Success", "Specifications saved successfully!")
+            # Collect data for TBL_MODEL_MASTER
+            part_number = self.textboxes["Part Number"].get()
+            model_name = self.textboxes["Model & Part Name"].get()
+            alc_code = self.textboxes["ALC Code"].get()
+            vendor_code = self.textboxes["Vendor Code"].get()
+            eo_number = self.textboxes["EO Number"].get()
+            special_data = self.textboxes["Special Data"].get()
+            initial_id = self.textboxes["Initial ID"].get()
+            supplier_section = self.textboxes["Supplier Section"].get()
+            image_path = self.textboxes["Image File Path"].get()
+            
+            master_data = (
+                part_number, model_name, alc_code, '', '', image_path, 0, '', vendor_code,
+                eo_number, special_data, initial_id, supplier_section, 'User', datetime.now(), True, 'User', datetime.now()
+            )
+            
+            # Insert data into the TBL_MODEL_MASTER table
+            self.insert_model_master(master_data)
+            
+            messagebox.showinfo("Success", "Specifications and part list details saved successfully!")
         except Exception as e:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"Failed to save specifications: {str(e)}")
+
+    def insert_model_master(self, data):
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            
+            query = """
+            INSERT INTO TBL_MODEL_MASTER 
+            (MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, MM_BARCODE_LABEL_CODE, MM_IMAGE_PATH, 
+            MM_BARCODE_LABEL_ID, MM_BARCODE_TYPE, MM_VENDOR_CODE, MM_EO_NUMBER, MM_SPECIAL_DATA, MM_INITIAL_ID, 
+            MM_SUPPLIER_SECTION, MM_CREATED_BY, MM_CREATED_DATE, MM_STATUS, MM_MODIFIED_BY, MM_MODIFIED_DATE)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            cursor.execute(query, data)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            print("Model master data inserted successfully!")
+            
+        except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            messagebox.showerror("Database Error", f"Failed to insert model master data: {err}")
+        except Exception as e:
+            print(f"Error: {e}")
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
 def main():
     root = tk.Tk()
