@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import os
+import mysql.connector
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -70,8 +71,9 @@ class EOLTesterGUI:
         self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
 
     def create_first_quadrant(self):
-        q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1, width=500, height=400)
         q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        q1.grid_propagate(False)  # Prevent resizing to ensure fixed size
         
         # Model header
         model_header = tk.Label(q1, 
@@ -529,6 +531,30 @@ class EOLTesterGUI:
             except Exception as e:
                 self.image_loaded = False
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
+
+    def retrieve_part_specifications(self):
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            
+            query = """
+            SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX
+            FROM TBL_MODEL_SPECIFICATION
+            """
+            
+            cursor.execute(query)
+            for row in cursor.fetchall():
+                self.spec_tree.insert('', 'end', values=row)
+            
+            cursor.close()
+            conn.close()
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to retrieve specifications: {err}")
 
 def main():
     root = tk.Tk()

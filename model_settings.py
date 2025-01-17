@@ -226,7 +226,7 @@ class WorkspaceApp:
         columns = ('description', 'device', 'unit', 'master_min', 'master_max', 'normal_min', 'normal_max')
         self.spec_tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
         
-        # Define headings
+
         headings = {
             'description': 'DESCRIPTION',
             'device': 'DEVICE',
@@ -241,11 +241,10 @@ class WorkspaceApp:
             self.spec_tree.heading(col, text=heading)
             self.spec_tree.column(col, width=100, anchor='center')
 
-        # Add scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.spec_tree.yview)
         self.spec_tree.configure(yscrollcommand=scrollbar.set)
         
-        # Pack the treeview and scrollbar
+
         self.spec_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
 
@@ -377,7 +376,7 @@ class WorkspaceApp:
                       pady=(5,0))
 
             # Entry with placeholder
-            entry = tk.Entry(left_frame, bg='black',fg='gray',width=30 if colspan > 1 else 20)
+            entry = tk.Entry(left_frame, bg='white',fg='black',width=30 if colspan > 1 else 20)
             entry.insert(0, placeholder)
             entry.config(fg='gray')
             
@@ -1199,6 +1198,11 @@ class WorkspaceApp:
     def save_specifications_to_db(self):
         """Save specifications data to the database."""
         try:
+            # Validate that all required fields are filled
+            if not all(entry.get() for entry in self.spec_entries.values()) or not all(self.textboxes[key].get() for key in self.textboxes):
+                messagebox.showwarning("Input Error", "Please fill in all the fields before saving.")
+                return
+            
             # Collect data from spec_entries
             spec_data = tuple(entry.get() for entry in self.spec_entries.values())
             
@@ -1226,6 +1230,9 @@ class WorkspaceApp:
             
             # Insert data into the TBL_MODEL_MASTER table
             self.insert_model_master(master_data)
+            
+            # Clear part specification textboxes after saving
+            self.clear_specification_textboxes()
             
             messagebox.showinfo("Success", "Specifications and part list details saved successfully!")
         except Exception as e:
@@ -1262,6 +1269,11 @@ class WorkspaceApp:
         except Exception as e:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+
+    def clear_specification_textboxes(self):
+        """Clear textboxes related to part specifications."""
+        for entry in self.spec_entries.values():
+            entry.delete(0, 'end')
 
 def main():
     root = tk.Tk()
