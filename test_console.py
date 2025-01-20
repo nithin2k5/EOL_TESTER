@@ -3,6 +3,8 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import os
 import mysql.connector
+from pynput import keyboard
+import threading
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -15,8 +17,10 @@ class EOLTesterGUI:
         self.current_image = None
         self.label_positions = {}
         self.selected_label = None
+        self.barcode_data = ""
         
         self.setup_gui()
+        self.setup_barcode_listener()
 
     def setup_gui(self):
         # Main container
@@ -35,6 +39,8 @@ class EOLTesterGUI:
         
         # Footer
         self.create_footer()
+
+        self.create_manual_entry()
 
     def create_title_bar(self):
         title_frame = tk.Frame(self.main_container, bg="#FFB6C1", height=40)
@@ -532,7 +538,44 @@ class EOLTesterGUI:
                 self.image_loaded = False
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
 
-    def retrieve_part_specifications(self):
+    def create_manual_entry(self):
+        """Create an entry widget and button for manual part number entry."""
+        manual_entry_frame = tk.Frame(self.main_container)
+        manual_entry_frame.pack(fill="x", pady=5)
+
+        self.part_number_entry = tk.Entry(manual_entry_frame, width=20)
+        self.part_number_entry.pack(side="left", padx=5)
+
+        retrieve_button = tk.Button(manual_entry_frame, text="Retrieve Specifications", command=self.manual_retrieve_command)
+        retrieve_button.pack(side="left", padx=5)
+
+    def manual_retrieve_command(self):
+        """Retrieve specifications based on manual entry."""
+        part_number = self.part_number_entry.get().strip()
+        if part_number:
+            self.retrieve_part_specifications(part_number)
+
+    def setup_barcode_listener(self):
+        """Alternative approach using tkinter bindings"""
+        self.root.bind('<Key>', self.on_key_press)
+        self.root.bind('<Return>', self.on_enter_press)
+
+    def on_key_press(self, event):
+        if event.char:
+            self.barcode_data += event.char
+
+    def on_enter_press(self, event):
+        self.process_barcode_data()
+        self.barcode_data = ""
+
+    def process_barcode_data(self):
+        """Process the captured barcode data."""
+        part_number = self.barcode_data.strip()
+        if part_number:
+            self.retrieve_part_specifications(part_number)
+
+    def retrieve_part_specifications(self, part_number):
+        """Retrieve specifications for a given part number."""
         try:
             conn = mysql.connector.connect(
                 host="localhost",
@@ -542,17 +585,32 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
             
+            # Modified query to use correct table and column names
             query = """
-            SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX
-            FROM TBL_MODEL_SPECIFICATION
+            SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
+                   MS_MASTER_MIN, MS_MASTER_MAX, 
+                   MS_NORMAL_MIN, MS_NORMAL_MAX
+            FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
             """
             
-            cursor.execute(query)
+            cursor.execute(query, (part_number,))
+            
+            # Clear existing entries in treeview
+            self.spec_tree.delete(*self.spec_tree.get_children())
+            
+            # Insert retrieved data into treeview
             for row in cursor.fetchall():
-                self.spec_tree.insert('', 'end', values=row)
+                # Add empty string as ACTUAL and RESULT columns
+                display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
+                self.spec_tree.insert('', 'end', values=display_row)
+            
+            if not self.spec_tree.get_children():
+                messagebox.showinfo("No Data", f"No specifications found for part number: {part_number}")
             
             cursor.close()
             conn.close()
+            
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve specifications: {err}")
 
