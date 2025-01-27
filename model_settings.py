@@ -715,29 +715,28 @@ class WorkspaceApp:
         threading.Thread(target=remove_specification).start()
 
     def reset_labels(self):
-        if messagebox.askyesno("Reset", "Are you sure you want to reset all labels?"):
-            # Remove all placed labels
-            for label in self.placed_labels.values():
-                label.destroy()
-            self.placed_labels.clear()
-            
-            # Reset original labels' appearance
-            for label in self.original_positions.values():
-                if isinstance(label, tk.Label):
-                    label.config(bg="lightgray")
-            
-            # Reset all label statuses in treeview
-            for item in self.tree.get_children():
-                label_text = self.tree.item(item)['values'][0]
-                self.tree.item(item, values=(label_text, '', ''))
-            
-            # Reset stored positions
-            self.original_positions = {key: label for key, label in self.original_positions.items() 
-                                    if isinstance(label, tk.Label)}
-            
-            # Reset coordinate display
-            self.coord_label.config(text="Coordinates: ")
-            print("All labels reset and positions cleared")
+        """Reset all labels to their original positions."""
+        # Remove all placed labels
+        for label in self.placed_labels.values():
+            label.destroy()
+        self.placed_labels.clear()
+        
+        # Reset original labels' appearance
+        for label in self.original_positions.values():
+            if isinstance(label, tk.Label):
+                label.config(bg="lightgray")
+        
+        # Reset all label statuses in treeview
+        for item in self.tree.get_children():
+            label_text = self.tree.item(item)['values'][0]
+            self.tree.item(item, values=(label_text, '', ''))
+        
+        # Reset stored positions
+        self.original_positions = {key: label for key, label in self.original_positions.items() 
+                                if isinstance(label, tk.Label)}
+        
+        # Reset coordinate display
+        self.coord_label.config(text="Coordinates: ")
 
     def update_positions(self):
         positions = {}
@@ -1231,8 +1230,8 @@ class WorkspaceApp:
             # Insert data into the TBL_MODEL_MASTER table
             self.insert_model_master(master_data)
             
-            # Clear part specification textboxes after saving
-            self.clear_specification_textboxes()
+            # After successful save, clear everything
+            self.clear_all_data()
             
             messagebox.showinfo("Success", "Specifications and part list details saved successfully!")
         except Exception as e:
@@ -1270,10 +1269,40 @@ class WorkspaceApp:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
-    def clear_specification_textboxes(self):
-        """Clear textboxes related to part specifications."""
+    def clear_all_data(self):
+        """Clear all data fields, image, and restore labels."""
+        # Clear specification entries
         for entry in self.spec_entries.values():
             entry.delete(0, 'end')
+        
+        # Clear textboxes
+        for key, entry in self.textboxes.items():
+            entry.config(state='normal')  # Enable entry for clearing
+            entry.delete(0, 'end')
+            # Restore placeholder text
+            placeholder = "Enter " + key.lower()
+            if key == "Image File Path":
+                placeholder = "No image selected"
+            entry.insert(0, placeholder)
+            entry.config(fg='gray')
+            if key == "Image File Path":
+                entry.config(state='readonly')
+        
+        # Clear image
+        if self.image_label:
+            self.image_label.destroy()
+            self.image_label = None
+        self.image_uploaded = False
+        
+        # Reset labels
+        self.reset_labels()
+        
+        # Clear specifications tree
+        for item in self.spec_tree.get_children():
+            self.spec_tree.delete(item)
+        
+        # Update the part list view
+        self.update_part_list_view()
 
 def main():
     root = tk.Tk()

@@ -5,6 +5,7 @@ import os
 import mysql.connector
 from pynput import keyboard
 import threading
+import json
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -30,9 +31,12 @@ class EOLTesterGUI:
         # Title bar with INFAC logo
         self.create_title_bar()
         
-        # Main workspace with reduced padding
+        # Main workspace
         self.workspace = tk.Frame(self.main_container)
         self.workspace.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        # Force the workspace to update its geometry
+        self.root.update_idletasks()
         
         # Create quadrants
         self.create_quadrants()
@@ -57,29 +61,43 @@ class EOLTesterGUI:
         title_label.pack(pady=5)
 
     def create_quadrants(self):
-        # Configure grid weights
-        self.workspace.grid_columnconfigure(0, weight=1)
-        self.workspace.grid_columnconfigure(1, weight=1)
-        self.workspace.grid_rowconfigure(0, weight=1)
-        self.workspace.grid_rowconfigure(1, weight=1)
+        # Configure grid weights - equal weights for all quadrants
+        self.workspace.grid_columnconfigure(0, weight=1)  # First column
+        self.workspace.grid_columnconfigure(1, weight=1)  # Second column
+        self.workspace.grid_rowconfigure(0, weight=1)     # First row
+        self.workspace.grid_rowconfigure(1, weight=1)     # Second row
         
-        # Create quadrants with minimal padding
+        # Calculate quadrant sizes
+        # Get the workspace dimensions after padding
+        self.workspace.update()  # Force geometry update
+        total_width = self.workspace.winfo_width()
+        total_height = self.workspace.winfo_height()
+        
+        # Calculate exact quadrant dimensions
+        quadrant_width = total_width // 2 - 4   # Account for padding (2px on each side)
+        quadrant_height = total_height // 2 - 4  # Account for padding (2px on each side)
+        
+        # Create and configure all quadrants with identical size
         self.q1 = self.create_first_quadrant()
-        self.q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-        
         self.q2 = self.create_second_quadrant()
-        self.q2.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-        
         self.q3 = self.create_third_quadrant()
-        self.q3.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
-        
         self.q4 = self.create_fourth_quadrant()
-        self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
+        
+        # Configure all quadrants with identical settings
+        quadrants = [self.q1, self.q2, self.q3, self.q4]
+        positions = [(0,0), (0,1), (1,0), (1,1)]
+        
+        for quadrant, (row, col) in zip(quadrants, positions):
+            quadrant.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+            quadrant.configure(width=quadrant_width, height=quadrant_height)
+            quadrant.grid_propagate(False)  # Prevent resizing
+            
+            # Add a minimum size constraint
+            quadrant.grid_columnconfigure(0, minsize=quadrant_width)
+            quadrant.grid_rowconfigure(0, minsize=quadrant_height)
 
     def create_first_quadrant(self):
-        q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1, width=500, height=400)
-        q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-        q1.grid_propagate(False)  # Prevent resizing to ensure fixed size
+        q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
         
         # Model header
         model_header = tk.Label(q1, 
@@ -88,46 +106,50 @@ class EOLTesterGUI:
                               font=("Arial", 12, "bold"))
         model_header.pack(fill="x")
         
-        # Label strip (L0-L15)
-        label_frame = tk.Frame(q1)
-        label_frame.pack(fill="x", pady=5)
+        # Create fixed size image area container with border
+        self.image_container = tk.Frame(q1, width=500, height=400, relief="solid", borderwidth=1)
+        self.image_container.pack(pady=5)
+        self.image_container.pack_propagate(False)  # Prevent resizing
         
-        # Store labels in a dictionary for easy access
-        self.label_widgets = {}
-        
-        for i in range(16):
-            label = tk.Label(label_frame, text=f"L{i}", width=4, 
-                           relief="raised", bg="lightgray")
-            label.pack(side="left", padx=2)
-            self.label_widgets[f"L{i}"] = label
-            # Note: Drag bindings will be added only after image upload
-        
-        # Image/Workspace area (white background)
-        self.image_area = tk.Frame(q1, bg="white")
-        self.image_area.pack(fill="both", expand=True, padx=5, pady=5)
+        # Image area with white background
+        self.image_area = tk.Frame(self.image_container, bg="white")
+        self.image_area.place(relwidth=1, relheight=1)
         
         # Add image label placeholder
         self.image_label = None
-        self.image_loaded = False  # Track if image is loaded
+        self.image_loaded = False
         
-        # Control buttons at bottom
-        button_frame = tk.Frame(q1)
-        button_frame.pack(fill="x", side="bottom", pady=5)
+        # Create draggable labels container at the bottom
+        self.label_container = tk.Frame(q1)
+        self.label_container.pack(fill="x", side="bottom", pady=5)
         
-        buttons = [
-            ("AUTO", self.auto_command),
-            ("HOME", self.home_command),
-            ("1st PULL\n(Load Test)", self.first_pull_command),
-            ("2nd PULL\n(Length Test)", self.second_pull_command),
-            ("TEST\nRESULT", self.test_result_command)
+        # Create draggable labels with distinct colors
+        self.label_widgets = {}
+        labels_config = [
+            ("HOME", "#FFB6C1"),      # Light pink
+            ("AUTO", "#98FB98"),      # Light green
+            ("1st PULL", "#87CEEB"),  # Sky blue
+            ("2nd PULL", "#DDA0DD"),  # Plum
+            ("TEST RESULT", "#F0E68C") # Khaki
         ]
         
-        for text, command in buttons:
-            btn = tk.Button(button_frame, text=text, 
-                          bg="#00BFFF", fg="black",
-                          width=15, height=2,
-                          command=command)
-            btn.pack(side="left", padx=2, expand=True)
+        for text, color in labels_config:
+            label = tk.Label(self.label_container, 
+                            text=text,
+                            bg=color, 
+                            fg="black",
+                            width=15, 
+                            height=2,
+                            relief="raised",
+                            font=("Arial", 10, "bold"))
+            label.pack(side="left", padx=2, expand=True)
+            self.label_widgets[text] = label
+            
+            # Bind mouse events for dragging
+            label.bind("<Button-1>", self.start_label_drag)
+            label.bind("<B1-Motion>", self.on_label_drag)
+            label.bind("<ButtonRelease-1>", self.stop_label_drag)
+            label.configure(cursor="hand2")  # Change cursor to indicate draggable
         
         return q1
 
@@ -145,9 +167,10 @@ class EOLTesterGUI:
         columns = ("DESCRIPTION", "DEVICE", "UNIT", "SPEC MIN", "SPEC MAX", "ACTUAL", "RESULT")
         self.spec_tree = ttk.Treeview(q2, columns=columns, show="headings", height=10)
         
+        # Configure columns with center alignment
         for col in columns:
             self.spec_tree.heading(col, text=col)
-            self.spec_tree.column(col, width=100)
+            self.spec_tree.column(col, width=100, anchor='center')  # Set center alignment
             
         self.spec_tree.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -215,7 +238,25 @@ class EOLTesterGUI:
 
     def create_third_quadrant(self):
         q3 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        q3.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
+        
+        # Add labels at the top
+        label_frame = tk.Frame(q3)
+        label_frame.pack(fill="x", pady=5)
+        
+        labels = [
+            "HOME",
+            "AUTO",
+            "PULL 1",
+            "PULL 2",
+            "TEST RESULT"
+        ]
+        
+        for text in labels:
+            lbl = tk.Label(label_frame, text=text, 
+                          bg="#00BFFF", fg="black",
+                          width=10, height=1,
+                          font=("Arial", 10, "bold"))
+            lbl.pack(side="left", padx=10, pady=5, expand=True)
         
         # Add graph area
         self.create_graph_area(q3)
@@ -224,7 +265,6 @@ class EOLTesterGUI:
 
     def create_fourth_quadrant(self):
         q4 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
         
         # Header
         header_frame = tk.Frame(q4, bg="#00BFFF")
@@ -249,7 +289,7 @@ class EOLTesterGUI:
         bottom_frame.pack(fill="x", side="bottom", pady=2)
         
         # Next model button (yellow)
-        next_btn = tk.Button(bottom_frame, text="CLICK HERE TO MOVE TO NEXT MODEL",
+        next_btn = tk.Button(bottom_frame, text="CLICK TO MOVE TO NEXT LABEL",
                             bg="yellow", relief="flat",
                             font=("Arial", 10))
         next_btn.pack(side="left", fill="x", expand=True, padx=(2, 1))
@@ -271,9 +311,14 @@ class EOLTesterGUI:
         graph_container = tk.Frame(parent, bg="black")
         graph_container.pack(fill="both", expand=True)
         
+        # Configure grid weights for equal space
+        graph_container.grid_rowconfigure(0, weight=1)  # Load graph
+        graph_container.grid_rowconfigure(1, weight=1)  # Length graph
+        graph_container.grid_columnconfigure(0, weight=1)  # Ensure full width
+        
         # Load Graph Section
         load_graph_frame = tk.Frame(graph_container, bg="black")
-        load_graph_frame.pack(fill="both", expand=True, pady=(5,0))
+        load_graph_frame.grid(row=0, column=0, sticky="nsew", pady=(5, 0))
         
         # Load Graph Title
         tk.Label(load_graph_frame, text="LOAD GRAPH", 
@@ -287,7 +332,7 @@ class EOLTesterGUI:
         
         # Length Graph Section
         length_graph_frame = tk.Frame(graph_container, bg="black")
-        length_graph_frame.pack(fill="both", expand=True, pady=(5,5))
+        length_graph_frame.grid(row=1, column=0, sticky="nsew", pady=(5, 5))
         
         # Length Graph Title
         tk.Label(length_graph_frame, text="LENGTH GRAPH", 
@@ -441,16 +486,24 @@ class EOLTesterGUI:
                 label.pack(side="left", padx=2)
 
     def start_label_drag(self, event):
+        """Start dragging a label"""
         if self.image_loaded:
-            self.selected_label = event.widget
-            self.selected_label.startX = event.x
-            self.selected_label.startY = event.y
-            self.selected_label.lift()
+            widget = event.widget
+            widget._drag_start_x = event.x
+            widget._drag_start_y = event.y
+            widget._drag_start_pos = (widget.winfo_x(), widget.winfo_y())
+            widget.lift()  # Bring label to front while dragging
 
     def on_label_drag(self, event):
-        if self.image_loaded and self.selected_label:
-            x = self.selected_label.winfo_x() + event.x - self.selected_label.startX
-            y = self.selected_label.winfo_y() + event.y - self.selected_label.startY
+        """Handle label dragging"""
+        if self.image_loaded:
+            widget = event.widget
+            
+            # Calculate new position
+            dx = event.x - widget._drag_start_x
+            dy = event.y - widget._drag_start_y
+            new_x = widget._drag_start_pos[0] + dx
+            new_y = widget._drag_start_pos[1] + dy
             
             # Get image area boundaries
             image_x = self.image_area.winfo_x()
@@ -458,19 +511,21 @@ class EOLTesterGUI:
             image_width = self.image_area.winfo_width()
             image_height = self.image_area.winfo_height()
             
-            # Keep label within image area bounds
-            x = max(image_x, min(x, image_x + image_width - self.selected_label.winfo_width()))
-            y = max(image_y, min(y, image_y + image_height - self.selected_label.winfo_height()))
+            # Keep label within image boundaries
+            new_x = max(image_x, min(new_x, image_x + image_width - widget.winfo_width()))
+            new_y = max(image_y, min(new_y, image_y + image_height - widget.winfo_height()))
             
-            self.selected_label.place(x=x, y=y)
+            # Move the label
+            widget.place(x=new_x, y=new_y)
 
     def stop_label_drag(self, event):
-        if self.image_loaded and self.selected_label:
-            self.label_positions[self.selected_label.cget("text")] = (
-                self.selected_label.winfo_x(),
-                self.selected_label.winfo_y()
-            )
-            self.selected_label = None
+        """Handle the end of label dragging"""
+        if self.image_loaded:
+            widget = event.widget
+            # Save the final position
+            self.label_positions[widget.cget("text")] = (widget.winfo_x(), widget.winfo_y())
+            # Save positions to database
+            self.save_label_positions()
 
     # Button command methods
     def auto_command(self):
@@ -575,7 +630,7 @@ class EOLTesterGUI:
             self.retrieve_part_specifications(part_number)
 
     def retrieve_part_specifications(self, part_number):
-        """Retrieve specifications for a given part number."""
+        """Retrieve specifications and image for a given part number."""
         try:
             conn = mysql.connector.connect(
                 host="localhost",
@@ -585,8 +640,29 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
             
-            # Modified query to use correct table and column names
-            query = """
+            # Store the current part number
+            self.current_part_number = part_number
+            
+            # First, get the image path and label positions from TBL_MODEL_MASTER
+            master_query = """
+            SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS 
+            FROM TBL_MODEL_MASTER 
+            WHERE MM_PART_NUMBER = %s
+            """
+            cursor.execute(master_query, (part_number,))
+            result = cursor.fetchone()
+            
+            if result:
+                image_path, label_positions = result
+                if image_path:
+                    self.load_image_with_path(image_path)
+                    
+                # Load saved label positions if they exist
+                if label_positions:
+                    self.load_label_positions(json.loads(label_positions))
+            
+            # Get the specifications
+            spec_query = """
             SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
                    MS_MASTER_MIN, MS_MASTER_MAX, 
                    MS_NORMAL_MIN, MS_NORMAL_MAX
@@ -594,14 +670,13 @@ class EOLTesterGUI:
             WHERE MS_PART_NUMBER = %s
             """
             
-            cursor.execute(query, (part_number,))
+            cursor.execute(spec_query, (part_number,))
             
             # Clear existing entries in treeview
             self.spec_tree.delete(*self.spec_tree.get_children())
             
             # Insert retrieved data into treeview
             for row in cursor.fetchall():
-                # Add empty string as ACTUAL and RESULT columns
                 display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
                 self.spec_tree.insert('', 'end', values=display_row)
             
@@ -613,6 +688,162 @@ class EOLTesterGUI:
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve specifications: {err}")
+
+    def load_image_with_path(self, image_path):
+        """Load image from path and enable label dragging"""
+        if os.path.exists(image_path):
+            try:
+                # Reset any existing label positions
+                self.reset_labels()
+                
+                image = Image.open(image_path)
+                # Get image container dimensions
+                container_width = self.image_container.winfo_width()
+                container_height = self.image_container.winfo_height()
+                
+                # Calculate scaling to fit while maintaining aspect ratio
+                img_width, img_height = image.size
+                scale = min(container_width/img_width, container_height/img_height)
+                
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+                
+                # Resize image
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(image)
+                
+                if self.image_label:
+                    self.image_label.destroy()
+                    
+                self.image_label = tk.Label(self.image_area, image=photo, bg="white")
+                self.image_label.image = photo
+                
+                # Center the image in the container
+                x = (container_width - new_width) // 2
+                y = (container_height - new_height) // 2
+                self.image_label.place(x=x, y=y)
+                
+                # Enable label dragging
+                self.image_loaded = True
+                
+                # Make labels visually indicate they're draggable
+                for label in self.label_widgets.values():
+                    label.configure(cursor="hand2")
+                
+            except Exception as e:
+                self.image_loaded = False
+                messagebox.showerror("Error", f"Error loading image: {str(e)}")
+        else:
+            messagebox.showerror("Error", f"Image file not found: {image_path}")
+
+    def position_saved_labels(self):
+        """Position labels according to saved positions"""
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            
+            # Get label positions from database
+            query = """
+            SELECT MM_LABEL_POSITIONS 
+            FROM TBL_MODEL_MASTER 
+            WHERE MM_PART_NUMBER = %s
+            """
+            cursor.execute(query, (self.current_part_number,))
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                label_positions = json.loads(result[0])
+                
+                for label_name, position in label_positions.items():
+                    if label_name in self.label_widgets:
+                        label = self.label_widgets[label_name]
+                        label.place(x=position['x'], y=position['y'])
+                        self.label_positions[label_name] = (position['x'], position['y'])
+            
+            cursor.close()
+            conn.close()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error positioning labels: {str(e)}")
+
+    def load_label_positions(self, positions):
+        """Load saved label positions onto the image"""
+        if not self.image_loaded:
+            return
+        
+        for label_text, coords in positions.items():
+            if label_text in self.label_widgets:
+                label = self.label_widgets[label_text]
+                label.place(in_=self.image_area, x=coords['x'], y=coords['y'])
+                self.label_positions[label_text] = (coords['x'], coords['y'])
+
+    def save_label_positions(self):
+        """Save current label positions to database"""
+        if not self.current_part_number or not self.label_positions:
+            return
+        
+        try:
+            positions_json = json.dumps({
+                text: {'x': x, 'y': y} 
+                for text, (x, y) in self.label_positions.items()
+            })
+            
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+            
+            update_query = """
+            UPDATE TBL_MODEL_MASTER 
+            SET MM_LABEL_POSITIONS = %s 
+            WHERE MM_PART_NUMBER = %s
+            """
+            cursor.execute(update_query, (positions_json, self.current_part_number))
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to save label positions: {err}")
+
+    def reset_labels(self):
+        """Reset all labels to their original positions"""
+        for label in self.label_widgets.values():
+            label.place_forget()  # Remove from image area
+            label.pack(in_=self.label_container, side="left", padx=2, expand=True)  # Return to bottom container
+        self.label_positions.clear()
+        
+        # Save the cleared positions to database
+        if hasattr(self, 'current_part_number'):
+            self.save_label_positions()
+
+    # Example button command methods
+    def button1_command(self):
+        messagebox.showinfo("Button 1", "Button 1 pressed")
+
+    def button2_command(self):
+        messagebox.showinfo("Button 2", "Button 2 pressed")
+
+    def button3_command(self):
+        messagebox.showinfo("Button 3", "Button 3 pressed")
+
+    def button4_command(self):
+        messagebox.showinfo("Button 4", "Button 4 pressed")
+
+    def button5_command(self):
+        messagebox.showinfo("Button 5", "Button 5 pressed")
+
+    def button6_command(self):
+        messagebox.showinfo("Button 6", "Button 6 pressed")
 
 def main():
     root = tk.Tk()
