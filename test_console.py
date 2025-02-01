@@ -643,7 +643,7 @@ class EOLTesterGUI:
             # Store the current part number
             self.current_part_number = part_number
             
-            # First, get the image path and label positions from TBL_MODEL_MASTER
+            # Get image path and label positions from TBL_MODEL_MASTER
             master_query = """
             SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS 
             FROM TBL_MODEL_MASTER 
@@ -654,14 +654,22 @@ class EOLTesterGUI:
             
             if result:
                 image_path, label_positions = result
-                if image_path:
+                
+                # Load the image if path exists
+                if image_path and os.path.exists(image_path):
                     self.load_image_with_path(image_path)
                     
-                # Load saved label positions if they exist
-                if label_positions:
-                    self.load_label_positions(json.loads(label_positions))
+                    # Place labels if positions exist and image was loaded successfully
+                    if label_positions and self.image_loaded:
+                        try:
+                            positions = json.loads(label_positions)
+                            self.place_labels_from_positions(positions)
+                        except json.JSONDecodeError:
+                            print(f"Warning: Invalid label position data for part {part_number}")
+                else:
+                    print(f"Warning: Image file not found at {image_path}")
             
-            # Get the specifications
+            # Get specifications
             spec_query = """
             SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
                    MS_MASTER_MIN, MS_MASTER_MAX, 
@@ -680,9 +688,6 @@ class EOLTesterGUI:
                 display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
                 self.spec_tree.insert('', 'end', values=display_row)
             
-            if not self.spec_tree.get_children():
-                messagebox.showinfo("No Data", f"No specifications found for part number: {part_number}")
-            
             cursor.close()
             conn.close()
             
@@ -690,109 +695,119 @@ class EOLTesterGUI:
             messagebox.showerror("Database Error", f"Failed to retrieve specifications: {err}")
 
     def load_image_with_path(self, image_path):
-        """Load image from path and enable label dragging"""
-        if os.path.exists(image_path):
-            try:
-                # Reset any existing label positions
-                self.reset_labels()
-                
-                image = Image.open(image_path)
-                # Get image container dimensions
-                container_width = self.image_container.winfo_width()
-                container_height = self.image_container.winfo_height()
-                
-                # Calculate scaling to fit while maintaining aspect ratio
-                img_width, img_height = image.size
-                scale = min(container_width/img_width, container_height/img_height)
-                
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
-                
-                # Resize image
-                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
-                
-                if self.image_label:
-                    self.image_label.destroy()
-                    
-                self.image_label = tk.Label(self.image_area, image=photo, bg="white")
-                self.image_label.image = photo
-                
-                # Center the image in the container
-                x = (container_width - new_width) // 2
-                y = (container_height - new_height) // 2
-                self.image_label.place(x=x, y=y)
-                
-                # Enable label dragging
-                self.image_loaded = True
-                
-                # Make labels visually indicate they're draggable
-                for label in self.label_widgets.values():
-                    label.configure(cursor="hand2")
-                
-            except Exception as e:
-                self.image_loaded = False
-                messagebox.showerror("Error", f"Error loading image: {str(e)}")
-        else:
-            messagebox.showerror("Error", f"Image file not found: {image_path}")
-
-    def position_saved_labels(self):
-        """Position labels according to saved positions"""
+        """Load image from path and prepare for label placement"""
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="nk446420",
-                database="EOL"
-            )
-            cursor = conn.cursor()
+            # Reset any existing label positions
+            self.reset_labels()
             
-            # Get label positions from database
-            query = """
-            SELECT MM_LABEL_POSITIONS 
-            FROM TBL_MODEL_MASTER 
-            WHERE MM_PART_NUMBER = %s
-            """
-            cursor.execute(query, (self.current_part_number,))
-            result = cursor.fetchone()
+            image = Image.open(image_path)
+            # Get image area dimensions
+            area_width = self.image_area.winfo_width()
+            area_height = self.image_area.winfo_height()
             
-            if result and result[0]:
-                label_positions = json.loads(result[0])
+            # Calculate scaling to fit while maintaining aspect ratio
+            img_width, img_height = image.size
+            scale = min(area_width/img_width, area_height/img_height)
+            
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+            
+            # Resize image
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            
+            if self.image_label:
+                self.image_label.destroy()
                 
-                for label_name, position in label_positions.items():
-                    if label_name in self.label_widgets:
-                        label = self.label_widgets[label_name]
-                        label.place(x=position['x'], y=position['y'])
-                        self.label_positions[label_name] = (position['x'], position['y'])
+            self.image_label = tk.Label(self.image_area, image=photo, bg="white")
+            self.image_label.image = photo
             
-            cursor.close()
-            conn.close()
+            # Center the image
+            x = (area_width - new_width) // 2
+            y = (area_height - new_height) // 2
+            self.image_label.place(x=x, y=y)
+            
+            # Enable label dragging
+            self.image_loaded = True
+            
+            # Store image path
+            self.current_image_path = image_path
+            
+            return True
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error positioning labels: {str(e)}")
+            self.image_loaded = False
+            messagebox.showerror("Error", f"Error loading image: {str(e)}")
+            return False
 
-    def load_label_positions(self, positions):
-        """Load saved label positions onto the image"""
-        if not self.image_loaded:
-            return
-        
-        for label_text, coords in positions.items():
-            if label_text in self.label_widgets:
-                label = self.label_widgets[label_text]
-                label.place(in_=self.image_area, x=coords['x'], y=coords['y'])
-                self.label_positions[label_text] = (coords['x'], coords['y'])
+    def place_labels_from_positions(self, positions):
+        """Place labels according to saved positions from database."""
+        try:
+            # Reset existing labels first
+            self.reset_labels()
+            
+            # Get image area dimensions for validation
+            image_area_width = self.image_area.winfo_width()
+            image_area_height = self.image_area.winfo_height()
+            
+            for label_text, pos_data in positions.items():
+                if label_text in self.label_widgets:
+                    # Validate coordinates
+                    x = min(max(0, pos_data['x']), image_area_width - 50)  # 50 is approximate label width
+                    y = min(max(0, pos_data['y']), image_area_height - 30)  # 30 is approximate label height
+                    
+                    # Create new label in image area
+                    new_label = tk.Label(self.image_area, 
+                                       text=pos_data.get('text', label_text),
+                                       width=len(pos_data.get('text', label_text)) + 2,
+                                       relief="raised",
+                                       bg="lightblue")
+                    
+                    # Place at saved coordinates
+                    new_label.place(x=x, y=y)
+                    
+                    # Bind events for dragging
+                    new_label.bind("<Button-1>", self.start_label_drag)
+                    new_label.bind("<B1-Motion>", self.on_label_drag)
+                    new_label.bind("<ButtonRelease-1>", self.stop_label_drag)
+                    
+                    # Store the placed label
+                    self.placed_labels[label_text] = new_label
+                    self.label_positions[label_text] = (x, y)
+                    
+                    # Update original label appearance
+                    if label_text in self.label_widgets:
+                        self.label_widgets[label_text].config(bg="lightgray")
+                    
+                    # Update coordinate display
+                    self.update_coordinate_display(label_text, x, y)
+                    
+                    # Update label status in treeview
+                    self.update_label_status(label_text)
+            
+        except Exception as e:
+            print(f"Error placing labels: {e}")
+            messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
 
     def save_label_positions(self):
-        """Save current label positions to database"""
-        if not self.current_part_number or not self.label_positions:
+        """Save current label positions to database."""
+        if not hasattr(self, 'current_part_number'):
             return
         
         try:
-            positions_json = json.dumps({
-                text: {'x': x, 'y': y} 
-                for text, (x, y) in self.label_positions.items()
-            })
+            # Create positions dictionary with coordinates and label text
+            positions = {}
+            for label_text, label in self.placed_labels.items():
+                positions[label_text] = {
+                    'x': label.winfo_x(),
+                    'y': label.winfo_y(),
+                    'text': label.cget('text')  # Save current label text
+                }
             
+            # Convert to JSON
+            positions_json = json.dumps(positions)
+            
+            # Update database
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
@@ -813,7 +828,9 @@ class EOLTesterGUI:
             conn.close()
             
         except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Failed to save label positions: {err}")
+            print(f"Error saving label positions: {err}")
+        except Exception as e:
+            print(f"Error: {e}")
 
     def reset_labels(self):
         """Reset all labels to their original positions"""

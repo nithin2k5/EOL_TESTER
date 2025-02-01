@@ -739,14 +739,44 @@ class WorkspaceApp:
         self.coord_label.config(text="Coordinates: ")
 
     def update_positions(self):
+        """Update and save label positions to database"""
         positions = {}
         for label_text, label_widget in self.placed_labels.items():
             positions[label_text] = {
                 'x': label_widget.winfo_x(),
-                'y': label_widget.winfo_y()
+                'y': label_widget.winfo_y(),
+                'text': label_widget.cget('text')  # Store the label text as well
             }
-        print("Label positions updated:", positions)
-        messagebox.showinfo("Success", "Label positions updated successfully!")
+        
+        try:
+            # Convert positions to JSON string
+            positions_json = json.dumps(positions)
+            
+            # Get current part number
+            part_number = self.textboxes["Part Number"].get()
+            
+            # Update database
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            query = """
+            UPDATE TBL_MODEL_MASTER 
+            SET MM_LABEL_COORDINATES = %s,
+                MM_MODIFIED_BY = %s,
+                MM_MODIFIED_DATE = %s
+            WHERE MM_PART_NUMBER = %s
+            """
+            
+            cursor.execute(query, (positions_json, 'User', datetime.now(), part_number))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print("Label positions updated:", positions)
+            messagebox.showinfo("Success", "Label positions updated successfully!")
+        except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            messagebox.showerror("Database Error", f"Failed to update label positions: {err}")
 
     def update_image_path(self, path):
         if "Image File Path" in self.textboxes:
@@ -1240,20 +1270,30 @@ class WorkspaceApp:
 
     def insert_model_master(self, data):
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="nk446420",
-                database="EOL"
-            )
+            conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
+            
+            # Get label coordinates
+            positions = {}
+            for label_text, label_widget in self.placed_labels.items():
+                positions[label_text] = {
+                    'x': label_widget.winfo_x(),
+                    'y': label_widget.winfo_y(),
+                    'text': label_widget.cget('text')
+                }
+            
+            positions_json = json.dumps(positions)
+            
+            # Add positions_json to the data tuple
+            data = data[:-6] + (positions_json,) + data[-6:]
             
             query = """
             INSERT INTO TBL_MODEL_MASTER 
-            (MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, MM_BARCODE_LABEL_CODE, MM_IMAGE_PATH, 
-            MM_BARCODE_LABEL_ID, MM_BARCODE_TYPE, MM_VENDOR_CODE, MM_EO_NUMBER, MM_SPECIAL_DATA, MM_INITIAL_ID, 
-            MM_SUPPLIER_SECTION, MM_CREATED_BY, MM_CREATED_DATE, MM_STATUS, MM_MODIFIED_BY, MM_MODIFIED_DATE)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, MM_BARCODE_LABEL_CODE, 
+            MM_IMAGE_PATH, MM_BARCODE_LABEL_ID, MM_BARCODE_TYPE, MM_VENDOR_CODE, MM_EO_NUMBER, 
+            MM_SPECIAL_DATA, MM_INITIAL_ID, MM_SUPPLIER_SECTION, MM_LABEL_COORDINATES, 
+            MM_CREATED_BY, MM_CREATED_DATE, MM_STATUS, MM_MODIFIED_BY, MM_MODIFIED_DATE)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             cursor.execute(query, data)
@@ -1303,6 +1343,54 @@ class WorkspaceApp:
         
         # Update the part list view
         self.update_part_list_view()
+
+    def load_label_positions(self, part_number):
+        """Load saved label positions for a given part number"""
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            query = """
+            SELECT MM_LABEL_COORDINATES 
+            FROM TBL_MODEL_MASTER 
+            WHERE MM_PART_NUMBER = %s
+            """
+            
+            cursor.execute(query, (part_number,))
+            
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                positions = json.loads(result[0])
+                
+                # Clear existing labels
+                self.reset_labels()
+                
+                # Place labels at saved positions
+                for label_text, pos_data in positions.items():
+                    new_label = tk.Label(self.image_quadrant,
+                                       text=pos_data['text'],
+                                       width=len(pos_data['text']) + 2,
+                                       relief="raised",
+                                       bg="lightblue")
+                    
+                    new_label.place(x=pos_data['x'], y=pos_data['y'])
+                    new_label.bind("<Button-1>", self.start_move)
+                    new_label.bind("<B1-Motion>", self.on_motion)
+                    new_label.bind("<ButtonRelease-1>", self.stop_move)
+                    
+                    self.placed_labels[label_text] = new_label
+                    
+                    # Update original label appearance
+                    if label_text in self.original_positions:
+                        self.original_positions[label_text].config(bg="lightgray")
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            messagebox.showerror("Database Error", f"Failed to load label positions: {err}")
 
 def main():
     root = tk.Tk()
