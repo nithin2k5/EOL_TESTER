@@ -643,9 +643,9 @@ class EOLTesterGUI:
             # Store the current part number
             self.current_part_number = part_number
             
-            # Get image path and label positions from TBL_MODEL_MASTER
+            # Get image path, label positions, and coordinates from TBL_MODEL_MASTER
             master_query = """
-            SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS 
+            SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS, MM_LABEL_COORDINATES 
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
@@ -653,46 +653,52 @@ class EOLTesterGUI:
             result = cursor.fetchone()
             
             if result:
-                image_path, label_positions = result
+                image_path, label_positions, label_coordinates = result
                 
                 # Load the image if path exists
                 if image_path and os.path.exists(image_path):
-                    self.load_image_with_path(image_path)
-                    
-                    # Place labels if positions exist and image was loaded successfully
-                    if label_positions and self.image_loaded:
-                        try:
-                            positions = json.loads(label_positions)
-                            self.place_labels_from_positions(positions)
-                        except json.JSONDecodeError:
-                            print(f"Warning: Invalid label position data for part {part_number}")
+                    if self.load_image_with_path(image_path):
+                        # Place labels if positions exist
+                        if label_coordinates:  # Use label_coordinates instead of positions
+                            try:
+                                coordinates = json.loads(label_coordinates)
+                                self.place_labels_from_positions(coordinates)
+                            except json.JSONDecodeError:
+                                print(f"Warning: Invalid label coordinate data for part {part_number}")
+                        else:
+                            print(f"Warning: No label coordinates found for part {part_number}")
                 else:
                     print(f"Warning: Image file not found at {image_path}")
-            
-            # Get specifications
-            spec_query = """
-            SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
-                   MS_MASTER_MIN, MS_MASTER_MAX, 
-                   MS_NORMAL_MIN, MS_NORMAL_MAX
-            FROM TBL_MODEL_SPECIFICATION 
-            WHERE MS_PART_NUMBER = %s
-            """
-            
-            cursor.execute(spec_query, (part_number,))
-            
-            # Clear existing entries in treeview
-            self.spec_tree.delete(*self.spec_tree.get_children())
-            
-            # Insert retrieved data into treeview
-            for row in cursor.fetchall():
-                display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
-                self.spec_tree.insert('', 'end', values=display_row)
+                    messagebox.showwarning("Warning", "Image file not found!")
+                
+                # Get specifications
+                spec_query = """
+                SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
+                       MS_MASTER_MIN, MS_MASTER_MAX, 
+                       MS_NORMAL_MIN, MS_NORMAL_MAX
+                FROM TBL_MODEL_SPECIFICATION 
+                WHERE MS_PART_NUMBER = %s
+                """
+                
+                cursor.execute(spec_query, (part_number,))
+                
+                # Clear existing entries in treeview
+                self.spec_tree.delete(*self.spec_tree.get_children())
+                
+                # Insert retrieved data into treeview
+                for row in cursor.fetchall():
+                    display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
+                    self.spec_tree.insert('', 'end', values=display_row)
             
             cursor.close()
             conn.close()
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve specifications: {err}")
+            print(f"Database Error: {err}")
+        except Exception as e:
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+            print(f"Error: {e}")
 
     def load_image_with_path(self, image_path):
         """Load image from path and prepare for label placement"""
@@ -743,100 +749,64 @@ class EOLTesterGUI:
     def place_labels_from_positions(self, positions):
         """Place labels according to saved positions from database."""
         try:
-            # Reset existing labels first
-            self.reset_labels()
+            # Hide all original draggable labels first
+            for label in self.label_widgets.values():
+                label.pack_forget()
             
             # Get image area dimensions for validation
             image_area_width = self.image_area.winfo_width()
             image_area_height = self.image_area.winfo_height()
             
+            # Clear any existing placed labels
+            for label in getattr(self, 'placed_labels', {}).values():
+                label.destroy()
+            self.placed_labels = {}
+            
             for label_text, pos_data in positions.items():
-                if label_text in self.label_widgets:
-                    # Validate coordinates
-                    x = min(max(0, pos_data['x']), image_area_width - 50)  # 50 is approximate label width
-                    y = min(max(0, pos_data['y']), image_area_height - 30)  # 30 is approximate label height
-                    
-                    # Create new label in image area
-                    new_label = tk.Label(self.image_area, 
-                                       text=pos_data.get('text', label_text),
-                                       width=len(pos_data.get('text', label_text)) + 2,
+                # Validate coordinates
+                x = min(max(0, pos_data['x']), image_area_width - 50)
+                y = min(max(0, pos_data['y']), image_area_height - 30)
+                
+                # Create new label with matching style from original labels
+                original_label = self.label_widgets.get(label_text)
+                if original_label:
+                    new_label = tk.Label(self.image_area,
+                                       text=label_text,
+                                       bg=original_label.cget('bg'),
+                                       fg=original_label.cget('fg'),
+                                       width=15,
+                                       height=2,
                                        relief="raised",
-                                       bg="lightblue")
+                                       font=("Arial", 10, "bold"))
                     
                     # Place at saved coordinates
                     new_label.place(x=x, y=y)
                     
-                    # Bind events for dragging
-                    new_label.bind("<Button-1>", self.start_label_drag)
-                    new_label.bind("<B1-Motion>", self.on_label_drag)
-                    new_label.bind("<ButtonRelease-1>", self.stop_label_drag)
-                    
                     # Store the placed label
                     self.placed_labels[label_text] = new_label
-                    self.label_positions[label_text] = (x, y)
-                    
-                    # Update original label appearance
-                    if label_text in self.label_widgets:
-                        self.label_widgets[label_text].config(bg="lightgray")
-                    
-                    # Update coordinate display
-                    self.update_coordinate_display(label_text, x, y)
-                    
-                    # Update label status in treeview
-                    self.update_label_status(label_text)
+            
+            # Restore original labels to their container
+            for label in self.label_widgets.values():
+                label.pack(side="left", padx=2, expand=True)
             
         except Exception as e:
             print(f"Error placing labels: {e}")
             messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
-
-    def save_label_positions(self):
-        """Save current label positions to database."""
-        if not hasattr(self, 'current_part_number'):
-            return
-        
-        try:
-            # Create positions dictionary with coordinates and label text
-            positions = {}
-            for label_text, label in self.placed_labels.items():
-                positions[label_text] = {
-                    'x': label.winfo_x(),
-                    'y': label.winfo_y(),
-                    'text': label.cget('text')  # Save current label text
-                }
-            
-            # Convert to JSON
-            positions_json = json.dumps(positions)
-            
-            # Update database
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="nk446420",
-                database="EOL"
-            )
-            cursor = conn.cursor()
-            
-            update_query = """
-            UPDATE TBL_MODEL_MASTER 
-            SET MM_LABEL_POSITIONS = %s 
-            WHERE MM_PART_NUMBER = %s
-            """
-            cursor.execute(update_query, (positions_json, self.current_part_number))
-            conn.commit()
-            
-            cursor.close()
-            conn.close()
-            
-        except mysql.connector.Error as err:
-            print(f"Error saving label positions: {err}")
-        except Exception as e:
-            print(f"Error: {e}")
+            # Ensure original labels are restored even if there's an error
+            for label in self.label_widgets.values():
+                label.pack(side="left", padx=2, expand=True)
 
     def reset_labels(self):
-        """Reset all labels to their original positions"""
+        """Reset all labels to their original state"""
+        # Clear any placed labels
+        for label in getattr(self, 'placed_labels', {}).values():
+            label.destroy()
+        self.placed_labels = {}
+        
+        # Ensure original labels are visible in their container
         for label in self.label_widgets.values():
-            label.place_forget()  # Remove from image area
-            label.pack(in_=self.label_container, side="left", padx=2, expand=True)  # Return to bottom container
+            label.pack(in_=self.label_container, side="left", padx=2, expand=True)
+        
         self.label_positions.clear()
         
         # Save the cleared positions to database
@@ -861,6 +831,51 @@ class EOLTesterGUI:
 
     def button6_command(self):
         messagebox.showinfo("Button 6", "Button 6 pressed")
+
+    def save_label_positions(self):
+        """Save current label positions to the database for the current part number."""
+        if not hasattr(self, 'current_part_number'):
+            print("Warning: No part number selected")
+            return
+
+        try:
+            # Convert positions to JSON format
+            positions = {}
+            for label_text, label in self.placed_labels.items():
+                positions[label_text] = {
+                    'x': label.winfo_x(),
+                    'y': label.winfo_y()
+                }
+            
+            positions_json = json.dumps(positions)
+
+            # Connect to database
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="nk446420",
+                database="EOL"
+            )
+            cursor = conn.cursor()
+
+            # Update the label coordinates in TBL_MODEL_MASTER
+            update_query = """
+            UPDATE TBL_MODEL_MASTER 
+            SET MM_LABEL_COORDINATES = %s
+            WHERE MM_PART_NUMBER = %s
+            """
+            cursor.execute(update_query, (positions_json, self.current_part_number))
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+
+        except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            messagebox.showerror("Database Error", f"Failed to save label positions: {err}")
+        except Exception as e:
+            print(f"Error: {e}")
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
 def main():
     root = tk.Tk()

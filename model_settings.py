@@ -318,125 +318,118 @@ class WorkspaceApp:
     def create_second_quadrant_content(self):
         second_quadrant = self.quadrants[1]
         
-        # Header
-        header_frame = tk.Frame(second_quadrant, bg='#00BFFF')  # Light blue background
-        header_frame.pack(fill=tk.X)
+        # Create main container with padding
+        main_container = tk.Frame(second_quadrant, bg='white')
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        header_label = tk.Label(header_frame, 
+        # Create header label "PART DETAILS"
+        header_label = tk.Label(main_container, 
                               text="PART DETAILS",
-                              font=('Arial', 14, 'bold'),
-                              bg='#00BFFF',
-                              fg='navy')
-        header_label.pack(pady=5)
-
-        # Main content frame
-        content_frame = tk.Frame(second_quadrant, bg='white')
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        # Left side frame for input fields
-        left_frame = tk.Frame(content_frame, bg='white')
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-
-        # Right side frame for buttons
-        right_frame = tk.Frame(content_frame, bg='white')
-        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
-
-        # Input fields configuration with placeholders
+                              font=('Arial', 12, 'bold'),
+                              bg='deepskyblue',
+                              fg='navy',
+                              anchor='w',
+                              padx=10,
+                              pady=5)
+        header_label.pack(fill=tk.X, pady=(0, 5))
+        
+        # Create left frame for input fields
+        left_frame = tk.Frame(main_container, bg='white')
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        
+        # Create right frame for buttons
+        button_frame = tk.Frame(main_container, bg='white')
+        button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        
+        # Create textboxes for each field
         fields = [
             ("Vendor Code", "Enter vendor code", 0, 0),
             ("EO Number", "Enter EO number", 0, 1),
             ("Special Data", "Enter special data", 1, 0),
             ("Initial ID", "Enter initial ID", 1, 1),
-            ("Part Number", "Enter part number", 2, 0, 2),  # spans 2 columns
-            ("Model & Part Name", "Enter model & part name", 3, 0, 2),  # spans 2 columns
-            ("Image File Path", "No image selected", 4, 0, 2),  # spans 2 columns
-            ("ALC Code", "Enter ALC code", 5, 0),
-            ("Supplier Section", "Enter supplier section", 5, 1)
+            ("Part Number", "Enter part number", 2, 0, 2),
+            ("Supplier Section", "Enter supplier details", 3, 0, 2),
+            ("Model & Part Name", "Enter model & part name", 4, 0, 2),
+            ("Image File Path", "No image selected", 5, 0, 2),
+            ("ALC Code", "Enter ALC code", 6, 0),
         ]
-
+        
         self.textboxes = {}
         
-        # Create and arrange input fields
+        # Create textboxes for each field
         for field in fields:
-            label_text = field[0]
-            placeholder = field[1]
-            row = field[2]
-            col = field[3]
+            label_text, placeholder, row, col = field[:4]
             colspan = field[4] if len(field) > 4 else 1
-
-            # Label
-            label = tk.Label(left_frame, 
-                           text=label_text,
-                           bg='white',
-                           anchor='w')
-            label.grid(row=row*2, column=col, 
-                      columnspan=colspan,
-                      sticky='w', 
-                      padx=5, 
-                      pady=(5,0))
-
-            # Entry with placeholder
-            entry = tk.Entry(left_frame, bg='white',fg='black',width=30 if colspan > 1 else 20)
+            
+            # Create entry directly without label
+            entry = tk.Entry(left_frame, width=30)
             entry.insert(0, placeholder)
             entry.config(fg='gray')
+            entry.grid(row=row, column=col, columnspan=colspan, sticky='ew', padx=5, pady=5)
             
-            # Bind focus events for placeholder behavior
-            entry.bind('<FocusIn>', lambda e, entry=entry, placeholder=placeholder: 
-                      self.on_entry_focus_in(e, entry, placeholder))
-            entry.bind('<FocusOut>', lambda e, entry=entry, placeholder=placeholder: 
-                      self.on_entry_focus_out(e, entry, placeholder))
-
-            entry.grid(row=row*2+1, column=col,
-                      columnspan=colspan,
-                      sticky='ew',
-                      padx=5,
-                      pady=(0,5))
-
-            # Store reference to entry widget
-            self.textboxes[label_text] = entry
-
-            # Special handling for Image File Path
+            # Bind focus events
+            entry.bind('<FocusIn>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_in(e, entry, ph))
+            entry.bind('<FocusOut>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_out(e, entry, ph))
+            
+            # Make Image File Path read-only
             if label_text == "Image File Path":
                 entry.config(state='readonly')
-                browse_btn = tk.Button(left_frame,fg="white",background="black" ,
-                                     text="📂",
-                                     command=self.upload_image)
-                browse_btn.grid(row=row*2+1, column=col+colspan, padx=(0,5))
+            
+            self.textboxes[label_text] = entry
 
-        # Configure grid
+        # Configure grid weights
         left_frame.grid_columnconfigure(0, weight=1)
         left_frame.grid_columnconfigure(1, weight=1)
-
-        # Create buttons in right frame
+        
+        # Create buttons with specific colors
         buttons = [
-            ("NEW", "red", None),  # Add None for buttons without a command
-            ("EDIT", "navy", None),
-            ("SAVE", "green", self.save_specifications_to_db),  # Add command to SAVE button
-            ("CLEAR", "gray", None),
-            ("DELETE", "red", None)
+            ("NEW", "red", "white"),
+            ("EDIT", "navy", "white"),
+            ("SAVE", "green", "white"),
+            ("CLEAR", "gray", "white"),
+            ("DELETE", "red", "white")
         ]
-
-        for text, color, command in buttons:
-            btn = tk.Button(right_frame,
+        
+        for text, bg_color, fg_color in buttons:
+            btn = tk.Button(button_frame,
                            text=text,
-                           bg="white",
-                           fg='black',
+                           bg=bg_color,
+                           fg=fg_color,
                            width=10,
                            height=2,
-                           command=command)  # Assign command to button
-            btn.pack(pady=5)
+                           relief='flat')
+            btn.pack(pady=2)
+            
+            # Add command to SAVE button
+            if text == "SAVE":
+                btn.config(command=self.save_specifications_to_db)
+            elif text == "CLEAR":
+                btn.config(command=self.clear_all_data)
 
     def on_entry_focus_in(self, event, entry, placeholder):
         """Handle entry field focus in - remove placeholder text"""
         if entry.get() == placeholder:
             entry.delete(0, tk.END)
-            entry.config(fg='black')
+            entry.config(fg='white')
 
     def on_entry_focus_out(self, event, entry, placeholder):
         """Handle entry field focus out - restore placeholder if empty"""
         if entry.get() == '':
             entry.insert(0, placeholder)
-            entry.config(fg='grey')
+            entry.config(fg='white')
+
+    def on_text_focus_in(self, event, text_widget, placeholder):
+        """Handle text widget focus in - remove placeholder text"""
+        if text_widget.get("1.0", "end-1c") == placeholder:
+            text_widget.delete("1.0", tk.END)
+            text_widget.config(fg='white')
+
+    def on_text_focus_out(self, event, text_widget, placeholder):
+        """Handle text widget focus out - restore placeholder if empty"""
+        if text_widget.get("1.0", "end-1c").strip() == '':
+            text_widget.delete("1.0", tk.END)
+            text_widget.insert("1.0", placeholder)
+            text_widget.config(fg='white')
 
     def create_moveable_labels(self):
         # Create 16 moveable labels
@@ -538,25 +531,12 @@ class WorkspaceApp:
             # Update only the status of the specific label
             self.update_label_status(label_text)
             
-            # After placing the label, update the label details treeview
-            self.label_tree.insert('', tk.END, values=(
-                label_text,
-                self.label_status[label_text[1:]]['status'],
-                self.label_details[label_text[1:]]['details']
-            ))
-            
-            # Update the label details treeview for the placed label
-            for item in self.label_tree.get_children():
-                if self.label_tree.item(item)['values'][0] == label_text:
-                    self.label_tree.item(item, values=(label_text, 'OFF', 'ON'))
-                    break
+            # Update the treeview after placing the label
+            self.update_treeview()
         else:
             self.current_label = widget
             self.drag_start_x = event.x
             self.drag_start_y = event.y
-
-        # Update the treeview after placing the label
-        self.update_treeview()
 
     def on_motion(self, event):
         if not self.current_label:
@@ -1021,14 +1001,28 @@ class WorkspaceApp:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Create table if it doesn't exist
+            # Create table with exact column structure
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS part_list (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    part_number VARCHAR(50),
-                    model_name VARCHAR(100),
-                    created_date DATETIME,
-                    label_data JSON
+                CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (
+                    ID INT AUTO_INCREMENT PRIMARY KEY,
+                    MM_PART_NUMBER VARCHAR(255),
+                    MM_MODEL_NAME VARCHAR(255),
+                    MM_ALC_CODE VARCHAR(255),
+                    MM_PLC_ADDRESS VARCHAR(255),
+                    MM_BARCODE_LABEL_CODE VARCHAR(255),
+                    MM_IMAGE_PATH VARCHAR(255),
+                    MM_VENDOR_CODE VARCHAR(255),
+                    MM_EO_NUMBER VARCHAR(255),
+                    MM_SPECIAL_DATA VARCHAR(255),
+                    MM_INITIAL_ID VARCHAR(255),
+                    MM_SUPPLIER_SECTION VARCHAR(255),
+                    MM_CREATED_BY VARCHAR(255),
+                    MM_CREATED_DATE DATETIME,
+                    MM_STATUS TINYINT(1),
+                    MM_MODIFIED_BY VARCHAR(255),
+                    MM_MODIFIED_DATE DATETIME,
+                    MM_LABEL_POSITIONS JSON,
+                    MM_LABEL_COORDINATES JSON
                 )
             ''')
             
@@ -1041,70 +1035,24 @@ class WorkspaceApp:
 
     def save_to_database(self):
         try:
-            # Get model name and part number
-            model_name = self.model_name_var.get().strip()
-            part_number = self.part_number_var.get().strip()
+            # Get values from textboxes
+            part_number = self.textboxes["Part Number"].get().strip()
+            model_name = self.textboxes["Model & Part Name"].get().strip()
             
             # Validate inputs
             if not model_name or not part_number:
                 messagebox.showwarning("Warning", "Please enter both Model Name and Part Number!")
                 return
             
-            # Collect label data
-            label_data = {}
-            for item in self.tree.get_children():
-                values = self.tree.item(item)['values']
-                label_num = values[0]
-                if label_num in self.placed_labels:
-                    label_widget = self.placed_labels[label_num]
-                    label_data[label_num] = {
-                        'name': label_widget.cget('text'),  # Get current label text
-                        'position': {
-                            'x': label_widget.winfo_x(),
-                            'y': label_widget.winfo_y()
-                        },
-                        'on_status': values[1],
-                        'off_status': values[2]
-                    }
-            
-            # Connect to database
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="",
-                database="label_db"
-            )
-            cursor = conn.cursor()
-            
-            # Insert data
-            query = """
-                INSERT INTO part_list 
-                (part_number, model_name, created_date, label_data) 
-                VALUES (%s, %s, %s, %s)
-            """
-            
-            cursor.execute(query, (
-                part_number,
-                model_name,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                json.dumps(label_data)
-            ))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            # Clear input fields
-            self.model_name_var.set('')
-            self.part_number_var.set('')
+            # The rest of the data will be saved through save_specifications_to_db method
+            # which already handles saving to TBL_MODEL_MASTER
+            self.save_specifications_to_db()
             
             # Update the part list view
             self.update_part_list_view()
             
-            messagebox.showinfo("Success", "Data saved successfully!")
-            
-        except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Failed to save data: {err}")
+        except Exception as err:
+            messagebox.showerror("Error", f"Failed to save data: {err}")
 
     def update_part_list_view(self):
         try:
@@ -1112,62 +1060,27 @@ class WorkspaceApp:
             for item in self.part_list_tree.get_children():
                 self.part_list_tree.delete(item)
             
-            # Connect to database
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="nk446420",
-                database="label_db"
-            )
+            # Connect to database using existing config
+            conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Fetch all records
+            # Fetch all records from TBL_MODEL_MASTER
             cursor.execute("""
-                SELECT id, part_number, model_name, created_date 
-                FROM part_list 
-                ORDER BY created_date DESC
+                SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_CREATED_DATE 
+                FROM TBL_MODEL_MASTER 
+                ORDER BY MM_CREATED_DATE DESC
             """)
             
             # Insert records into treeview
             for row in cursor.fetchall():
-                formatted_date = row[3].strftime('%Y-%m-%d %H:%M:%S')
-                self.part_list_tree.insert('', 'end', values=(row[1], row[2], formatted_date))
+                formatted_date = row[2].strftime('%Y-%m-%d %H:%M:%S') if row[2] else ''
+                self.part_list_tree.insert('', 'end', values=(row[0], row[1], formatted_date))
             
             cursor.close()
             conn.close()
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to fetch records: {err}")
-
-    def create_part_list_section(self, frame):
-        # Create Part List section
-        part_list_frame = ttk.LabelFrame(frame, text="Part List")
-        part_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Create Treeview
-        columns = ('part_number', 'model_name', 'created_date')
-        self.part_list_tree = ttk.Treeview(part_list_frame, columns=columns, show='headings', height=10)
-        
-        # Configure columns
-        self.part_list_tree.heading('part_number', text='Part Number')
-        self.part_list_tree.heading('model_name', text='Model Name')
-        self.part_list_tree.heading('created_date', text='Created Date')
-        
-        # Set column widths
-        self.part_list_tree.column('part_number', width=100)
-        self.part_list_tree.column('model_name', width=150)
-        self.part_list_tree.column('created_date', width=150)
-        
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(part_list_frame, orient=tk.VERTICAL, command=self.part_list_tree.yview)
-        self.part_list_tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack widgets
-        self.part_list_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Load existing records
-        self.update_part_list_view()
 
     def insert_specification(self, data):
         try:
@@ -1225,23 +1138,36 @@ class WorkspaceApp:
             print(f"Error: {err}")
 
     def save_specifications_to_db(self):
-        """Save specifications data to the database."""
         try:
             # Validate that all required fields are filled
-            if not all(entry.get() for entry in self.spec_entries.values()) or not all(self.textboxes[key].get() for key in self.textboxes):
+            if not all(entry.get() for entry in self.spec_entries.values()) or \
+               not all(self.textboxes[key].get() for key in self.textboxes):
                 messagebox.showwarning("Input Error", "Please fill in all the fields before saving.")
                 return
             
             # Collect data from spec_entries
             spec_data = tuple(entry.get() for entry in self.spec_entries.values())
             
-            # Debugging: Print the collected data
-            print("Collected data for saving:", spec_data)
+            # Collect data from second quadrant with safe defaults
+            plc_address = ""
+            barcode_label_code = ""
+            barcode_type = ""
+            supplier_section = ""
             
-            # Insert data into the TBL_MODEL_SPECIFICATION table
-            self.insert_specification(spec_data)
+            # Safely get combo values if they exist
+            if hasattr(self, 'second_quad_combos'):
+                plc_address = self.second_quad_combos.get("PLC Address", ttk.Combobox()).get()
+                barcode_label_code = self.second_quad_combos.get("Barcode Label Code", ttk.Combobox()).get()
+                barcode_type = self.second_quad_combos.get("Barcode Type", ttk.Combobox()).get()
             
-            # Collect data for TBL_MODEL_MASTER
+            # Safely get supplier section text if it exists
+            if hasattr(self, 'second_quad_supplier'):
+                try:
+                    supplier_section = self.second_quad_supplier.get("1.0", "end-1c")
+                except:
+                    supplier_section = ""
+            
+            # Collect other data
             part_number = self.textboxes["Part Number"].get()
             model_name = self.textboxes["Model & Part Name"].get()
             alc_code = self.textboxes["ALC Code"].get()
@@ -1249,21 +1175,23 @@ class WorkspaceApp:
             eo_number = self.textboxes["EO Number"].get()
             special_data = self.textboxes["Special Data"].get()
             initial_id = self.textboxes["Initial ID"].get()
-            supplier_section = self.textboxes["Supplier Section"].get()
             image_path = self.textboxes["Image File Path"].get()
             
             master_data = (
-                part_number, model_name, alc_code, '', '', image_path, 0, '', vendor_code,
-                eo_number, special_data, initial_id, supplier_section, 'User', datetime.now(), True, 'User', datetime.now()
+                part_number, model_name, alc_code, plc_address, barcode_label_code, 
+                image_path, 0, barcode_type, vendor_code, eo_number, special_data, 
+                initial_id, supplier_section, 'User', datetime.now(), True, 'User', datetime.now()
             )
             
-            # Insert data into the TBL_MODEL_MASTER table
+            # Insert data into the database
             self.insert_model_master(master_data)
+            self.insert_specification(spec_data)
             
-            # After successful save, clear everything
+            # Clear everything after successful save
             self.clear_all_data()
             
             messagebox.showinfo("Success", "Specifications and part list details saved successfully!")
+            
         except Exception as e:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"Failed to save specifications: {str(e)}")
@@ -1273,30 +1201,61 @@ class WorkspaceApp:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Get label coordinates
-            positions = {}
+            # Format label positions and coordinates as separate JSON objects
+            label_positions = {}
+            label_coordinates = {}
+            
             for label_text, label_widget in self.placed_labels.items():
-                positions[label_text] = {
-                    'x': label_widget.winfo_x(),
-                    'y': label_widget.winfo_y(),
-                    'text': label_widget.cget('text')
+                label_num = label_text.lstrip('L')
+                
+                # Label positions JSON
+                label_positions[label_num] = {
+                    'position': 'placed',
+                    'status': 'active'
+                }
+                
+                # Label coordinates JSON
+                label_coordinates[label_num] = {
+                    'x': float(label_widget.winfo_x()),
+                    'y': float(label_widget.winfo_y()),
+                    'text': str(label_widget.cget('text'))
                 }
             
-            positions_json = json.dumps(positions)
-            
-            # Add positions_json to the data tuple
-            data = data[:-6] + (positions_json,) + data[-6:]
+            positions_json = json.dumps(label_positions, ensure_ascii=False)
+            coordinates_json = json.dumps(label_coordinates, ensure_ascii=False)
             
             query = """
-            INSERT INTO TBL_MODEL_MASTER 
-            (MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, MM_BARCODE_LABEL_CODE, 
-            MM_IMAGE_PATH, MM_BARCODE_LABEL_ID, MM_BARCODE_TYPE, MM_VENDOR_CODE, MM_EO_NUMBER, 
-            MM_SPECIAL_DATA, MM_INITIAL_ID, MM_SUPPLIER_SECTION, MM_LABEL_COORDINATES, 
-            MM_CREATED_BY, MM_CREATED_DATE, MM_STATUS, MM_MODIFIED_BY, MM_MODIFIED_DATE)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO TBL_MODEL_MASTER (
+                MM_PART_NUMBER, MM_MODEL_NAME, MM_ALC_CODE, MM_PLC_ADDRESS, 
+                MM_BARCODE_LABEL_CODE, MM_IMAGE_PATH, MM_VENDOR_CODE, MM_EO_NUMBER,
+                MM_SPECIAL_DATA, MM_INITIAL_ID, MM_SUPPLIER_SECTION, MM_CREATED_BY,
+                MM_CREATED_DATE, MM_STATUS, MM_MODIFIED_BY, MM_MODIFIED_DATE,
+                MM_LABEL_POSITIONS, MM_LABEL_COORDINATES
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
-            cursor.execute(query, data)
+            final_data = (
+                data[0],  # MM_PART_NUMBER
+                data[1],  # MM_MODEL_NAME
+                data[2],  # MM_ALC_CODE
+                data[3],  # MM_PLC_ADDRESS
+                data[4],  # MM_BARCODE_LABEL_CODE
+                data[5],  # MM_IMAGE_PATH
+                data[6],  # MM_VENDOR_CODE
+                data[7],  # MM_EO_NUMBER
+                data[8],  # MM_SPECIAL_DATA
+                data[9],  # MM_INITIAL_ID
+                data[10], # MM_SUPPLIER_SECTION
+                'User',   # MM_CREATED_BY
+                datetime.now(), # MM_CREATED_DATE
+                1,       # MM_STATUS (TINYINT)
+                'User',  # MM_MODIFIED_BY
+                datetime.now(), # MM_MODIFIED_DATE
+                positions_json,    # MM_LABEL_POSITIONS
+                coordinates_json   # MM_LABEL_COORDINATES
+            )
+            
+            cursor.execute(query, final_data)
             conn.commit()
             cursor.close()
             conn.close()
@@ -1305,9 +1264,6 @@ class WorkspaceApp:
         except mysql.connector.Error as err:
             print(f"Database Error: {err}")
             messagebox.showerror("Database Error", f"Failed to insert model master data: {err}")
-        except Exception as e:
-            print(f"Error: {e}")
-            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def clear_all_data(self):
         """Clear all data fields, image, and restore labels."""
@@ -1315,11 +1271,17 @@ class WorkspaceApp:
         for entry in self.spec_entries.values():
             entry.delete(0, 'end')
         
+        # Clear second quadrant comboboxes
+        for combo in self.second_quad_combos.values():
+            combo.set('')
+        
+        # Clear second quadrant supplier section
+        self.second_quad_supplier.delete("1.0", tk.END)
+        
         # Clear textboxes
         for key, entry in self.textboxes.items():
-            entry.config(state='normal')  # Enable entry for clearing
+            entry.config(state='normal')
             entry.delete(0, 'end')
-            # Restore placeholder text
             placeholder = "Enter " + key.lower()
             if key == "Image File Path":
                 placeholder = "No image selected"
@@ -1345,36 +1307,36 @@ class WorkspaceApp:
         self.update_part_list_view()
 
     def load_label_positions(self, part_number):
-        """Load saved label positions for a given part number"""
         try:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
             query = """
-            SELECT MM_LABEL_COORDINATES 
+            SELECT MM_LABEL_POSITIONS, MM_LABEL_COORDINATES 
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
             
             cursor.execute(query, (part_number,))
-            
             result = cursor.fetchone()
             
-            if result and result[0]:
-                positions = json.loads(result[0])
+            if result and (result[0] or result[1]):
+                positions = json.loads(result[0]) if result[0] else {}
+                coordinates = json.loads(result[1]) if result[1] else {}
                 
                 # Clear existing labels
                 self.reset_labels()
                 
-                # Place labels at saved positions
-                for label_text, pos_data in positions.items():
+                # Place labels using coordinates
+                for label_num, coord_data in coordinates.items():
+                    label_text = f'L{label_num}'
                     new_label = tk.Label(self.image_quadrant,
-                                       text=pos_data['text'],
-                                       width=len(pos_data['text']) + 2,
+                                       text=coord_data['text'],
+                                       width=len(coord_data['text']) + 2,
                                        relief="raised",
                                        bg="lightblue")
                     
-                    new_label.place(x=pos_data['x'], y=pos_data['y'])
+                    new_label.place(x=coord_data['x'], y=coord_data['y'])
                     new_label.bind("<Button-1>", self.start_move)
                     new_label.bind("<B1-Motion>", self.on_motion)
                     new_label.bind("<ButtonRelease-1>", self.stop_move)
@@ -1391,6 +1353,31 @@ class WorkspaceApp:
         except mysql.connector.Error as err:
             print(f"Database Error: {err}")
             messagebox.showerror("Database Error", f"Failed to load label positions: {err}")
+
+    def on_combo_focus_in(self, event, combo, placeholder):
+        """Handle combobox focus in - remove placeholder text"""
+        if combo.get() == placeholder:
+            combo.set('')
+            combo.config(style='Custom.TCombobox')
+
+    def on_combo_focus_out(self, event, combo, placeholder):
+        """Handle combobox focus out - restore placeholder if empty"""
+        if combo.get() == '':
+            combo.set(placeholder)
+            combo.config(style='Custom.TCombobox')
+
+    def on_text_focus_in(self, event, text_widget, placeholder):
+        """Handle text widget focus in - remove placeholder text"""
+        if text_widget.get("1.0", "end-1c") == placeholder:
+            text_widget.delete("1.0", tk.END)
+            text_widget.config(fg='black')
+
+    def on_text_focus_out(self, event, text_widget, placeholder):
+        """Handle text widget focus out - restore placeholder if empty"""
+        if text_widget.get("1.0", "end-1c").strip() == '':
+            text_widget.delete("1.0", tk.END)
+            text_widget.insert("1.0", placeholder)
+            text_widget.config(fg='gray')
 
 def main():
     root = tk.Tk()
