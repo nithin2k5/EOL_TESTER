@@ -19,6 +19,7 @@ class EOLTesterGUI:
         self.label_positions = {}
         self.selected_label = None
         self.barcode_data = ""
+        self.label_widgets = {}
         
         self.setup_gui()
         self.setup_barcode_listener()
@@ -44,8 +45,6 @@ class EOLTesterGUI:
         # Footer
         self.create_footer()
 
-        self.create_manual_entry()
-
     def create_title_bar(self):
         title_frame = tk.Frame(self.main_container, bg="#FFB6C1", height=40)
         title_frame.pack(fill="x")
@@ -61,40 +60,24 @@ class EOLTesterGUI:
         title_label.pack(pady=5)
 
     def create_quadrants(self):
-        # Configure grid weights - equal weights for all quadrants
+        # Configure grid weights for equal space
         self.workspace.grid_columnconfigure(0, weight=1)  # First column
         self.workspace.grid_columnconfigure(1, weight=1)  # Second column
         self.workspace.grid_rowconfigure(0, weight=1)     # First row
         self.workspace.grid_rowconfigure(1, weight=1)     # Second row
         
-        # Calculate quadrant sizes
-        # Get the workspace dimensions after padding
-        self.workspace.update()  # Force geometry update
-        total_width = self.workspace.winfo_width()
-        total_height = self.workspace.winfo_height()
-        
-        # Calculate exact quadrant dimensions
-        quadrant_width = total_width // 2 - 4   # Account for padding (2px on each side)
-        quadrant_height = total_height // 2 - 4  # Account for padding (2px on each side)
-        
-        # Create and configure all quadrants with identical size
+        # Create and configure all quadrants
         self.q1 = self.create_first_quadrant()
         self.q2 = self.create_second_quadrant()
         self.q3 = self.create_third_quadrant()
         self.q4 = self.create_fourth_quadrant()
         
-        # Configure all quadrants with identical settings
+        # Place quadrants with equal spacing
         quadrants = [self.q1, self.q2, self.q3, self.q4]
         positions = [(0,0), (0,1), (1,0), (1,1)]
         
         for quadrant, (row, col) in zip(quadrants, positions):
             quadrant.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
-            quadrant.configure(width=quadrant_width, height=quadrant_height)
-            quadrant.grid_propagate(False)  # Prevent resizing
-            
-            # Add a minimum size constraint
-            quadrant.grid_columnconfigure(0, minsize=quadrant_width)
-            quadrant.grid_rowconfigure(0, minsize=quadrant_height)
 
     def create_first_quadrant(self):
         q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
@@ -106,10 +89,19 @@ class EOLTesterGUI:
                               font=("Arial", 12, "bold"))
         model_header.pack(fill="x")
         
+        # Create main content frame
+        content_frame = tk.Frame(q1)
+        content_frame.pack(fill="both", expand=True)
+        
+        # Configure grid weights to maintain image size
+        content_frame.grid_columnconfigure(0, weight=1)
+        content_frame.grid_rowconfigure(0, weight=1)  # Image area
+        content_frame.grid_rowconfigure(1, weight=0)  # L0-L15 labels
+        content_frame.grid_rowconfigure(2, weight=0)  # Test status labels
+        
         # Create fixed size image area container with border
-        self.image_container = tk.Frame(q1, width=500, height=400, relief="solid", borderwidth=1)
-        self.image_container.pack(pady=5)
-        self.image_container.pack_propagate(False)  # Prevent resizing
+        self.image_container = tk.Frame(content_frame, relief="solid", borderwidth=1)
+        self.image_container.grid(row=0, column=0, sticky="nsew", pady=5)
         
         # Image area with white background
         self.image_area = tk.Frame(self.image_container, bg="white")
@@ -119,22 +111,33 @@ class EOLTesterGUI:
         self.image_label = None
         self.image_loaded = False
         
-        # Create draggable labels container at the bottom
-        self.label_container = tk.Frame(q1)
-        self.label_container.pack(fill="x", side="bottom", pady=5)
+        # Create L0-L15 labels container
+        l_labels_frame = tk.Frame(content_frame)
+        l_labels_frame.grid(row=1, column=0, sticky="ew", pady=5)
         
-        # Create draggable labels with distinct colors
-        self.label_widgets = {}
-        labels_config = [
-            ("HOME", "#FFB6C1"),      # Light pink
+        # Create L0-L15 labels
+        for i in range(16):  # L0 to L15
+            label = tk.Label(l_labels_frame,
+                            text=f"L{i}",
+                            font=("Arial", 8),
+                            width=4)
+            label.pack(side="left", expand=True)
+        
+        # Create test status labels container
+        test_status_frame = tk.Frame(content_frame)
+        test_status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 5))
+        
+        # Create test status labels with distinct colors
+        test_status_config = [
             ("AUTO", "#98FB98"),      # Light green
-            ("1st PULL", "#87CEEB"),  # Sky blue
-            ("2nd PULL", "#DDA0DD"),  # Plum
-            ("TEST RESULT", "#F0E68C") # Khaki
+            ("HOME", "#FFB6C1"),      # Light pink
+            ("1st PULL\n(Load Test)", "#87CEEB"),  # Sky blue
+            ("2nd PULL\n(Length Test)", "#DDA0DD"),  # Plum
+            ("TEST\nRESULT", "#F0E68C") # Khaki
         ]
         
-        for text, color in labels_config:
-            label = tk.Label(self.label_container, 
+        for text, color in test_status_config:
+            label = tk.Label(test_status_frame, 
                             text=text,
                             bg=color, 
                             fg="black",
@@ -149,7 +152,7 @@ class EOLTesterGUI:
             label.bind("<Button-1>", self.start_label_drag)
             label.bind("<B1-Motion>", self.on_label_drag)
             label.bind("<ButtonRelease-1>", self.stop_label_drag)
-            label.configure(cursor="hand2")  # Change cursor to indicate draggable
+            label.configure(cursor="hand2")
         
         return q1
 
@@ -239,26 +242,7 @@ class EOLTesterGUI:
     def create_third_quadrant(self):
         q3 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
         
-        # Add labels at the top
-        label_frame = tk.Frame(q3)
-        label_frame.pack(fill="x", pady=5)
-        
-        labels = [
-            "HOME",
-            "AUTO",
-            "PULL 1",
-            "PULL 2",
-            "TEST RESULT"
-        ]
-        
-        for text in labels:
-            lbl = tk.Label(label_frame, text=text, 
-                          bg="#00BFFF", fg="black",
-                          width=10, height=1,
-                          font=("Arial", 10, "bold"))
-            lbl.pack(side="left", padx=10, pady=5, expand=True)
-        
-        # Add graph area
+        # Add graph area directly without the labels
         self.create_graph_area(q3)
         
         return q3
@@ -309,40 +293,34 @@ class EOLTesterGUI:
     def create_graph_area(self, parent):
         # Create main graph container with black background
         graph_container = tk.Frame(parent, bg="black")
-        graph_container.pack(fill="both", expand=True)
+        graph_container.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Configure grid weights for equal space
-        graph_container.grid_rowconfigure(0, weight=1)  # Load graph
-        graph_container.grid_rowconfigure(1, weight=1)  # Length graph
+        # Configure grid weights for reduced height
+        graph_container.grid_rowconfigure(0, weight=0)  # Title row for Load graph
+        graph_container.grid_rowconfigure(1, weight=1)  # Load graph
+        graph_container.grid_rowconfigure(2, weight=0)  # Title row for Length graph
+        graph_container.grid_rowconfigure(3, weight=1)  # Length graph
         graph_container.grid_columnconfigure(0, weight=1)  # Ensure full width
         
-        # Load Graph Section
-        load_graph_frame = tk.Frame(graph_container, bg="black")
-        load_graph_frame.grid(row=0, column=0, sticky="nsew", pady=(5, 0))
-        
         # Load Graph Title
-        tk.Label(load_graph_frame, text="LOAD GRAPH", 
+        tk.Label(graph_container, text="LOAD GRAPH", 
                  bg="black", fg="white", anchor="w",
-                 font=("Arial", 10)).pack(fill="x", padx=5)
+                 font=("Arial", 10)).grid(row=0, column=0, sticky="w", padx=5)
         
-        # Load Graph Canvas
-        self.load_canvas = tk.Canvas(load_graph_frame, bg="black", 
-                                   highlightthickness=0)
-        self.load_canvas.pack(fill="both", expand=True, padx=5)
-        
-        # Length Graph Section
-        length_graph_frame = tk.Frame(graph_container, bg="black")
-        length_graph_frame.grid(row=1, column=0, sticky="nsew", pady=(5, 5))
+        # Load Graph Canvas with reduced height
+        self.load_canvas = tk.Canvas(graph_container, bg="black", 
+                                   highlightthickness=0, height=100)  # Reduced height
+        self.load_canvas.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 10))
         
         # Length Graph Title
-        tk.Label(length_graph_frame, text="LENGTH GRAPH", 
+        tk.Label(graph_container, text="LENGTH GRAPH", 
                  bg="black", fg="white", anchor="w",
-                 font=("Arial", 10)).pack(fill="x", padx=5)
+                 font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=5)
         
-        # Length Graph Canvas
-        self.length_canvas = tk.Canvas(length_graph_frame, bg="black", 
-                                     highlightthickness=0)
-        self.length_canvas.pack(fill="both", expand=True, padx=5)
+        # Length Graph Canvas with reduced height
+        self.length_canvas = tk.Canvas(graph_container, bg="black", 
+                                     highlightthickness=0, height=100)  # Reduced height
+        self.length_canvas.grid(row=3, column=0, sticky="ew", padx=5, pady=(0, 5))
         
         # Bind resize events
         self.load_canvas.bind('<Configure>', lambda e: self.draw_load_graph())
@@ -593,23 +571,6 @@ class EOLTesterGUI:
                 self.image_loaded = False
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
 
-    def create_manual_entry(self):
-        """Create an entry widget and button for manual part number entry."""
-        manual_entry_frame = tk.Frame(self.main_container)
-        manual_entry_frame.pack(fill="x", pady=5)
-
-        self.part_number_entry = tk.Entry(manual_entry_frame, width=20)
-        self.part_number_entry.pack(side="left", padx=5)
-
-        retrieve_button = tk.Button(manual_entry_frame, text="Retrieve Specifications", command=self.manual_retrieve_command)
-        retrieve_button.pack(side="left", padx=5)
-
-    def manual_retrieve_command(self):
-        """Retrieve specifications based on manual entry."""
-        part_number = self.part_number_entry.get().strip()
-        if part_number:
-            self.retrieve_part_specifications(part_number)
-
     def setup_barcode_listener(self):
         """Alternative approach using tkinter bindings"""
         self.root.bind('<Key>', self.on_key_press)
@@ -643,9 +604,12 @@ class EOLTesterGUI:
             # Store the current part number
             self.current_part_number = part_number
             
-            # Get image path, label positions, and coordinates from TBL_MODEL_MASTER
+            # Get model details from TBL_MODEL_MASTER
             master_query = """
-            SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS, MM_LABEL_COORDINATES 
+            SELECT MM_IMAGE_PATH, MM_LABEL_POSITIONS, MM_LABEL_COORDINATES,
+                   MM_MODEL_NAME, MM_VENDOR_CODE, MM_EO_NUMBER, MM_SPECIAL_DATA,
+                   MM_INITIAL_ID, MM_SUPPLIER_SECTION, MM_BARCODE_PRN_FILE_NAME,
+                   MM_PLC_ADDRESS
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
@@ -653,42 +617,63 @@ class EOLTesterGUI:
             result = cursor.fetchone()
             
             if result:
-                image_path, label_positions, label_coordinates = result
+                (image_path, label_positions, label_coordinates, 
+                 model_name, vendor_code, eo_number, special_data,
+                 initial_id, supplier_section, barcode_prn_file, 
+                 plc_address) = result
                 
-                # Load the image if path exists
+                # Update model information display
+                self.model_name = model_name.upper()
+                self.vendor_code = vendor_code.upper()
+                self.eo_number = eo_number.upper()
+                self.special_data = special_data.upper()
+                self.initial_id = initial_id.upper()
+                self.supplier_section = supplier_section.upper()
+                
+                # Update part name and number label
+                part_label = f"{model_name} - {part_number}"
+                # Update your label widget here
+                
+                # Load image if exists
                 if image_path and os.path.exists(image_path):
                     if self.load_image_with_path(image_path):
-                        # Place labels if positions exist
-                        if label_coordinates:  # Use label_coordinates instead of positions
+                        if label_coordinates:
                             try:
                                 coordinates = json.loads(label_coordinates)
                                 self.place_labels_from_positions(coordinates)
                             except json.JSONDecodeError:
                                 print(f"Warning: Invalid label coordinate data for part {part_number}")
-                        else:
-                            print(f"Warning: No label coordinates found for part {part_number}")
-                else:
-                    print(f"Warning: Image file not found at {image_path}")
-                    messagebox.showwarning("Warning", "Image file not found!")
+            
+            # Get specifications from TBL_MODEL_SPECIFICATION
+            spec_query = """
+            SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
+                   MS_NORMAL_MIN, MS_NORMAL_MAX
+            FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
+            ORDER BY MS_DEVICE
+            """
+            cursor.execute(spec_query, (part_number,))
+            
+            # Clear existing entries in treeview
+            self.spec_tree.delete(*self.spec_tree.get_children())
+            
+            # Insert specifications into treeview
+            for row in cursor.fetchall():
+                display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT columns
+                self.spec_tree.insert('', 'end', values=display_row)
                 
-                # Get specifications
-                spec_query = """
-                SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT, 
-                       MS_MASTER_MIN, MS_MASTER_MAX, 
-                       MS_NORMAL_MIN, MS_NORMAL_MAX
-                FROM TBL_MODEL_SPECIFICATION 
-                WHERE MS_PART_NUMBER = %s
-                """
-                
-                cursor.execute(spec_query, (part_number,))
-                
-                # Clear existing entries in treeview
-                self.spec_tree.delete(*self.spec_tree.get_children())
-                
-                # Insert retrieved data into treeview
-                for row in cursor.fetchall():
-                    display_row = list(row) + ['', '']  # Add empty ACTUAL and RESULT values
-                    self.spec_tree.insert('', 'end', values=display_row)
+                # Configure device columns visibility
+                device = row[1].upper()  # MS_DEVICE column
+                if device == 'L2':
+                    # Show L2 column
+                    pass
+                elif device == 'L3':
+                    # Show L3 column
+                    pass
+                # ... handle other device columns
+            
+            # Start monitoring process
+            self.start_monitoring()
             
             cursor.close()
             conn.close()
@@ -707,13 +692,13 @@ class EOLTesterGUI:
             self.reset_labels()
             
             image = Image.open(image_path)
-            # Get image area dimensions
-            area_width = self.image_area.winfo_width()
-            area_height = self.image_area.winfo_height()
+            # Get container dimensions
+            container_width = self.image_container.winfo_width()
+            container_height = self.image_container.winfo_height()
             
             # Calculate scaling to fit while maintaining aspect ratio
             img_width, img_height = image.size
-            scale = min(area_width/img_width, area_height/img_height)
+            scale = min(container_width/img_width, container_height/img_height)
             
             new_width = int(img_width * scale)
             new_height = int(img_height * scale)
@@ -724,19 +709,18 @@ class EOLTesterGUI:
             
             if self.image_label:
                 self.image_label.destroy()
-                
+            
+            # Create new image label
             self.image_label = tk.Label(self.image_area, image=photo, bg="white")
             self.image_label.image = photo
             
-            # Center the image
-            x = (area_width - new_width) // 2
-            y = (area_height - new_height) // 2
+            # Center the image in the container
+            x = (container_width - new_width) // 2
+            y = (container_height - new_height) // 2
             self.image_label.place(x=x, y=y)
             
             # Enable label dragging
             self.image_loaded = True
-            
-            # Store image path
             self.current_image_path = image_path
             
             return True
@@ -762,14 +746,12 @@ class EOLTesterGUI:
                 label.destroy()
             self.placed_labels = {}
             
+            # Create new labels at saved positions
             for label_text, pos_data in positions.items():
-                # Validate coordinates
-                x = min(max(0, pos_data['x']), image_area_width - 50)
-                y = min(max(0, pos_data['y']), image_area_height - 30)
-                
-                # Create new label with matching style from original labels
+                # Get original label style
                 original_label = self.label_widgets.get(label_text)
                 if original_label:
+                    # Create new label with same style
                     new_label = tk.Label(self.image_area,
                                        text=label_text,
                                        bg=original_label.cget('bg'),
@@ -779,20 +761,30 @@ class EOLTesterGUI:
                                        relief="raised",
                                        font=("Arial", 10, "bold"))
                     
-                    # Place at saved coordinates
+                    # Validate and adjust coordinates to ensure they're within bounds
+                    x = min(max(0, pos_data['x']), image_area_width - new_label.winfo_reqwidth())
+                    y = min(max(0, pos_data['y']), image_area_height - new_label.winfo_reqheight())
+                    
+                    # Place the label
                     new_label.place(x=x, y=y)
+                    
+                    # Make the label draggable
+                    new_label.bind("<Button-1>", self.start_label_drag)
+                    new_label.bind("<B1-Motion>", self.on_label_drag)
+                    new_label.bind("<ButtonRelease-1>", self.stop_label_drag)
+                    new_label.configure(cursor="hand2")
                     
                     # Store the placed label
                     self.placed_labels[label_text] = new_label
             
-            # Restore original labels to their container
+            # Show original labels in the bottom panel
             for label in self.label_widgets.values():
                 label.pack(side="left", padx=2, expand=True)
             
         except Exception as e:
             print(f"Error placing labels: {e}")
             messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
-            # Ensure original labels are restored even if there's an error
+            # Restore original labels
             for label in self.label_widgets.values():
                 label.pack(side="left", padx=2, expand=True)
 
@@ -876,6 +868,12 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+
+    def start_monitoring(self):
+        """Start monitoring sensors and PLC status"""
+        self.message_label.configure(text="Please Validate NG Cable...")
+        self.starting_ng_cable_validation = True
+        # Start your monitoring threads/processes here
 
 def main():
     root = tk.Tk()

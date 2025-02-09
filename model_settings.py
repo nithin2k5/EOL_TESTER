@@ -362,7 +362,7 @@ class WorkspaceApp:
             colspan = field[4] if len(field) > 4 else 1
             
             # Create entry directly without label
-            entry = tk.Entry(left_frame, width=30)
+            entry = tk.Entry(left_frame, width=20)
             entry.insert(0, placeholder)
             entry.config(fg='gray')
             entry.grid(row=row, column=col, columnspan=colspan, sticky='ew', padx=5, pady=5)
