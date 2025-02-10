@@ -322,6 +322,10 @@ class WorkspaceApp:
         main_container = tk.Frame(second_quadrant, bg='white')
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
+        # Load combobox options from files
+        plc_options = self.load_plc_options()
+        barcode_options = self.load_barcode_options()
+        
         # Create header label "PART DETAILS"
         header_label = tk.Label(main_container, 
                               text="PART DETAILS",
@@ -352,30 +356,44 @@ class WorkspaceApp:
             ("Model & Part Name", "Enter model & part name", 4, 0, 2),
             ("Image File Path", "No image selected", 5, 0, 2),
             ("ALC Code", "Enter ALC code", 6, 0),
+            ("PLC Address", plc_options, 7, 0),  # Using loaded PLC options
+            ("Barcode Type", barcode_options, 7, 1),  # Using loaded barcode options
         ]
         
         self.textboxes = {}
+        self.second_quad_combos = {}  # Dictionary to store comboboxes
         
-        # Create textboxes for each field
+        # Create textboxes and comboboxes for each field
         for field in fields:
             label_text, placeholder, row, col = field[:4]
             colspan = field[4] if len(field) > 4 else 1
             
-            # Create entry directly without label
-            entry = tk.Entry(left_frame, width=20)
-            entry.insert(0, placeholder)
-            entry.config(fg='gray')
-            entry.grid(row=row, column=col, columnspan=colspan, sticky='ew', padx=5, pady=5)
-            
-            # Bind focus events
-            entry.bind('<FocusIn>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_in(e, entry, ph))
-            entry.bind('<FocusOut>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_out(e, entry, ph))
-            
-            # Make Image File Path read-only
-            if label_text == "Image File Path":
-                entry.config(state='readonly')
-            
-            self.textboxes[label_text] = entry
+            if isinstance(placeholder, list):  # If placeholder is a list, create combobox
+                combo = ttk.Combobox(left_frame, width=20, values=placeholder)
+                combo.set(f"Select {label_text}")
+                combo.grid(row=row, column=col, columnspan=colspan, sticky='ew', padx=5, pady=5)
+                self.second_quad_combos[label_text] = combo
+                
+                # Bind selection events for specific comboboxes
+                if label_text == "PLC Address":
+                    combo.bind('<<ComboboxSelected>>', self.on_plc_address_select)
+                elif label_text == "Barcode Type":
+                    combo.bind('<<ComboboxSelected>>', self.on_barcode_type_select)
+            else:  # Create regular entry
+                entry = tk.Entry(left_frame, width=20)
+                entry.insert(0, placeholder)
+                entry.config(fg='gray')
+                entry.grid(row=row, column=col, columnspan=colspan, sticky='ew', padx=5, pady=5)
+                
+                # Bind focus events for entries
+                entry.bind('<FocusIn>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_in(e, entry, ph))
+                entry.bind('<FocusOut>', lambda e, entry=entry, ph=placeholder: self.on_entry_focus_out(e, entry, ph))
+                
+                # Make Image File Path read-only
+                if label_text == "Image File Path":
+                    entry.config(state='readonly')
+                
+                self.textboxes[label_text] = entry
 
         # Configure grid weights
         left_frame.grid_columnconfigure(0, weight=1)
@@ -1149,23 +1167,13 @@ class WorkspaceApp:
             spec_data = tuple(entry.get() for entry in self.spec_entries.values())
             
             # Collect data from second quadrant with safe defaults
-            plc_address = ""
-            barcode_label_code = ""
-            barcode_type = ""
-            supplier_section = ""
+            plc_address = self.second_quad_combos.get("PLC Address", ttk.Combobox()).get()
+            barcode_type = self.second_quad_combos.get("Barcode Type", ttk.Combobox()).get()
             
-            # Safely get combo values if they exist
-            if hasattr(self, 'second_quad_combos'):
-                plc_address = self.second_quad_combos.get("PLC Address", ttk.Combobox()).get()
-                barcode_label_code = self.second_quad_combos.get("Barcode Label Code", ttk.Combobox()).get()
-                barcode_type = self.second_quad_combos.get("Barcode Type", ttk.Combobox()).get()
-            
-            # Safely get supplier section text if it exists
-            if hasattr(self, 'second_quad_supplier'):
-                try:
-                    supplier_section = self.second_quad_supplier.get("1.0", "end-1c")
-                except:
-                    supplier_section = ""
+            # Get supplier section from textboxes instead of text widget
+            supplier_section = self.textboxes.get("Supplier Section", tk.Entry()).get()
+            if supplier_section == "Enter supplier details":
+                supplier_section = ""
             
             # Collect other data
             part_number = self.textboxes["Part Number"].get()
@@ -1178,8 +1186,8 @@ class WorkspaceApp:
             image_path = self.textboxes["Image File Path"].get()
             
             master_data = (
-                part_number, model_name, alc_code, plc_address, barcode_label_code, 
-                image_path, 0, barcode_type, vendor_code, eo_number, special_data, 
+                part_number, model_name, alc_code, plc_address, barcode_type, 
+                image_path, vendor_code, eo_number, special_data, 
                 initial_id, supplier_section, 'User', datetime.now(), True, 'User', datetime.now()
             )
             
@@ -1274,9 +1282,6 @@ class WorkspaceApp:
         # Clear second quadrant comboboxes
         for combo in self.second_quad_combos.values():
             combo.set('')
-        
-        # Clear second quadrant supplier section
-        self.second_quad_supplier.delete("1.0", tk.END)
         
         # Clear textboxes
         for key, entry in self.textboxes.items():
@@ -1378,6 +1383,105 @@ class WorkspaceApp:
             text_widget.delete("1.0", tk.END)
             text_widget.insert("1.0", placeholder)
             text_widget.config(fg='gray')
+
+    def on_plc_address_select(self, event):
+        """Handle PLC Address combobox selection"""
+        try:
+            # Read PLC register data from file
+            with open('/Users/nithink/Developer/python/EOL_TESTER/plc_register.txt', 'r') as file:
+                plc_data = file.read()
+            
+            # Create popup window to display data
+            popup = tk.Toplevel(self.root)
+            popup.title("PLC Register Data")
+            popup.geometry("400x300")
+            
+            # Add text widget to display data
+            text_widget = tk.Text(popup, wrap=tk.WORD)
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Insert the data
+            text_widget.insert('1.0', plc_data)
+            text_widget.config(state='disabled')  # Make read-only
+            
+            # Add scrollbar
+            scrollbar = ttk.Scrollbar(popup, orient='vertical', command=text_widget.yview)
+            scrollbar.pack(side='right', fill='y')
+            text_widget.config(yscrollcommand=scrollbar.set)
+            
+        except FileNotFoundError:
+            messagebox.showerror("Error", "plc_register.txt file not found!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error reading PLC register data: {str(e)}")
+
+    def on_barcode_type_select(self, event):
+        """Handle Barcode Type combobox selection"""
+        try:
+            # Read barcode filename data from file
+            with open('/Users/nithink/Developer/python/EOL_TESTER/barcodeprintfilename.txt', 'r') as file:
+                barcode_data = file.read().strip()
+            
+            # Split data by commas
+            barcode_options = [opt.strip() for opt in barcode_data.split(',')]
+            
+            # Create popup window to display data
+            popup = tk.Toplevel(self.root)
+            popup.title("Barcode Print Filenames")
+            popup.geometry("400x300")
+            
+            # Add listbox to display data
+            listbox = tk.Listbox(popup)
+            listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Insert the options
+            for option in barcode_options:
+                listbox.insert(tk.END, option)
+            
+            # Add scrollbar
+            scrollbar = ttk.Scrollbar(popup, orient='vertical', command=listbox.yview)
+            scrollbar.pack(side='right', fill='y')
+            listbox.config(yscrollcommand=scrollbar.set)
+            
+        except FileNotFoundError:
+            messagebox.showerror("Error", "barcodeprintfilename.txt file not found!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error reading barcode filename data: {str(e)}")
+
+    def load_plc_options(self):
+        """Load PLC address options from plc_register.txt"""
+        try:
+            # Use absolute path to the file
+            file_path = "/Users/nithink/Developer/python/EOL_TESTER/PLC_on_register.txt"
+            with open(file_path, 'r') as file:
+                # Read content and split by commas
+                content = file.read().strip()
+                options = [opt.strip() for opt in content.split(',') if opt.strip()]
+                print(f"Loaded PLC options: {options}")  # Debug print
+                return options
+        except FileNotFoundError:
+            print(f"Warning: plc_register.txt not found at {file_path}")
+            return []
+        except Exception as e:
+            print(f"Error reading PLC options: {str(e)}")
+            return []
+
+    def load_barcode_options(self):
+        """Load barcode options from barcodeprintfilename.txt"""
+        try:
+            # Use absolute path to the file
+            file_path = "/Users/nithink/Developer/python/EOL_TESTER/barcodeprintfilenames.txt"
+            with open(file_path, 'r') as file:
+                # Read content and split by commas
+                content = file.read().strip()
+                options = [opt.strip() for opt in content.split(',') if opt.strip()]
+                print(f"Loaded barcode options: {options}")  # Debug print
+                return options
+        except FileNotFoundError:
+            print(f"Warning: barcodeprintfilename.txt not found at {file_path}")
+            return []
+        except Exception as e:
+            print(f"Error reading barcode options: {str(e)}")
+            return []
 
 def main():
     root = tk.Tk()

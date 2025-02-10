@@ -2,11 +2,19 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import configparser
 import os
+from model_settings import WorkspaceApp  # Import ModelSettings
+from test_console import EOLTesterGUI    # Import TestConsole
+from comport_settings import ComPortSettings  # Add this import
+from dataconsole import DataConsole  # Add this import
+from adminconsole import AdminConsole  # Add this import
+# Add this import
+
 
 class MainConsole(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("EOL Tester")
+        self.state('zoomed')  # Start maximized
         self.setup_ui()
         
     def setup_ui(self):
@@ -41,78 +49,87 @@ class MainConsole(tk.Tk):
         
     def load_settings(self):
         """Load application settings and validate machine ID"""
-        config = configparser.ConfigParser()
-        config.read('config.ini')
-        
-        try:
-            machine_id = config.get('DEFAULT', 'MACHINE_ID', fallback=None)
-            valid_machine_id = machine_id is not None and len(machine_id) == 3
-        except:
-            valid_machine_id = False
-            
-        # Enable/disable buttons based on machine ID validation
+        # Remove the machine ID validation since we want all buttons enabled
         for btn in (self.btn_com_settings, self.btn_settings, 
-                   self.btn_test, self.btn_work_data):
-            btn.config(state='normal' if valid_machine_id else 'disabled')
+                   self.btn_test, self.btn_work_data, self.btn_admin):
+            btn.config(state='normal')
             
     def com_port_settings_click(self):
+        settings_window = tk.Toplevel(self)
+        settings_window.state('zoomed')  # Make it full screen
+        app = ComPortSettings(settings_window)
+        settings_window.grab_set()  # Make the window modal
         self.withdraw()  # Hide main window
-        try:
-            com_settings = COMPortSettings()
-            com_settings.mainloop()
-        finally:
+        
+        def on_settings_close():
+            settings_window.destroy()
             self.deiconify()  # Show main window again
             
+        settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
+            
     def settings_click(self):
-        self.withdraw()
-        try:
-            model_settings = ModelSettings()
-            model_settings.mainloop()
-        finally:
-            self.deiconify()
+        settings_window = tk.Toplevel(self)
+        settings_window.state('zoomed')  # Make it full screen
+        app = WorkspaceApp(settings_window)
+        settings_window.grab_set()  # Make the window modal
+        self.withdraw()  # Hide main window
+        
+        def on_settings_close():
+            settings_window.destroy()
+            self.deiconify()  # Show main window again
+            
+        settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
             
     def test_click(self):
-        self.withdraw()
-        try:
-            test_console = TestConsole()
-            test_console.mainloop()
-        finally:
-            self.deiconify()
+        test_window = tk.Toplevel(self)
+        test_window.state('zoomed')  # Make it full screen
+        app = EOLTesterGUI(test_window)
+        test_window.grab_set()  # Make the window modal
+        self.withdraw()  # Hide main window
+        
+        def on_test_close():
+            test_window.destroy()
+            self.deiconify()  # Show main window again
+            
+        test_window.protocol("WM_DELETE_WINDOW", on_test_close)
             
     def work_data_click(self):
-        self.withdraw()
-        try:
-            data_console = DataConsole()
-            data_console.mainloop()
-        finally:
-            self.deiconify()
-            
+        # Open work data window
+        work_data_window = tk.Toplevel(self)
+        work_data_window.title("Work Data")
+        # Add your work data window content here
+        
     def admin_click(self):
-        self.withdraw()
-        try:
-            admin_console = AdminConsole()
-            admin_console.mainloop()
-            self.load_settings()  # Reload settings after admin console closes
-        finally:
-            self.deiconify()
+        admin_window = tk.Toplevel(self)
+        admin_window.state('zoomed')  # Make it full screen
+        app = AdminConsole(admin_window)
+        admin_window.grab_set()  # Make the window modal
+        self.withdraw()  # Hide main window
+        
+        def on_admin_close():
+            admin_window.destroy()
+            self.deiconify()  # Show main window again
             
+        admin_window.protocol("WM_DELETE_WINDOW", on_admin_close)
+
     def user_manual_click(self):
-        messagebox.showinfo("Info", "User Manual coming soon...")
-        
+        messagebox.showinfo("User Manual", "User manual functionality will be implemented here.")
+
     def support_click(self):
-        support_info = SupportInfo()
-        support_info.mainloop()
+        support_window = tk.Toplevel(self)
+        support_window.state('zoomed')  # Make it full screen
+        app = SupportInfo(support_window)
+        support_window.grab_set()  # Make the window modal
+        self.withdraw()  # Hide main window
         
+        def on_support_close():
+            support_window.destroy()
+            self.deiconify()  # Show main window again
+            
+        support_window.protocol("WM_DELETE_WINDOW", on_support_close)
+
     def exit_click(self):
         self.quit()
-
-# These would be defined in separate files
-class COMPortSettings(tk.Toplevel): pass
-class ModelSettings(tk.Toplevel): pass
-class TestConsole(tk.Toplevel): pass
-class DataConsole(tk.Toplevel): pass
-class AdminConsole(tk.Toplevel): pass
-class SupportInfo(tk.Toplevel): pass
 
 if __name__ == "__main__":
     app = MainConsole()
