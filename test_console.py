@@ -89,64 +89,40 @@ class EOLTesterGUI:
             quadrant.configure(width=min_quadrant_size[0], height=min_quadrant_size[1])
 
     def create_first_quadrant(self):
-        """Create the first quadrant with layout matching the image."""
-        # Set exact size to match model_settings.py
+        """Create the image display quadrant."""
         q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        q1.grid_propagate(False)  # Prevent frame from resizing
-        q1.pack_propagate(False)  # Prevent pack from resizing
-        q1.configure(width=500, height=400)  # Fixed size
         
-        # Model header (reduced height to match model_settings.py)
-        self.model_header = tk.Label(q1, 
-                              text="MODEL NAME / PART NAME - PART NUMBER",
-                              bg="navy", fg="white", 
-                              font=("Arial", 12, "bold"),
-                              height=1)  # Fixed height
-        self.model_header.pack(fill="x")
+        # Create a frame to hold the image
+        self.image_frame = tk.Frame(q1, bg='white')
+        self.image_frame.place(relwidth=1, relheight=0.9)  # Reduced height to make room for labels
         
-        # Create image container with white background and fixed size
-        self.image_container = tk.Frame(q1, bg="white")
-        self.image_container.pack(fill="both", expand=True, padx=2, pady=2)
-        self.image_container.pack_propagate(False)  # Prevent resizing
+        # Create initial placeholder
+        self.image_label = tk.Label(self.image_frame, 
+                                  text="No image loaded",
+                                  bg='white',
+                                  font=('Arial', 12))
+        self.image_label.place(relx=0.5, rely=0.5, anchor='center')
         
-        # Create frame to hold the image with fixed size
-        self.image_frame = tk.Frame(self.image_container, bg='white')
-        self.image_frame.place(relwidth=1, relheight=1)
+        # Create label container at the bottom
+        self.label_frame = tk.Frame(q1, bg='white')
+        self.label_frame.place(relx=0, rely=0.9, relwidth=1, relheight=0.1)
         
-        # Create image label with fixed size
-        self.image_label = tk.Label(self.image_frame, bg="white")
-        self.image_label.pack(fill="both", expand=True)
+        # Create labels L1-L15
+        self.label_widgets = {}
+        for i in range(1, 16):
+            label = tk.Label(self.label_frame,
+                            text=f"L{i}",
+                            bg="yellow",
+                            fg="black",
+                            font=("Arial", 8, "bold"),
+                            width=4,
+                            relief="raised",
+                            borderwidth=1)
+            label.pack(side="left", padx=1)
+            self.label_widgets[f"L{i}"] = label
         
-        # Create frame for L1-L15 labels with fixed height
-        self.label_frame = tk.Frame(q1, height=30)  # Fixed height
-        self.label_frame.pack(fill="x", side="bottom", pady=(0, 2))
-        self.label_frame.pack_propagate(False)  # Prevent resizing
-        
-        # Create bottom status frame with fixed height
-        status_frame = tk.Frame(q1, height=40)  # Fixed height
-        status_frame.pack(fill="x", side="bottom", pady=(0, 2))
-        status_frame.pack_propagate(False)  # Prevent resizing
-        
-        # Create status buttons
-        buttons = [
-            ("AUTO", "#00BFFF"),
-            ("HOME", "#00BFFF"),
-            ("1st PULL\n(Load Test)", "#00BFFF"),
-            ("2nd PULL\n(Length Test)", "#00BFFF"),
-            ("TEST\nRESULT", "#00BFFF")
-        ]
-        
-        for text, color in buttons:
-            btn = tk.Label(status_frame,
-                          text=text,
-                          bg=color,
-                          fg="black",
-                          font=("Arial", 10, "bold"),
-                          relief="raised",
-                          borderwidth=1,
-                          padx=5,
-                          pady=3)
-            btn.pack(side="left", fill="x", expand=True, padx=2)
+        # Initialize drag and drop functionality
+        self.enable_label_dragging()
         
         return q1
 
@@ -431,19 +407,50 @@ class EOLTesterGUI:
         label = event.widget
         label._drag_start_x = event.x
         label._drag_start_y = event.y
+        # Raise the label to the top of the stacking order
+        label.lift()
+        # Store original position
+        label._original_position = (label.winfo_x(), label.winfo_y())
 
     def on_label_drag(self, event):
         """Handle label dragging."""
         label = event.widget
+        # Calculate new position
         x = label.winfo_x() + event.x - label._drag_start_x
         y = label.winfo_y() + event.y - label._drag_start_y
-        label.place(x=x, y=y)
+        
+        # Get image frame boundaries
+        image_frame = self.image_frame
+        frame_width = image_frame.winfo_width()
+        frame_height = image_frame.winfo_height()
+        
+        # Keep label within image frame boundaries
+        x = max(0, min(x, frame_width - label.winfo_width()))
+        y = max(0, min(y, frame_height - label.winfo_height()))
+        
+        # Move the label
+        label.place(in_=image_frame, x=x, y=y)
 
     def stop_label_drag(self, event):
         """Handle end of label drag."""
         label = event.widget
-        # Save the new position
-        print(f"Label {label.cget('text')} dropped at x={label.winfo_x()}, y={label.winfo_y()}")
+        
+        # Get label position relative to image frame
+        x = label.winfo_x()
+        y = label.winfo_y()
+        
+        # Check if label is within image frame bounds
+        if (0 <= x <= self.image_frame.winfo_width() and 
+            0 <= y <= self.image_frame.winfo_height()):
+            # Save the new position
+            self.label_positions[label.cget('text')] = (x, y)
+            print(f"Label {label.cget('text')} dropped at x={x}, y={y}")
+        else:
+            # Return label to label frame if dropped outside image
+            label.place_forget()
+            label.pack(in_=self.label_frame, side="left", padx=1)
+            if label.cget('text') in self.label_positions:
+                del self.label_positions[label.cget('text')]
 
     # Button command methods
     def auto_command(self):
@@ -467,49 +474,53 @@ class EOLTesterGUI:
     def alc_code_command(self):
         messagebox.showinfo("ALC Code", "Opening ALC Code dialog")
 
-    def load_image(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp")]
-        )
+    def load_image(self, file_path=None):
+        """Load and display an image in the first quadrant."""
+        if not file_path:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.ico")]
+            )
+        
         if file_path:
             try:
-                # Reset any existing label positions
-                self.disable_label_dragging()
-                self.label_positions.clear()
-                
+                # Load the image
                 image = Image.open(file_path)
-                # Get image area dimensions
-                area_width = self.image_label.winfo_width()
-                area_height = self.image_label.winfo_height()
                 
-                # Calculate scaling to fit while maintaining aspect ratio
-                img_width, img_height = image.size
-                scale = min(area_width/img_width, area_height/img_height)
+                # Get the exact quadrant dimensions
+                quad_width = self.image_frame.winfo_width()
+                quad_height = self.image_frame.winfo_height()
                 
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
+                # Resize image to exactly match quadrant dimensions
+                resized_image = image.resize((quad_width, quad_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(resized_image)
                 
-                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
-                
-                if self.image_label:
+                # Remove old image label if it exists
+                if hasattr(self, 'image_label'):
                     self.image_label.destroy()
-                    
-                self.image_label = tk.Label(self.image_container, image=photo, bg="white")
-                self.image_label.image = photo
                 
-                # Center the image
-                x = (area_width - new_width) // 2
-                y = (area_height - new_height) // 2
-                self.image_label.place(x=x, y=y)
+                # Create new image label that fills the entire frame
+                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
+                self.image_label.image = photo  # Keep a reference
+                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
                 
-                # Enable label dragging only after successful image load
-                self.image_loaded = True
-                self.enable_label_dragging()
+                # Store image dimensions
+                self.image_dimensions = {
+                    'width': quad_width,
+                    'height': quad_height,
+                    'x_offset': 0,
+                    'y_offset': 0
+                }
+                
+                # Store the image path
+                self.current_image_path = file_path
+                
+                return True
                 
             except Exception as e:
-                self.image_loaded = False
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
+                return False
+        
+        return False
 
     def setup_barcode_listener(self):
         """Alternative approach using tkinter bindings"""
@@ -531,7 +542,7 @@ class EOLTesterGUI:
             self.retrieve_part_specifications(part_number)
 
     def retrieve_part_specifications(self, part_number):
-        """Retrieve specifications and image for a given part number."""
+        """Retrieve specifications and label coordinates from database."""
         try:
             conn = mysql.connector.connect(
                 host="localhost",
@@ -553,20 +564,24 @@ class EOLTesterGUI:
             if result:
                 image_path, label_coordinates, model_name = result
                 
+                # Update model header
+                if model_name:
+                    self.model_header.config(text=f"{model_name} - {part_number}")
+                
                 # Store current part number
                 self.current_part_number = part_number
                 
-                # Load image if path exists
+                # Load image first
                 if image_path and os.path.exists(image_path):
                     if self.load_image_with_path(image_path):
+                        # After image is loaded, place labels using database coordinates
                         if label_coordinates:
                             try:
-                                # Parse the JSON coordinates data
                                 coordinates_data = json.loads(label_coordinates)
-                                # Place labels according to exact coordinates
                                 self.place_labels_from_positions(coordinates_data)
                             except json.JSONDecodeError as e:
                                 print(f"Warning: Invalid label coordinate data: {e}")
+                                messagebox.showwarning("Warning", "Invalid label coordinate data in database")
                 
                 # Get specifications
                 spec_query = """
@@ -583,7 +598,7 @@ class EOLTesterGUI:
                 cursor.execute(spec_query, (part_number,))
                 specs = cursor.fetchall()
                 
-                # Clear and populate treeview
+                # Update specifications tree
                 self.spec_tree.delete(*self.spec_tree.get_children())
                 for index, spec in enumerate(specs, start=1):
                     values = (index,) + spec
@@ -604,24 +619,24 @@ class EOLTesterGUI:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_image_with_path(self, image_path):
-        """Load image from path with exact sizing to match model_settings.py"""
+        """Load and place image at exact location matching model_settings."""
         try:
-            # Reset any existing label positions
-            self.reset_labels()
-            
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
             image = Image.open(image_path)
             
-            # Get exact container dimensions
-            container_width = 500  # Fixed width
-            container_height = 300  # Fixed height for image area
+            # Fixed dimensions matching model_settings.py
+            image_area_width = 498  # 500 - 2px border
+            image_area_height = 290  # Fixed height for image area
             
             # Calculate scaling to fit while maintaining aspect ratio
             img_width, img_height = image.size
-            scale = min(container_width/img_width, container_height/img_height)
+            width_ratio = image_area_width / img_width
+            height_ratio = image_area_height / img_height
+            scale = min(width_ratio, height_ratio)
             
+            # Calculate new dimensions
             new_width = int(img_width * scale)
             new_height = int(img_height * scale)
             
@@ -629,20 +644,26 @@ class EOLTesterGUI:
             resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
             
+            # Clear existing image label if any
             if self.image_label:
                 self.image_label.destroy()
             
-            self.image_label = tk.Label(self.image_container, image=photo, bg="white")
+            # Create new image label
+            self.image_label = tk.Label(self.image_frame, 
+                                      image=photo, 
+                                      bg="white")
             self.image_label.image = photo
             
-            # Center the image in the fixed space
-            x_pos = (container_width - new_width) // 2
-            y_pos = (container_height - new_height) // 2
+            # Calculate center position
+            x_pos = (image_area_width - new_width) // 2
+            y_pos = (image_area_height - new_height) // 2
+            
+            # Place image at exact center position
             self.image_label.place(x=x_pos, y=y_pos)
             
             self.image_loaded = True
             self.current_image_path = image_path
-            print(f"Successfully loaded image: {image_path}")
+            print(f"Image loaded and placed at x={x_pos}, y={y_pos} with dimensions {new_width}x{new_height}")
             return True
             
         except Exception as e:
@@ -652,8 +673,9 @@ class EOLTesterGUI:
             return False
 
     def place_labels_from_positions(self, coordinates_data):
+        """Place labels exactly according to database coordinates."""
         try:
-            # Clear existing labels
+            # Clear any existing placed labels
             for label in getattr(self, 'placed_labels', {}).values():
                 label.destroy()
             self.placed_labels = {}
@@ -668,8 +690,8 @@ class EOLTesterGUI:
                 label_text = f"L{i}"
                 
                 if label_num in coordinates_data:
-                    # Create label with exact same properties as model_settings.py
-                    new_label = tk.Label(self.image_container,  # Use same parent as model_settings
+                    # Create label with exact same properties as model_settings
+                    new_label = tk.Label(self.image_frame,  # Use image_frame as parent
                                        text=label_text,
                                        bg="yellow",
                                        fg="black",
@@ -678,17 +700,17 @@ class EOLTesterGUI:
                                        relief="raised",
                                        borderwidth=2)
                     
-                    # Use exact coordinates from database
-                    x = float(coordinates_data[label_num].get('x', 0))
-                    y = float(coordinates_data[label_num].get('y', 0))
+                    # Get exact coordinates from database
+                    x = coordinates_data[label_num].get('x')
+                    y = coordinates_data[label_num].get('y')
                     
-                    # Place label at exact position
-                    new_label.place(x=x, y=y)
-                    
-                    self.placed_labels[label_text] = new_label
-                    print(f"Placed {label_text} at x={x}, y={y}")  # Debug info
+                    if x is not None and y is not None:
+                        # Place label at exact database coordinates
+                        new_label.place(x=int(x), y=int(y))
+                        self.placed_labels[label_text] = new_label
+                        print(f"Placed {label_text} at exact coordinates x={x}, y={y}")
                 else:
-                    # Bottom frame labels
+                    # Create bottom label for unplaced labels
                     bottom_label = tk.Label(self.label_frame,
                                           text=label_text,
                                           bg="yellow",

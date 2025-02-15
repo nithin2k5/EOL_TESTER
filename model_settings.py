@@ -791,40 +791,45 @@ class WorkspaceApp:
         
         if file_path:
             try:
+                # Get the first quadrant
                 first_quadrant = self.quadrants[0]
                 
-                # Create a frame to hold the image and labels
+                # Create a frame to hold the image
                 if not hasattr(self, 'image_frame'):
                     self.image_frame = tk.Frame(first_quadrant, bg='white')
-                    self.image_frame.place(relwidth=1, relheight=1)
+                    self.image_frame.place(relwidth=1, relheight=1)  # Use place with relative dimensions
                 
+                # Load the image
                 image = Image.open(file_path)
                 
+                # Get the exact quadrant dimensions
                 quad_width = first_quadrant.winfo_width()
                 quad_height = first_quadrant.winfo_height()
                 
-                width_ratio = quad_width / image.size[0]
-                height_ratio = quad_height / image.size[1]
-                scale_factor = min(width_ratio, height_ratio)
-                
-                new_width = int(image.size[0] * scale_factor)
-                new_height = int(image.size[1] * scale_factor)
-                
-                resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                # Resize image to exactly match quadrant dimensions
+                resized_image = image.resize((quad_width, quad_height), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(resized_image)
                 
-                if self.image_label:
+                # Remove old image label if it exists
+                if hasattr(self, 'image_label') and self.image_label:
                     self.image_label.destroy()
                 
+                # Create new image label that fills the entire frame
                 self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
-                self.image_label.image = photo
+                self.image_label.image = photo  # Keep a reference
+                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)  # Fill entire frame
                 
-                x_pos = (quad_width - new_width) // 2
-                y_pos = (quad_height - new_height) // 2
-                self.image_label.place(x=x_pos, y=y_pos)
+                # Store image dimensions
+                self.image_dimensions = {
+                    'width': quad_width,
+                    'height': quad_height,
+                    'x_offset': 0,
+                    'y_offset': 0
+                }
                 
+                # Update the image path and set flag
                 self.update_image_path(file_path)
-                self.image_uploaded = True  # Set flag to True after image upload
+                self.image_uploaded = True
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Error loading image: {str(e)}")
