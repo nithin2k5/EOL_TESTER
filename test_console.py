@@ -70,99 +70,83 @@ class EOLTesterGUI:
         self.workspace.grid_rowconfigure(0, weight=1)     # First row
         self.workspace.grid_rowconfigure(1, weight=1)     # Second row
         
-        # Create and configure all quadrants
+        # Set minimum size for workspace
+        min_quadrant_size = (500, 400)  # Match model_settings.py dimensions
+        
+        # Create and configure all quadrants with minimum size
         self.q1 = self.create_first_quadrant()
         self.q2 = self.create_second_quadrant()
         self.q3 = self.create_third_quadrant()
         self.q4 = self.create_fourth_quadrant()
         
-        # Place quadrants with equal spacing
+        # Place quadrants with equal spacing and minimum size
         quadrants = [self.q1, self.q2, self.q3, self.q4]
         positions = [(0,0), (0,1), (1,0), (1,1)]
         
         for quadrant, (row, col) in zip(quadrants, positions):
             quadrant.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+            quadrant.grid_propagate(False)  # Prevent resizing
+            quadrant.configure(width=min_quadrant_size[0], height=min_quadrant_size[1])
 
     def create_first_quadrant(self):
+        """Create the first quadrant with layout matching the image."""
+        # Set exact size to match model_settings.py
         q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        q1.grid_propagate(False)  # Prevent frame from resizing
+        q1.pack_propagate(False)  # Prevent pack from resizing
+        q1.configure(width=500, height=400)  # Fixed size
         
-        # Model header
-        model_header = tk.Label(q1, 
+        # Model header (reduced height to match model_settings.py)
+        self.model_header = tk.Label(q1, 
                               text="MODEL NAME / PART NAME - PART NUMBER",
                               bg="navy", fg="white", 
-                              font=("Arial", 12, "bold"))
-        model_header.pack(fill="x")
+                              font=("Arial", 12, "bold"),
+                              height=1)  # Fixed height
+        self.model_header.pack(fill="x")
         
-        # Create main content frame
-        content_frame = tk.Frame(q1)
-        content_frame.pack(fill="both", expand=True)
+        # Create image container with white background and fixed size
+        self.image_container = tk.Frame(q1, bg="white")
+        self.image_container.pack(fill="both", expand=True, padx=2, pady=2)
+        self.image_container.pack_propagate(False)  # Prevent resizing
         
-        # Configure grid weights to maintain image size
-        content_frame.grid_columnconfigure(0, weight=1)
-        content_frame.grid_rowconfigure(0, weight=1)  # Image area
-        content_frame.grid_rowconfigure(1, weight=0)  # L0-L15 labels
-        content_frame.grid_rowconfigure(2, weight=0)  # Test status labels
+        # Create frame to hold the image with fixed size
+        self.image_frame = tk.Frame(self.image_container, bg='white')
+        self.image_frame.place(relwidth=1, relheight=1)
         
-        # Create fixed size image area container with border
-        self.image_container = tk.Frame(content_frame, relief="solid", borderwidth=1)
-        self.image_container.grid(row=0, column=0, sticky="nsew", pady=5)
+        # Create image label with fixed size
+        self.image_label = tk.Label(self.image_frame, bg="white")
+        self.image_label.pack(fill="both", expand=True)
         
-        # Image area with white background
-        self.image_area = tk.Frame(self.image_container, bg="white")
-        self.image_area.place(relwidth=1, relheight=1)
+        # Create frame for L1-L15 labels with fixed height
+        self.label_frame = tk.Frame(q1, height=30)  # Fixed height
+        self.label_frame.pack(fill="x", side="bottom", pady=(0, 2))
+        self.label_frame.pack_propagate(False)  # Prevent resizing
         
-        # Create L0-L15 labels container
-        l_labels_frame = tk.Frame(content_frame)
-        l_labels_frame.grid(row=1, column=0, sticky="ew", pady=5)
+        # Create bottom status frame with fixed height
+        status_frame = tk.Frame(q1, height=40)  # Fixed height
+        status_frame.pack(fill="x", side="bottom", pady=(0, 2))
+        status_frame.pack_propagate(False)  # Prevent resizing
         
-        # Create L0-L15 labels with distinct colors
-        self.l_label_widgets = {}  # Store L-labels separately
-        for i in range(16):
-            label = tk.Label(l_labels_frame,
-                           text=f"L{i}",
-                           font=("Arial", 8),
-                           bg="lightgray",  # Default background
-                           width=4,
-                           relief="raised")
-            label.pack(side="left", expand=True)
-            self.l_label_widgets[f"L{i}"] = label
-            
-            # Make L-labels draggable
-            label.bind("<Button-1>", self.start_label_drag)
-            label.bind("<B1-Motion>", self.on_label_drag)
-            label.bind("<ButtonRelease-1>", self.stop_label_drag)
-            label.configure(cursor="hand2")
-
-        # Add label container for test status labels
-        self.label_container = tk.Frame(content_frame)
-        self.label_container.grid(row=2, column=0, sticky="ew", pady=(0, 5))
-        
-        # Create test status labels with distinct colors
-        test_status_config = [
-            ("AUTO", "#98FB98"),      # Light green
-            ("HOME", "#FFB6C1"),      # Light pink
-            ("1st PULL\n(Load Test)", "#87CEEB"),  # Sky blue
-            ("2nd PULL\n(Length Test)", "#DDA0DD"),  # Plum
-            ("TEST\nRESULT", "#F0E68C") # Khaki
+        # Create status buttons
+        buttons = [
+            ("AUTO", "#00BFFF"),
+            ("HOME", "#00BFFF"),
+            ("1st PULL\n(Load Test)", "#00BFFF"),
+            ("2nd PULL\n(Length Test)", "#00BFFF"),
+            ("TEST\nRESULT", "#00BFFF")
         ]
         
-        for text, color in test_status_config:
-            label = tk.Label(self.label_container, 
-                            text=text,
-                            bg=color, 
-                            fg="black",
-                            width=15, 
-                            height=2,
-                            relief="raised",
-                            font=("Arial", 10, "bold"))
-            label.pack(side="left", padx=2, expand=True)
-            self.label_widgets[text] = label
-            
-            # Bind mouse events for dragging
-            label.bind("<Button-1>", self.start_label_drag)
-            label.bind("<B1-Motion>", self.on_label_drag)
-            label.bind("<ButtonRelease-1>", self.stop_label_drag)
-            label.configure(cursor="hand2")
+        for text, color in buttons:
+            btn = tk.Label(status_frame,
+                          text=text,
+                          bg=color,
+                          fg="black",
+                          font=("Arial", 10, "bold"),
+                          relief="raised",
+                          borderwidth=1,
+                          padx=5,
+                          pady=3)
+            btn.pack(side="left", fill="x", expand=True, padx=2)
         
         return q1
 
@@ -443,36 +427,23 @@ class EOLTesterGUI:
                 label.pack(side="left", padx=2)
 
     def start_label_drag(self, event):
-        """Start dragging a label"""
-        if self.image_loaded:
-            widget = event.widget
-            widget._drag_start_x = event.x
-            widget._drag_start_y = event.y
-            widget._drag_start_pos = (widget.winfo_x(), widget.winfo_y())
-            widget.lift()  # Bring label to front while dragging
+        """Start dragging a label."""
+        label = event.widget
+        label._drag_start_x = event.x
+        label._drag_start_y = event.y
 
     def on_label_drag(self, event):
-        """Handle label dragging without restrictions"""
-        if self.image_loaded:
-            widget = event.widget
-            
-            # Calculate new position
-            dx = event.x - widget._drag_start_x
-            dy = event.y - widget._drag_start_y
-            new_x = widget._drag_start_pos[0] + dx
-            new_y = widget._drag_start_pos[1] + dy
-            
-            # Move the label without boundary restrictions
-            widget.place(x=new_x, y=new_y)
+        """Handle label dragging."""
+        label = event.widget
+        x = label.winfo_x() + event.x - label._drag_start_x
+        y = label.winfo_y() + event.y - label._drag_start_y
+        label.place(x=x, y=y)
 
     def stop_label_drag(self, event):
-        """Handle the end of label dragging"""
-        if self.image_loaded:
-            widget = event.widget
-            # Save the final position
-            self.label_positions[widget.cget("text")] = (widget.winfo_x(), widget.winfo_y())
-            # Save positions to database
-            self.save_label_positions()
+        """Handle end of label drag."""
+        label = event.widget
+        # Save the new position
+        print(f"Label {label.cget('text')} dropped at x={label.winfo_x()}, y={label.winfo_y()}")
 
     # Button command methods
     def auto_command(self):
@@ -508,8 +479,8 @@ class EOLTesterGUI:
                 
                 image = Image.open(file_path)
                 # Get image area dimensions
-                area_width = self.image_area.winfo_width()
-                area_height = self.image_area.winfo_height()
+                area_width = self.image_label.winfo_width()
+                area_height = self.image_label.winfo_height()
                 
                 # Calculate scaling to fit while maintaining aspect ratio
                 img_width, img_height = image.size
@@ -524,7 +495,7 @@ class EOLTesterGUI:
                 if self.image_label:
                     self.image_label.destroy()
                     
-                self.image_label = tk.Label(self.image_area, image=photo, bg="white")
+                self.image_label = tk.Label(self.image_container, image=photo, bg="white")
                 self.image_label.image = photo
                 
                 # Center the image
@@ -572,7 +543,7 @@ class EOLTesterGUI:
             
             # Get image path and label coordinates
             master_query = """
-            SELECT MM_IMAGE_PATH, MM_LABEL_COORDINATES
+            SELECT MM_IMAGE_PATH, MM_LABEL_COORDINATES, MM_MODEL_NAME
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
@@ -580,18 +551,19 @@ class EOLTesterGUI:
             result = cursor.fetchone()
             
             if result:
-                image_path, label_coordinates = result
+                image_path, label_coordinates, model_name = result
                 
                 # Store current part number
                 self.current_part_number = part_number
                 
-                # Load image and place labels
+                # Load image if path exists
                 if image_path and os.path.exists(image_path):
                     if self.load_image_with_path(image_path):
                         if label_coordinates:
                             try:
+                                # Parse the JSON coordinates data
                                 coordinates_data = json.loads(label_coordinates)
-                                print(f"Retrieved coordinates: {coordinates_data}")
+                                # Place labels according to exact coordinates
                                 self.place_labels_from_positions(coordinates_data)
                             except json.JSONDecodeError as e:
                                 print(f"Warning: Invalid label coordinate data: {e}")
@@ -611,12 +583,9 @@ class EOLTesterGUI:
                 cursor.execute(spec_query, (part_number,))
                 specs = cursor.fetchall()
                 
-                # Clear existing entries in treeview
+                # Clear and populate treeview
                 self.spec_tree.delete(*self.spec_tree.get_children())
-                
-                # Insert specifications into treeview with custom ID
                 for index, spec in enumerate(specs, start=1):
-                    # Add the index at the beginning of the values
                     values = (index,) + spec
                     self.spec_tree.insert('', 'end', values=values)
             
@@ -635,15 +604,19 @@ class EOLTesterGUI:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_image_with_path(self, image_path):
-        """Load image from path and prepare for label placement"""
+        """Load image from path with exact sizing to match model_settings.py"""
         try:
             # Reset any existing label positions
             self.reset_labels()
             
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"Image file not found: {image_path}")
+            
             image = Image.open(image_path)
-            # Get container dimensions
-            container_width = self.image_container.winfo_width()
-            container_height = self.image_container.winfo_height()
+            
+            # Get exact container dimensions
+            container_width = 500  # Fixed width
+            container_height = 300  # Fixed height for image area
             
             # Calculate scaling to fit while maintaining aspect ratio
             img_width, img_height = image.size
@@ -653,74 +626,93 @@ class EOLTesterGUI:
             new_height = int(img_height * scale)
             
             # Resize image
-            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(image)
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(resized_image)
             
             if self.image_label:
                 self.image_label.destroy()
             
-            # Create new image label
-            self.image_label = tk.Label(self.image_area, image=photo, bg="white")
+            self.image_label = tk.Label(self.image_container, image=photo, bg="white")
             self.image_label.image = photo
             
-            # Center the image in the container
-            x = (container_width - new_width) // 2
-            y = (container_height - new_height) // 2
-            self.image_label.place(x=x, y=y)
+            # Center the image in the fixed space
+            x_pos = (container_width - new_width) // 2
+            y_pos = (container_height - new_height) // 2
+            self.image_label.place(x=x_pos, y=y_pos)
             
-            # Enable label dragging
             self.image_loaded = True
             self.current_image_path = image_path
-            
+            print(f"Successfully loaded image: {image_path}")
             return True
             
         except Exception as e:
             self.image_loaded = False
+            print(f"Error loading image: {str(e)}")
             messagebox.showerror("Error", f"Error loading image: {str(e)}")
             return False
 
     def place_labels_from_positions(self, coordinates_data):
-        """Place L1-L15 labels on the image with proper visibility."""
         try:
-            # Clear any existing placed labels
+            # Clear existing labels
             for label in getattr(self, 'placed_labels', {}).values():
                 label.destroy()
             self.placed_labels = {}
             
-            # Create labels L1 to L15 (even if not all are in coordinates_data)
+            # Clear label frame
+            for widget in self.label_frame.winfo_children():
+                widget.destroy()
+            
+            # Create labels L1-L15
             for i in range(1, 16):
                 label_num = str(i)
                 label_text = f"L{i}"
                 
-                # Create new label with better visibility
-                new_label = tk.Label(self.workspace,
-                                   text=label_text,
-                                   bg="yellow",  # Yellow background for visibility
-                                   fg="black",   # Black text
-                                   font=("Arial", 10, "bold"),
-                                   width=4,
-                                   relief="raised",
-                                   borderwidth=2)  # Added border for better visibility
-                
-                # If we have coordinates for this label, place it
                 if label_num in coordinates_data:
+                    # Create label with exact same properties as model_settings.py
+                    new_label = tk.Label(self.image_container,  # Use same parent as model_settings
+                                       text=label_text,
+                                       bg="yellow",
+                                       fg="black",
+                                       font=("Arial", 10, "bold"),
+                                       width=4,
+                                       relief="raised",
+                                       borderwidth=2)
+                    
+                    # Use exact coordinates from database
                     x = float(coordinates_data[label_num].get('x', 0))
                     y = float(coordinates_data[label_num].get('y', 0))
+                    
+                    # Place label at exact position
                     new_label.place(x=x, y=y)
                     
-                    # Make the label draggable
-                    new_label.bind("<Button-1>", self.start_label_drag)
-                    new_label.bind("<B1-Motion>", self.on_label_drag)
-                    new_label.bind("<ButtonRelease-1>", self.stop_label_drag)
-                    new_label.configure(cursor="hand2")
-                    
-                    # Store the placed label
                     self.placed_labels[label_text] = new_label
-                    print(f"Placed {label_text} at x={x}, y={y}")  # Debug print
+                    print(f"Placed {label_text} at x={x}, y={y}")  # Debug info
+                else:
+                    # Bottom frame labels
+                    bottom_label = tk.Label(self.label_frame,
+                                          text=label_text,
+                                          bg="yellow",
+                                          fg="black",
+                                          font=("Arial", 8, "bold"),
+                                          width=4,
+                                          relief="raised",
+                                          borderwidth=1)
+                    bottom_label.pack(side="left", padx=1)
 
         except Exception as e:
             print(f"Error placing labels: {e}")
             messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
+
+    def get_status_label_color(self, label_text):
+        """Return the color for each status label."""
+        colors = {
+            'HOME': '#4169E1',  # Royal Blue
+            'AUTO': '#228B22',  # Forest Green
+            'SEMI': '#DAA520',  # Goldenrod
+            'MANU': '#B8860B',  # Dark Goldenrod
+            'STOP': '#DC143C'   # Crimson
+        }
+        return colors.get(label_text, 'gray')
 
     def reset_labels(self):
         """Reset all labels to their original state"""
@@ -759,30 +751,21 @@ class EOLTesterGUI:
         messagebox.showinfo("Button 6", "Button 6 pressed")
 
     def save_label_positions(self):
-        """Save current label positions in the format:
-        {"5": {"x": 93.0, "y": 116.0, "text": "L5"}, ...}
-        """
-        if not hasattr(self, 'current_part_number'):
-            print("Warning: No part number selected")
+        """Save current label positions to database."""
+        if not hasattr(self, 'current_part_number') or not self.placed_labels:
             return
 
-        try:
-            # Convert positions to the required format
-            positions = {}
-            
-            for label_name, label in self.placed_labels.items():
-                # Extract number from label name (e.g., "L5" -> "5")
-                label_num = label_name.replace('L', '')
-                
+        positions = {}
+        for label_text, label in self.placed_labels.items():
+            if label_text.startswith('L'):
+                label_num = label_text[1:]  # Extract number from "L1", "L2", etc.
                 positions[label_num] = {
-                    'x': float(label.winfo_x()),
-                    'y': float(label.winfo_y()),
-                    'text': label_name
+                    'x': label.winfo_x(),
+                    'y': label.winfo_y(),
+                    'text': label_text
                 }
-            
-            positions_json = json.dumps(positions)
 
-            # Connect to database
+        try:
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
@@ -791,10 +774,11 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
 
-            # Update MM_LABEL_COORDINATES in TBL_MODEL_MASTER
+            # Update the database with new positions
+            positions_json = json.dumps(positions)
             update_query = """
             UPDATE TBL_MODEL_MASTER 
-            SET MM_LABEL_COORDINATES = %s
+            SET MM_LABEL_COORDINATES = %s 
             WHERE MM_PART_NUMBER = %s
             """
             cursor.execute(update_query, (positions_json, self.current_part_number))
