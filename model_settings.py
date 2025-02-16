@@ -6,6 +6,7 @@ import mysql.connector
 from datetime import datetime
 from mysql.connector import Error
 import threading
+import os
 
 class WorkspaceApp:
     def __init__(self, root):
@@ -315,6 +316,9 @@ class WorkspaceApp:
         # Load existing records
         self.update_part_list_view()
 
+        # Add binding for tree item selection
+        self.part_list_tree.bind('<<TreeviewSelect>>', self.on_tree_select)
+
     def create_second_quadrant_content(self):
         second_quadrant = self.quadrants[1]
         
@@ -418,11 +422,13 @@ class WorkspaceApp:
                            relief='flat')
             btn.pack(pady=2)
             
-            # Add command to SAVE button
+            # Update the delete button command
             if text == "SAVE":
                 btn.config(command=self.save_specifications_to_db)
             elif text == "CLEAR":
                 btn.config(command=self.clear_all_data)
+            elif text == "DELETE":
+                btn.config(command=self.delete_record)
 
     def on_entry_focus_in(self, event, entry, placeholder):
         """Handle entry field focus in - remove placeholder text"""
@@ -473,7 +479,7 @@ class WorkspaceApp:
                                  fg="black",
                                  width=10,
                                  height=2,
-                                 command=self.reset_labels)
+                                 command=self.reset_form)
         self.reset_btn.pack(side=tk.LEFT, padx=5)
         
         # Update button
@@ -1487,6 +1493,248 @@ class WorkspaceApp:
         except Exception as e:
             print(f"Error reading barcode options: {str(e)}")
             return []
+
+    def on_tree_select(self, event):
+        """Handle tree item selection"""
+        selected_items = self.part_list_tree.selection()
+        if not selected_items:
+            return
+        
+        # Get the selected item
+        item = selected_items[0]
+        part_number = self.part_list_tree.item(item)['values'][0]
+        
+        # Store the currently selected part number
+        self.current_selected_part = part_number
+        
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Fetch record from database
+            query = """
+            SELECT * FROM TBL_MODEL_MASTER 
+            WHERE MM_PART_NUMBER = %s
+            """
+            cursor.execute(query, (part_number,))
+            record = cursor.fetchone()
+            
+            if record:
+                # Clear existing data
+                self.clear_all_data()
+                
+                # Populate textboxes with data
+                self.textboxes["Part Number"].delete(0, tk.END)
+                self.textboxes["Part Number"].insert(0, record[1] or "")  # MM_PART_NUMBER
+                
+                self.textboxes["Model & Part Name"].delete(0, tk.END)
+                self.textboxes["Model & Part Name"].insert(0, record[2] or "")  # MM_MODEL_NAME
+                
+                self.textboxes["ALC Code"].delete(0, tk.END)
+                self.textboxes["ALC Code"].insert(0, record[3] or "")  # MM_ALC_CODE
+                
+                # Set PLC Address combobox
+                if "PLC Address" in self.second_quad_combos:
+                    self.second_quad_combos["PLC Address"].set(record[4] or "")  # MM_PLC_ADDRESS
+                
+                # Set Barcode Type combobox
+                if "Barcode Type" in self.second_quad_combos:
+                    self.second_quad_combos["Barcode Type"].set(record[5] or "")  # MM_BARCODE_LABEL_CODE
+                
+                # Update image path
+                self.textboxes["Image File Path"].config(state='normal')
+                self.textboxes["Image File Path"].delete(0, tk.END)
+                self.textboxes["Image File Path"].insert(0, record[6] or "")  # MM_IMAGE_PATH
+                self.textboxes["Image File Path"].config(state='readonly')
+                
+                self.textboxes["Vendor Code"].delete(0, tk.END)
+                self.textboxes["Vendor Code"].insert(0, record[7] or "")  # MM_VENDOR_CODE
+                
+                self.textboxes["EO Number"].delete(0, tk.END)
+                self.textboxes["EO Number"].insert(0, record[8] or "")  # MM_EO_NUMBER
+                
+                self.textboxes["Special Data"].delete(0, tk.END)
+                self.textboxes["Special Data"].insert(0, record[9] or "")  # MM_SPECIAL_DATA
+                
+                self.textboxes["Initial ID"].delete(0, tk.END)
+                self.textboxes["Initial ID"].insert(0, record[10] or "")  # MM_INITIAL_ID
+                
+                self.textboxes["Supplier Section"].delete(0, tk.END)
+                self.textboxes["Supplier Section"].insert(0, record[11] or "")  # MM_SUPPLIER_SECTION
+                
+                # Load label positions if they exist
+                if record[17]:  # MM_LABEL_COORDINATES
+                    self.load_label_positions(part_number)
+                
+                # Load image if path exists
+                if record[6]:  # MM_IMAGE_PATH
+                    self.load_image(record[6])
+                    
+                # Load specifications
+                self.load_specifications(part_number)
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to load record: {err}")
+
+    def load_image(self, image_path):
+        """Load image from path"""
+        try:
+            if os.path.exists(image_path):
+                # Get the first quadrant
+                first_quadrant = self.quadrants[0]
+                
+                # Create a frame to hold the image if it doesn't exist
+                if not hasattr(self, 'image_frame'):
+                    self.image_frame = tk.Frame(first_quadrant, bg='white')
+                    self.image_frame.place(relwidth=1, relheight=1)
+                
+                # Load and resize the image
+                image = Image.open(image_path)
+                quad_width = first_quadrant.winfo_width()
+                quad_height = first_quadrant.winfo_height()
+                resized_image = image.resize((quad_width, quad_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(resized_image)
+                
+                # Remove old image label if it exists
+                if hasattr(self, 'image_label') and self.image_label:
+                    self.image_label.destroy()
+                
+                # Create new image label
+                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
+                self.image_label.image = photo  # Keep a reference
+                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
+                
+                # Update image path and flag
+                self.update_image_path(image_path)
+                self.image_uploaded = True
+                
+            else:
+                messagebox.showwarning("Warning", f"Image file not found: {image_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load image: {e}")
+
+    def load_specifications(self, part_number):
+        """Load specifications for the selected part"""
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            query = """
+            SELECT * FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
+            """
+            cursor.execute(query, (part_number,))
+            specs = cursor.fetchall()
+            
+            # Clear existing specs
+            for item in self.spec_tree.get_children():
+                self.spec_tree.delete(item)
+            
+            # Insert specifications into tree
+            for spec in specs:
+                self.spec_tree.insert('', 'end', values=spec[1:])  # Skip part number column
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to load specifications: {err}")
+
+    def reset_form(self):
+        """Reset all form fields to their default state"""
+        # Clear all textboxes and restore default placeholders
+        for key, entry in self.textboxes.items():
+            entry.config(state='normal')
+            entry.delete(0, tk.END)
+            
+            # Set appropriate placeholder based on field
+            if key == "Part Number":
+                entry.insert(0, "Enter part number")
+            elif key == "Model & Part Name":
+                entry.insert(0, "Enter model name")
+            elif key == "Image File Path":
+                entry.insert(0, "No image selected")
+                entry.config(state='readonly')
+            else:
+                entry.insert(0, f"Enter {key.lower()}")
+            
+            entry.config(fg='gray')
+        
+        # Clear comboboxes
+        for combo in self.second_quad_combos.values():
+            combo.set('')
+        
+        # Clear specification entries
+        for entry in self.spec_entries.values():
+            entry.delete(0, tk.END)
+        
+        # Clear specification tree
+        for item in self.spec_tree.get_children():
+            self.spec_tree.delete(item)
+        
+        # Clear the image
+        if hasattr(self, 'image_label') and self.image_label:
+            self.image_label.destroy()
+            self.image_label = None
+        self.image_uploaded = False
+        
+        # Reset current selection
+        if hasattr(self, 'current_selected_part'):
+            self.current_selected_part = None
+        
+        # Clear tree selection
+        self.part_list_tree.selection_remove(self.part_list_tree.selection())
+
+    def delete_record(self):
+        """Delete the selected record and clear all textboxes"""
+        if not hasattr(self, 'current_selected_part') or not self.current_selected_part:
+            messagebox.showwarning("Warning", "Please select a record to delete!")
+            return
+        
+        # Get the part details from textboxes for confirmation
+        part_number = self.current_selected_part
+        model_name = self.textboxes["Model & Part Name"].get()
+        
+        # Show confirmation dialog with record details
+        confirm = messagebox.askyesno(
+            "Confirm Delete",
+            f"Are you sure you want to delete:\nPart Number: {part_number}\nModel Name: {model_name}?"
+        )
+        
+        if not confirm:
+            return
+        
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Delete from TBL_MODEL_SPECIFICATION
+            cursor.execute("DELETE FROM TBL_MODEL_SPECIFICATION WHERE MS_PART_NUMBER = %s", (part_number,))
+            
+            # Delete from TBL_MODEL_MASTER
+            cursor.execute("DELETE FROM TBL_MODEL_MASTER WHERE MM_PART_NUMBER = %s", (part_number,))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            # Reset all form fields
+            self.reset_form()
+            
+            # Update the part list view
+            self.update_part_list_view()
+            
+            messagebox.showinfo("Success", "Record deleted successfully!")
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to delete record: {err}")
+
+    def on_reset_button_click(self):
+        """Handle reset button click"""
+        self.reset_form()
 
 def main():
     root = tk.Tk()
