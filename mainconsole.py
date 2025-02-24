@@ -18,6 +18,14 @@ class MainConsole(tk.Tk):
         self.setup_ui()
         
     def setup_ui(self):
+        # Set the main window to full screen
+        self.state('zoomed')
+        
+        # Get screen dimensions
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        self.geometry(f"{screen_width}x{screen_height}+0+0")
+        
         # Create toolbar
         toolbar = ttk.Frame(self)
         toolbar.pack(fill="x", padx=5, pady=5)
@@ -56,40 +64,46 @@ class MainConsole(tk.Tk):
             
     def com_port_settings_click(self):
         settings_window = tk.Toplevel(self)
-        settings_window.state('zoomed')  # Make it full screen
+        # Set the window to full screen
+        settings_window.state('zoomed')
+        settings_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         app = ComPortSettings(settings_window)
-        settings_window.grab_set()  # Make the window modal
-        self.withdraw()  # Hide main window
+        settings_window.grab_set()
+        self.withdraw()
         
         def on_settings_close():
             settings_window.destroy()
-            self.deiconify()  # Show main window again
+            self.deiconify()
             
         settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
             
     def settings_click(self):
         settings_window = tk.Toplevel(self)
-        settings_window.state('zoomed')  # Make it full screen
+        # Set the window to full screen
+        settings_window.state('zoomed')
+        settings_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         app = WorkspaceApp(settings_window)
-        settings_window.grab_set()  # Make the window modal
-        self.withdraw()  # Hide main window
+        settings_window.grab_set()
+        self.withdraw()
         
         def on_settings_close():
             settings_window.destroy()
-            self.deiconify()  # Show main window again
+            self.deiconify()
             
         settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
             
     def test_click(self):
         test_window = tk.Toplevel(self)
-        test_window.state('zoomed')  # Make it full screen
+        # Set the window to full screen
+        test_window.state('zoomed')
+        test_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         app = EOLTesterGUI(test_window)
-        test_window.grab_set()  # Make the window modal
-        self.withdraw()  # Hide main window
+        test_window.grab_set()
+        self.withdraw()
         
         def on_test_close():
             test_window.destroy()
-            self.deiconify()  # Show main window again
+            self.deiconify()
             
         test_window.protocol("WM_DELETE_WINDOW", on_test_close)
             
@@ -101,14 +115,16 @@ class MainConsole(tk.Tk):
         
     def admin_click(self):
         admin_window = tk.Toplevel(self)
-        admin_window.state('zoomed')  # Make it full screen
+        # Set the window to full screen
+        admin_window.state('zoomed')
+        admin_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         app = AdminConsole(admin_window)
-        admin_window.grab_set()  # Make the window modal
-        self.withdraw()  # Hide main window
+        admin_window.grab_set()
+        self.withdraw()
         
         def on_admin_close():
             admin_window.destroy()
-            self.deiconify()  # Show main window again
+            self.deiconify()
             
         admin_window.protocol("WM_DELETE_WINDOW", on_admin_close)
 

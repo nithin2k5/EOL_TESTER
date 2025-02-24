@@ -13,13 +13,15 @@ class WorkspaceApp:
         self.root = root
         self.root.title("EOL Tester - Model Settings")
         
-        # Make it full screen
-        self.root.state('zoomed')
+        # Set window to full screen
+        self.root.attributes('-fullscreen', True)  # Change from state('zoomed') to true fullscreen
+        
+        # Add escape key binding to exit fullscreen
+        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
         
         # Track placed labels
         self.placed_labels = {}
         self.original_positions = {}
-        
         # Initialize variables
         self.current_label = None
         self.moving_label = None
@@ -35,6 +37,7 @@ class WorkspaceApp:
         self.style = ttk.Style()
         self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
         self.style.configure("Custom.TEntry", padding=5)
+        
         
         self.image_uploaded = False  # Flag to track image upload
         
@@ -60,26 +63,11 @@ class WorkspaceApp:
         self.main_container = tk.Frame(self.root)
         self.main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Create top navigation frame
-        self.create_navigation()
-        
         # Create header with labels
         self.create_header()
         
         # Create main workspace
         self.create_workspace()
-
-    def create_navigation(self):
-        nav_frame = tk.Frame(self.main_container, bg="lightgray", height=40)
-        nav_frame.pack(fill=tk.X)
-
-        buttons = ["PORT SETTINGS", "LABEL MAKER", "MODEL SETTINGS", 
-                  "TEST", "WORK DATA", "ADMIN", "HELP", "EXIT"]
-        
-        for btn_text in buttons:
-            btn = tk.Button(nav_frame, text=btn_text, bg="white", 
-                          relief=tk.FLAT, padx=10, pady=5)
-            btn.pack(side=tk.LEFT, padx=2, pady=2)
 
     def create_header(self):
         # Header frame
@@ -218,10 +206,34 @@ class WorkspaceApp:
         button_frame = tk.Frame(frame)
         button_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        tk.Button(button_frame, text="ADD", bg="green", fg="white", width=10,
-                 command=lambda: self.on_add_button_click(self.spec_entries.values(), self.spec_tree)).pack(side=tk.LEFT, padx=5)
-        tk.Button(button_frame, text="REMOVE", bg="red", fg="white", width=10,
-                 command=lambda: self.on_remove_button_click(self.spec_tree)).pack(side=tk.LEFT, padx=5)
+        # Updated button styling
+        add_btn = tk.Button(
+            button_frame, 
+            text="ADD",
+            bg="#2ecc71",
+            fg="white",
+            width=10,
+            relief=tk.RAISED,
+            activebackground="#27ae60",
+            activeforeground="white",
+            highlightbackground="#2ecc71",
+            command=lambda: self.on_add_button_click(self.spec_entries.values(), self.spec_tree)
+        )
+        add_btn.pack(side=tk.LEFT, padx=5)
+
+        remove_btn = tk.Button(
+            button_frame, 
+            text="REMOVE",
+            bg="#ff4d4d",
+            fg="white",
+            width=10,
+            relief=tk.RAISED,
+            activebackground="#ff3333",
+            activeforeground="white",
+            highlightbackground="#ff4d4d",
+            command=lambda: self.on_remove_button_click(self.spec_tree)
+        )
+        remove_btn.pack(side=tk.LEFT, padx=5)
 
         # Specifications Treeview
         columns = ('description', 'device', 'unit', 'master_min', 'master_max', 'normal_min', 'normal_max')
@@ -288,12 +300,12 @@ class WorkspaceApp:
 
     def create_parts_list_section(self, frame):
         # Create Part List section
-        part_list_frame = ttk.LabelFrame(frame, text="Part List")
-        part_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        part_list_frame = ttk.LabelFrame(frame)
+        part_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=0)
         
         # Create Treeview
         columns = ('part_number', 'model_name', 'created_date')
-        self.part_list_tree = ttk.Treeview(part_list_frame, columns=columns, show='headings', height=10)
+        self.part_list_tree = ttk.Treeview(part_list_frame, columns=columns, show='headings',height=10)
         
         # Configure columns
         self.part_list_tree.heading('part_number', text='Part Number')
@@ -301,8 +313,8 @@ class WorkspaceApp:
         self.part_list_tree.heading('created_date', text='Created Date')
         
         # Set column widths
-        self.part_list_tree.column('part_number', width=100)
-        self.part_list_tree.column('model_name', width=150)
+        self.part_list_tree.column('part_number', width=70)
+        self.part_list_tree.column('model_name', width=100)
         self.part_list_tree.column('created_date', width=150)
         
         # Add scrollbar
@@ -403,32 +415,42 @@ class WorkspaceApp:
         left_frame.grid_columnconfigure(0, weight=1)
         left_frame.grid_columnconfigure(1, weight=1)
         
-        # Create buttons with specific colors
+        # Create buttons with vibrant colors
         buttons = [
-            ("NEW", "red", "white"),
-            ("EDIT", "navy", "white"),
-            ("SAVE", "green", "white"),
-            ("CLEAR", "gray", "white"),
-            ("DELETE", "red", "white")
+            ("NEW", "#3498db", "#2980b9", "white"),     # Bright Blue
+            ("EDIT", "#9b59b6", "#8e44ad", "white"),    # Vibrant Purple
+            ("SAVE", "#2ecc71", "#27ae60", "white"),    # Bright Green
+            ("CLEAR", "#95a5a6", "#7f8c8d", "white"),   # Light Gray
+            ("DELETE", "#e74c3c", "#c0392b", "white")   # Bright Red
         ]
         
-        for text, bg_color, fg_color in buttons:
-            btn = tk.Button(button_frame,
-                           text=text,
-                           bg=bg_color,
-                           fg=fg_color,
-                           width=10,
-                           height=2,
-                           relief='flat')
-            btn.pack(pady=2)
+        for text, bg_color, active_bg, fg_color in buttons:
+            btn = tk.Button(
+                button_frame,
+                text=text,
+                bg=bg_color,
+                fg=fg_color,
+                width=10,
+                height=2,
+                relief=tk.RAISED,
+                activebackground=active_bg,
+                activeforeground=fg_color,
+                highlightbackground=bg_color,
+                font=('Arial', 10, 'bold')  # Make text bold
+            )
+            btn.pack(pady=5)
             
-            # Update the delete button command
+            # Update the button commands
             if text == "SAVE":
                 btn.config(command=self.save_specifications_to_db)
             elif text == "CLEAR":
                 btn.config(command=self.clear_all_data)
             elif text == "DELETE":
                 btn.config(command=self.delete_record)
+            elif text == "NEW":
+                btn.config(command=self.reset_form)
+            elif text == "EDIT":
+                btn.config(command=self.edit_record)
 
     def on_entry_focus_in(self, event, entry, placeholder):
         """Handle entry field focus in - remove placeholder text"""
@@ -472,33 +494,75 @@ class WorkspaceApp:
             self.moveable_labels.append(label)
 
     def create_buttons(self):
-        # Reset button
-        self.reset_btn = tk.Button(self.buttons_frame, 
-                                 text="RESET",
-                                 bg="red",
-                                 fg="black",
-                                 width=10,
-                                 height=2,
-                                 command=self.reset_form)
-        self.reset_btn.pack(side=tk.LEFT, padx=5)
+        # Modern button styles with gradients and hover effects
+        button_styles = [
+            {
+                'text': "RESET",
+                'main_color': "#ff4757",      # Soft red
+                'hover_color': "#ff6b81",     # Lighter red
+                'width': 12,
+                'icon': "🔄"                  # Reset icon
+            },
+            {
+                'text': "UPDATE",
+                'main_color': "#2ed573",      # Fresh green
+                'hover_color': "#7bed9f",     # Lighter green
+                'width': 12,
+                'icon': "💾"                  # Save icon
+            },
+            {
+                'text': "UPLOAD",
+                'main_color': "#1e90ff",      # Bright blue
+                'hover_color': "#70a1ff",     # Lighter blue
+                'width': 12,
+                'icon': "📁"                  # Upload icon
+            }
+        ]
+
+        for style in button_styles:
+            # Create button frame for gradient effect
+            btn_frame = tk.Frame(self.buttons_frame, 
+                                
+                               padx=2, pady=2)
+            btn_frame.pack(side=tk.LEFT, padx=5, pady=5)
+
+
+
+            # Create the actual button
+            btn = tk.Button(btn_frame,
+                          text=f"{style['icon']} {style['text']}",
+                          width=style['width'],
+                          bg=style['main_color'],
+                          fg="white",
+                          font=('Arial', 10, 'bold'),
+                          relief="flat",
+                          bd=0,
+                          padx=15,
+                          pady=8,
+                          cursor="hand2")  # Hand cursor on hover
+            btn.pack()
+
         
-        # Update button
-        self.update_btn = tk.Button(self.buttons_frame,
-                                  text="UPDATE",
-                                  bg="green",
-                                  fg="black",
-                                  width=10,
-                                  height=2,
-                                  command=self.update_positions)
-        self.update_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Upload image button
-        self.upload_btn = tk.Button(self.buttons_frame,
-                                  text="Upload Image",
-                                  width=10,
-                                  height=2,
-                                  command=self.upload_image)
-        self.upload_btn.pack(side=tk.LEFT, padx=5)
+            
+
+            # Bind hover effects
+            btn.bind('<Enter>', lambda e, b=btn, c=style['hover_color']: 
+                    self.on_button_hover(b, c))
+            btn.bind('<Leave>', lambda e, b=btn, c=style['main_color']: 
+                    self.on_button_hover(b, c))
+
+            # Assign commands
+            if style['text'] == "RESET":
+                btn.config(command=self.reset_form)
+            elif style['text'] == "UPDATE":
+                btn.config(command=self.update_positions)
+            else:  # UPLOAD
+                btn.config(command=self.upload_image)
+
+
+    def on_button_hover(self, button, color):
+        """Handle button hover effect"""
+        button.configure(bg=color)
 
     def start_move(self, event):
         if not self.image_uploaded:
@@ -1517,6 +1581,7 @@ class WorkspaceApp:
             WHERE MM_PART_NUMBER = %s
             """
             cursor.execute(query, (part_number,))
+            
             record = cursor.fetchone()
             
             if record:
@@ -1671,10 +1736,6 @@ class WorkspaceApp:
         for entry in self.spec_entries.values():
             entry.delete(0, tk.END)
         
-        # Clear specification tree
-        for item in self.spec_tree.get_children():
-            self.spec_tree.delete(item)
-        
         # Clear the image
         if hasattr(self, 'image_label') and self.image_label:
             self.image_label.destroy()
@@ -1735,6 +1796,30 @@ class WorkspaceApp:
     def on_reset_button_click(self):
         """Handle reset button click"""
         self.reset_form()
+
+    def edit_record(self):
+        """Enable editing of the selected record"""
+        if not hasattr(self, 'current_selected_part') or not self.current_selected_part:
+            messagebox.showwarning("Warning", "Please select a record to edit!")
+            return
+        
+        # Enable all textboxes for editing
+        for key, entry in self.textboxes.items():
+            if key != "Image File Path":  # Keep Image File Path readonly
+                entry.config(state='normal')
+                if entry.get() in ["Enter " + key.lower(), "No image selected"]:
+                    entry.delete(0, tk.END)
+                entry.config(fg='black')
+        
+        # Enable comboboxes
+        for combo in self.second_quad_combos.values():
+            combo.config(state='normal')
+        
+        # Enable specification entries
+        for entry in self.spec_entries.values():
+            entry.config(state='normal')
+        
+        messagebox.showinfo("Edit Mode", "You can now edit the record.\nClick SAVE when done to update the changes.")
 
 def main():
     root = tk.Tk()

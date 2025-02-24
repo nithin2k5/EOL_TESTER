@@ -11,7 +11,12 @@ class EOLTesterGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("EOL (END OF LINE) TESTER")
-        self.root.state('zoomed')
+        
+        # Set window to full screen
+        self.root.attributes('-fullscreen', True)  # Change from state('zoomed') to true fullscreen
+        
+        # Add escape key binding to exit fullscreen
+        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
         
         # Initialize variables
         self.image_label = None
@@ -64,45 +69,32 @@ class EOLTesterGUI:
         title_label.pack(pady=5)
 
     def create_quadrants(self):
-        """Update the create_quadrants method to adjust the first quadrant size"""
+        """Update the create_quadrants method to remove borders"""
         # Configure grid weights for equal space
         self.workspace.grid_columnconfigure(0, weight=1)  # First column
         self.workspace.grid_columnconfigure(1, weight=1)  # Second column
         self.workspace.grid_rowconfigure(0, weight=1)     # First row
         self.workspace.grid_rowconfigure(1, weight=1)     # Second row
         
-        # Set minimum size for workspace
-        min_quadrant_size = (500, 400)  # Base size for quadrants
-        
-        # Create quadrants with adjusted size for first quadrant
+        # Create quadrants without borders
         self.q1 = self.create_first_quadrant()
         self.q2 = self.create_second_quadrant()
         self.q3 = self.create_third_quadrant()
         self.q4 = self.create_fourth_quadrant()
         
-        # Calculate adjusted height for first quadrant (add space for header and labels)
-        q1_extra_height = 90  # 30px header + 30px status + 30px bottom labels
-        q1_height = min_quadrant_size[1] + q1_extra_height
-        
-        # Place quadrants
-        self.q1.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
-        self.q2.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
-        self.q3.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
-        self.q4.grid(row=1, column=1, sticky="nsew", padx=2, pady=2)
-        
-        # Configure minimum sizes
-        self.q1.configure(width=min_quadrant_size[0], height=q1_height)
-        self.q2.configure(width=min_quadrant_size[0], height=min_quadrant_size[1])
-        self.q3.configure(width=min_quadrant_size[0], height=min_quadrant_size[1])
-        self.q4.configure(width=min_quadrant_size[0], height=min_quadrant_size[1])
+        # Place quadrants with minimal spacing
+        self.q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        self.q2.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+        self.q3.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
+        self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
         
         # Prevent resizing
         for quadrant in [self.q1, self.q2, self.q3, self.q4]:
             quadrant.grid_propagate(False)
 
     def create_first_quadrant(self):
-        """Create the image display quadrant."""
-        q1 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        """Create the image display quadrant with correct dimensions."""
+        q1 = tk.Frame(self.workspace)
         
         # Create header frame at the top
         header_frame = tk.Frame(q1, bg="#00BFFF", height=30)
@@ -115,10 +107,13 @@ class EOLTesterGUI:
                                     font=("Arial", 12, "bold"))
         self.model_header.pack(pady=2)
         
-        # Create a frame to hold the image with fixed dimensions
-        self.image_frame = tk.Frame(q1, bg='white', width=500, height=400)  # Match model_settings dimensions
-        self.image_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        self.image_frame.pack_propagate(False)  # Prevent frame from resizing
+        # Create a frame to hold the image with specific dimensions
+        self.image_frame = tk.Frame(q1, bg='white')
+        self.image_frame.pack(fill="both", expand=True, padx=0, pady=0)
+        self.image_frame.pack_propagate(False)
+        
+        # Set size for the image frame - increasing width to 550 while keeping height at 300
+        self.image_frame.config(width=527, height=340)
         
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame, 
@@ -130,24 +125,24 @@ class EOLTesterGUI:
         # Create bottom frame for status and label info
         bottom_frame = tk.Frame(q1, height=60, bg='white')
         bottom_frame.pack(fill="x", side="bottom")
-        bottom_frame.pack_propagate(False)  # Prevent frame from shrinking
+        bottom_frame.pack_propagate(False)
         
         # Create status frame
         status_frame = tk.Frame(bottom_frame, bg="white")
         status_frame.pack(fill="x", pady=2)
         
         # Add HOME and AUTO status labels
-        status_labels = ['HOME', 'AUTO']
+        status_labels = ['HOME', 'AUTO', '1st PULL', '2nd PULL', 'TEST']
         for label_text in status_labels:
             label = tk.Label(status_frame,
                             text=label_text,
                             bg=self.get_status_label_color(label_text),
                             fg="white",
                             font=("Arial", 10, "bold"),
-                            width=8,
+                            width=15,height=15,
                             relief="raised",
                             borderwidth=2)
-            label.pack(side="left", padx=5)
+            label.pack(side="left", padx=5,pady=5)
         
         # Add label info text
         self.label_info = tk.Label(bottom_frame,
@@ -170,23 +165,25 @@ class EOLTesterGUI:
         
         # Create specifications table with numbered ID
         columns = (
-            "No",
             "Description",
             "Device",
             "Unit",
-            "Normal Min",
-            "Normal Max"
+            "Min",
+            "Max",
+            "Actual",
+            "Result"
         )
         self.spec_tree = ttk.Treeview(q2, columns=columns, show="headings", height=10)
         
         # Configure columns with specific widths
         column_widths = {
-            "No": 50,
             "Description": 200,
             "Device": 100,
             "Unit": 80,
-            "Normal Min": 100,
-            "Normal Max": 100
+            "Min": 50,
+            "Max": 50,
+            "Acutal": 50,
+            "Result": 50
         }
         
         # Set up each column
@@ -217,46 +214,94 @@ class EOLTesterGUI:
         return q3
 
     def create_fourth_quadrant(self):
-        q4 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
+        q4 = tk.Frame(self.workspace)
         
-        # Header
-        header_frame = tk.Frame(q4, bg="#00BFFF")
+        # Header with gradient effect - reduced height to 30
+        header_frame = tk.Frame(q4, bg="#1e88e5", height=30)
         header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
         
         columns = ["LOT NUMBER", "L1", "P1", "P2", "RESULT"]
         for col in columns:
-            label = tk.Label(header_frame, text=col, bg="#00BFFF", 
-                            font=("Arial", 10, "bold"))
-            label.pack(side="left", expand=True, fill="x", padx=2)
+            label = tk.Label(header_frame, 
+                           text=col, 
+                           bg="#1e88e5",     
+                           fg="white",        
+                           font=("Arial", 9, "bold"))
+            label.pack(side="left", expand=True, fill="x", padx=2, pady=3)
         
         # Grid view area
-        grid_frame = tk.Frame(q4, bg="white")
-        grid_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        grid_frame = tk.Frame(q4, bg="#f5f5f5")
+        grid_frame.pack(fill="both", expand=True, padx=4, pady=4)
         
-        grid_label = tk.Label(grid_frame, text="Grid view", 
-                             font=("Arial", 24), bg="white")
+        grid_label = tk.Label(grid_frame, 
+                            text="Grid view", 
+                            font=("Arial", 20),
+                            bg="#f5f5f5",
+                            fg="#757575")
         grid_label.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Bottom frame
-        bottom_frame = tk.Frame(q4)
+        # Bottom frame with equal spacing
+        bottom_frame = tk.Frame(q4, bg="#f5f5f5", height=40)
         bottom_frame.pack(fill="x", side="bottom", pady=2)
+        bottom_frame.pack_propagate(False)
         
-        # Next model button (yellow)
-        next_btn = tk.Button(bottom_frame, text="CLICK TO MOVE TO NEXT LABEL",
-                            bg="yellow", relief="flat",
-                            font=("Arial", 10))
-        next_btn.pack(side="left", fill="x", expand=True, padx=(2, 1))
+        # Configure equal column weights
+        bottom_frame.columnconfigure(0, weight=1)  # EMP CODE
+        bottom_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
+        bottom_frame.columnconfigure(2, weight=1)  # ALC CODE
         
-        # ALC CODE text box
-        self.alc_entry = tk.Entry(bottom_frame, bg="yellow", 
-                            font=("Arial", 10),
-                            justify="center")
+        # Employee Code Entry
+        self.emp_entry = tk.Entry(bottom_frame,
+                                 bg="white",
+                                 fg="#424242",
+                                 font=("Arial", 9, "bold"),
+                                 justify="center",
+                                 relief="flat",
+                                 width=12)
+        self.emp_entry.grid(row=0, column=0, padx=5, sticky="ew")
+        self.emp_entry.insert(0, "EMP CODE")
+        self.emp_entry.configure(highlightthickness=1,
+                               highlightbackground="#e0e0e0",
+                               highlightcolor="#1e88e5")
+        
+        # Next Label Button (centered)
+        next_btn = tk.Button(bottom_frame,
+                            text="NEXT LABEL ➜",
+                            bg="#ffd700",
+                            fg="#000000",
+                            relief="flat",
+                            font=("Arial", 9, "bold"),
+                            cursor="hand2",
+                            pady=2)
+        next_btn.grid(row=0, column=1, padx=5, sticky="ew")
+        
+        # Add hover effect
+        next_btn.bind('<Enter>', lambda e: next_btn.configure(bg="#ffeb3b"))
+        next_btn.bind('<Leave>', lambda e: next_btn.configure(bg="#ffd700"))
+        
+        # ALC Code Entry (initially disabled)
+        self.alc_entry = tk.Entry(bottom_frame,
+                                 bg="#fff9c4",
+                                 fg="#424242",
+                                 font=("Arial", 9, "bold"),
+                                 justify="center",
+                                 relief="flat",
+                                 width=12,
+                                 state='disabled')  # Initially disabled
+        self.alc_entry.grid(row=0, column=2, padx=5, sticky="ew")
         self.alc_entry.insert(0, "ALC CODE")
-        self.alc_entry.pack(side="right", padx=(1, 2), ipady=1)
+        self.alc_entry.configure(highlightthickness=1,
+                               highlightbackground="#e0e0e0",
+                               highlightcolor="#ffd700")
         
-        # Clear default text on focus
-        self.alc_entry.bind("<FocusIn>", self.clear_alc_entry)
-        # Bind Enter key to process ALC code
+        # Bind events
+        self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
+        self.emp_entry.bind("<FocusOut>", lambda e: self.on_emp_entry_focus(False))
+        self.emp_entry.bind("<Return>", self.validate_employee_code)
+        
+        self.alc_entry.bind("<FocusIn>", lambda e: self.on_alc_entry_focus(True))
+        self.alc_entry.bind("<FocusOut>", lambda e: self.on_alc_entry_focus(False))
         self.alc_entry.bind("<Return>", self.process_alc_code)
         
         return q4
@@ -650,30 +695,19 @@ class EOLTesterGUI:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_image_with_path(self, image_path):
-        """Load and fit image to the first quadrant, scaling to fit within the frame."""
+        """Load and fit image to match the exact width of the image frame."""
         try:
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            # Get the fixed frame dimensions
+            # Get the first quadrant dimensions
             frame_width = self.image_frame.winfo_width()
             frame_height = self.image_frame.winfo_height()
             
             # Load original image
             original_image = Image.open(image_path)
             
-            # Calculate scaling factors for both dimensions
-            width_ratio = frame_width / original_image.width
-            height_ratio = frame_height / original_image.height
-            
-            # Use the smaller ratio to ensure image fits completely within frame
-            scale_factor = min(width_ratio, height_ratio)
-            
-            # Calculate new dimensions
-            new_width = int(original_image.width * scale_factor)
-            new_height = int(original_image.height * scale_factor)
-            
-            # Resize image to exactly match frame dimensions
+            # Resize image to fill the entire frame
             resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
             
@@ -684,16 +718,14 @@ class EOLTesterGUI:
             # Create new image label that fills the entire frame
             self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
             self.image_label.image = photo  # Keep a reference
-            self.image_label.place(x=0, y=0, relwidth=1, relheight=1)  # Fill entire frame
+            self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             
-            # Store image dimensions and scaling for label positioning
+            # Store image dimensions for label positioning
             self.image_dimensions = {
                 'width': frame_width,
                 'height': frame_height,
                 'x_offset': 0,
-                'y_offset': 0,
-                'scale_x': scale_factor,
-                'scale_y': scale_factor
+                'y_offset': 0
             }
             
             self.current_image_path = image_path
@@ -857,13 +889,55 @@ class EOLTesterGUI:
         self.starting_ng_cable_validation = True
         # Start your monitoring threads/processes here
 
-    def clear_alc_entry(self, event):
-        """Clear the default text when entry is focused"""
-        if self.alc_entry.get() == "ALC CODE":
-            self.alc_entry.delete(0, tk.END)
+    def on_emp_entry_focus(self, is_focused):
+        """Handle employee code entry focus"""
+        if is_focused:
+            if self.emp_entry.get() == "EMP CODE":
+                self.emp_entry.delete(0, tk.END)
+            self.emp_entry.configure(bg="white")
+        else:
+            if not self.emp_entry.get():
+                self.emp_entry.insert(0, "EMP CODE")
+                self.emp_entry.configure(bg="white")
+
+    def validate_employee_code(self, event=None):
+        """Validate employee code against employecode.txt"""
+        emp_code = self.emp_entry.get().strip()
+        if emp_code == "EMP CODE" or not emp_code:
+            messagebox.showwarning("Warning", "Please enter an employee code")
+            return
+        
+        try:
+            with open('employecode.txt', 'r') as file:
+                valid_codes = [code.strip() for code in file.read().split(',')]
+            
+            if emp_code in valid_codes:
+                self.alc_entry.configure(state='normal')
+                self.emp_entry.configure(bg="lightgreen")
+                messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
+            else:
+                self.alc_entry.configure(state='disabled')
+                self.emp_entry.configure(bg="pink")
+                messagebox.showerror("Error", "Employee code unauthorized")
+                
+        except FileNotFoundError:
+            messagebox.showerror("Error", "Employee code file not found")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def on_alc_entry_focus(self, is_focused):
+        """Handle ALC entry focus with visual feedback"""
+        if is_focused:
+            if self.alc_entry.get() == "ALC CODE":
+                self.alc_entry.delete(0, tk.END)
+            self.alc_entry.configure(bg="white")
+        else:
+            if not self.alc_entry.get():
+                self.alc_entry.insert(0, "ALC CODE")
+                self.alc_entry.configure(bg="#fff9c4")
 
     def process_alc_code(self, event=None):
-        """Process the entered ALC code"""
+        """Process the entered ALC code and retrieve specifications"""
         alc_code = self.alc_entry.get().strip()
         if not alc_code or alc_code == "ALC CODE":
             messagebox.showwarning("Warning", "Please enter a valid ALC code")
@@ -878,30 +952,70 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
 
-            # Query to get part details based on ALC code
-            query = """
-            SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, 
-                   MM_LABEL_COORDINATES, MM_VENDOR_CODE, MM_EO_NUMBER, 
-                   MM_SPECIAL_DATA, MM_INITIAL_ID, MM_SUPPLIER_SECTION
+            # First query to get basic part details
+            part_query = """
+            SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, MM_LABEL_COORDINATES
             FROM TBL_MODEL_MASTER 
             WHERE MM_ALC_CODE = %s
             """
-            cursor.execute(query, (alc_code,))
-            result = cursor.fetchone()
+            cursor.execute(part_query, (alc_code,))
+            part_result = cursor.fetchone()
 
-            if result:
-                (part_number, model_name, image_path, label_coordinates,
-                 vendor_code, eo_number, special_data, initial_id,
-                 supplier_section) = result
-
+            if part_result:
+                part_number, model_name, image_path, label_coordinates = part_result
+                
                 # Store the current part number
                 self.current_part_number = part_number
 
-                # Update message label
+                # Update message label with part info
                 self.message_label.config(
                     text=f"Model: {model_name} | Part Number: {part_number}",
                     fg="green"
                 )
+
+                # Second query to get specifications
+                spec_query = """
+                SELECT 
+                    MS_DESCRIPTION,
+                    MS_DEVICE,
+                    MS_UNIT,
+                    MS_NORMAL_MIN,
+                    MS_NORMAL_MAX,
+                    MS_SPECIAL_DATA
+                FROM TBL_MODEL_SPECIFICATION 
+                WHERE MS_PART_NUMBER = %s
+                ORDER BY MS_DEVICE
+                """
+                cursor.execute(spec_query, (part_number,))
+                specs = cursor.fetchall()
+
+                # Clear existing items in specification tree
+                self.spec_tree.delete(*self.spec_tree.get_children())
+
+                # Add specifications to tree
+                for i, spec in enumerate(specs, 1):
+                    description, device, unit, min_val, max_val, special_data = spec
+                    
+                    # Format values for display
+                    min_val = f"{float(min_val):.2f}" if min_val is not None else "N/A"
+                    max_val = f"{float(max_val):.2f}" if max_val is not None else "N/A"
+                    
+                    # Insert into tree with ID number
+                    values = (
+                        description,
+                        device,
+                        unit,
+                        min_val,
+                        max_val,
+                        "",  # Empty Actual column
+                        ""   # Empty Result column
+                    )
+                    item_id = self.spec_tree.insert('', 'end', values=values)
+                    
+                    # Add special styling if needed
+                    if special_data:
+                        self.spec_tree.item(item_id, tags=('special',))
+                        self.spec_tree.tag_configure('special', background='#fff3cd')
 
                 # Load image if path exists
                 if image_path and os.path.exists(image_path):
@@ -912,9 +1026,6 @@ class EOLTesterGUI:
                                 self.place_labels_from_positions(coordinates)
                             except json.JSONDecodeError:
                                 print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
-
-                # Retrieve and display specifications
-                self.retrieve_part_specifications(part_number)
 
             else:
                 self.message_label.config(
