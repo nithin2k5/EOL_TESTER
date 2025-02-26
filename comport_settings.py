@@ -12,101 +12,72 @@ class ComPortSettings:
         self.root.state('zoomed')
         
         # Configure the main background color
-        self.root.configure(bg='white')
+        self.root.configure(bg='#f0f0f0')  # Light gray background
         
         # Header with border lines
-        header_frame = tk.Frame(self.root, bg='white')
+        header_frame = tk.Frame(self.root, bg='#f0f0f0')
         header_frame.pack(fill=tk.X, padx=5)
         
         # Top border line
-        tk.Canvas(header_frame, height=2, bg='black').pack(fill=tk.X)
+        tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
         
         # Title
         title_label = tk.Label(
             header_frame, 
             text="COM PORT SETTINGS",
-            bg='white',
-            fg='black',
+            bg='#f0f0f0',
+            fg='#2c3e50',
             font=('Arial', 28, 'bold')
         )
         title_label.pack(pady=10)
         
         # Bottom border line
-        tk.Canvas(header_frame, height=2, bg='black').pack(fill=tk.X)
+        tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
 
-        # Top row frame
-        top_row = tk.Frame(self.root, bg='black')
-        top_row.pack(fill=tk.X, padx=5, pady=5)
+        # Main content frame
+        main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # LVDT Section (Pink background)
-        lvdt_frame = tk.Frame(top_row, bg='#FFB6C1', relief='solid', borderwidth=1)  # Light pink
-        lvdt_frame.pack(side=tk.LEFT, padx=5, fill=tk.BOTH)
+        # Control buttons frame
+        control_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        control_frame.pack(side=tk.RIGHT, padx=20)
         
-        # LVDT Title
-        tk.Label(lvdt_frame, text="LVDT (P01 - P04)", bg='#FFB6C1', fg='black',
-                font=('Arial', 10, 'bold')).pack(anchor='w', padx=5, pady=2)
-        
-        self.add_lvdt_content(lvdt_frame)
-
-        # CAM Sections (Yellow background)
-        for i in range(1, 3):
-            cam_frame = tk.Frame(top_row, bg='#FFFFE0', relief='solid', borderwidth=1)  # Light yellow
-            cam_frame.pack(side=tk.LEFT, padx=5, fill=tk.BOTH)
-            
-            tk.Label(cam_frame, text=f"CAM - {i:02d}", bg='#FFFFE0', fg='black',
-                    font=('Arial', 10, 'bold')).pack(anchor='w', padx=5, pady=2)
-            
-            self.add_cam_content(cam_frame)
-
-        # Right side controls
-        control_frame = tk.Frame(top_row, bg='white')
-        control_frame.pack(side=tk.LEFT, padx=5)
-        
-        # Screen size with up/down arrows
-        size_frame = tk.Frame(control_frame, bg='white', relief='solid', borderwidth=1)
-        size_frame.pack(fill=tk.X, pady=2)
-        
-        tk.Label(size_frame, text="SCREEN SIZE:", bg='white', fg='black',
-                font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
-        
-        screen_entry = tk.Entry(size_frame, width=5, justify='right')
-        screen_entry.insert(0, "0.0")
-        screen_entry.pack(side=tk.LEFT)
-        
-        arrows = tk.Label(size_frame, text="▲\n▼", bg='white', fg='black')
-        arrows.pack(side=tk.LEFT)
-
         # Control buttons
         buttons = [
-            ("EDIT", 'black', 'white'),
-            ("SAVE", 'black', 'white'),
-            ("RESET", 'black', 'white')
+            ("EDIT", '#3498db', 'white'),
+            ("SAVE", '#2ecc71', 'white'),
+            ("RESET", '#e74c3c', 'white')
         ]
         
         for text, bg, fg in buttons:
             btn = tk.Button(control_frame, text=text, bg=bg, fg=fg, 
-                          width=10, font=('Arial', 10, 'bold'))
-            btn.pack(pady=2)
+                          width=15, font=('Arial', 12, 'bold'))
+            btn.pack(pady=5)
 
-        # Bottom row frames
-        bottom_frame = tk.Frame(self.root, bg='black')
-        bottom_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Panels frame using grid
+        panels_frame = tk.Frame(main_frame, bg='#f0f0f0')
+        panels_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Configure grid columns to have equal width
+        panels_frame.grid_columnconfigure(0, weight=1)
+        panels_frame.grid_columnconfigure(1, weight=1)
+        panels_frame.grid_columnconfigure(2, weight=1)
 
-        # PLC Section (Green background)
+        # PLC Section
         plc_frame = self.create_section(
-            bottom_frame, "PLC", '#90EE90',  # Light green
-            width=300, height=300
+            panels_frame, "PLC", '#e8f6e9',
+            width=400, height=400
         )
-        plc_frame.pack(side=tk.LEFT, padx=5)
+        plc_frame.grid(row=0, column=0, padx=10, sticky='nsew')
         self.add_plc_content(plc_frame)
 
-        # Loadcell Sections (Brown background)
-        for i in range(1, 5):
+        # Loadcell Sections
+        for i in range(1, 3):  # Only creating 2 loadcells
             loadcell_frame = self.create_section(
-                bottom_frame, f"LOADCELL - {i:02d} (L{i})", '#DEB887',  # Burlywood
-                width=250, height=300
+                panels_frame, f"LOADCELL - {i:02d} (L{i})", '#f5e6e8',
+                width=400, height=400
             )
-            loadcell_frame.pack(side=tk.LEFT, padx=5)
+            loadcell_frame.grid(row=0, column=i, padx=10, sticky='nsew')
             self.add_loadcell_content(loadcell_frame)
 
         self.db_config = {
@@ -127,44 +98,6 @@ class ComPortSettings:
                 font=('Arial', 10, 'bold')).pack(anchor='w', padx=5, pady=2)
         
         return frame
-
-    def add_lvdt_content(self, frame):
-        # COM Port
-        tk.Label(frame, text="COM Port", bg=frame['bg'], fg='black').pack(anchor='w', padx=5, pady=2)
-        ttk.Combobox(frame, width=25).pack(anchor='w', padx=5)
-        
-        # BAUD Rate
-        tk.Label(frame, text="BAUD Rate", bg=frame['bg'], fg='black').pack(anchor='w', padx=5, pady=2)
-        ttk.Combobox(frame, width=25).pack(anchor='w', padx=5)
-        
-        # P01-P04 entries
-        labels = [
-            "P01 (Shift Conduit)",
-            "P02 (Shift Inner)",
-            "P03 (Select Conduit)",
-            "P04 (Select Inner)"
-        ]
-        
-        for label in labels:
-            tk.Label(frame, text=label, bg=frame['bg'], fg='black').pack(anchor='w', padx=5, pady=2)
-            entry_frame = tk.Frame(frame, bg=frame['bg'])
-            entry_frame.pack(anchor='w', fill='x', padx=5)
-            
-            tk.Entry(entry_frame, width=25).pack(side='left')
-            tk.Label(entry_frame, text="mm", bg=frame['bg'], fg='black').pack(side='left', padx=5)
-
-    def add_cam_content(self, frame):
-        # COM Port
-        tk.Label(frame, text="COM Port", bg=frame['bg'], fg='black').pack(anchor='w', padx=5, pady=2)
-        ttk.Combobox(frame, width=25).pack(anchor='w', padx=5)
-        
-        # BAUD Rate
-        tk.Label(frame, text="BAUD Rate", bg=frame['bg'], fg='black').pack(anchor='w', padx=5, pady=2)
-        ttk.Combobox(frame, width=25).pack(anchor='w', padx=5)
-        
-        # Text area
-        text_area = tk.Text(frame, height=8, width=25)
-        text_area.pack(padx=5, pady=5)
 
     def add_plc_content(self, frame):
         # Test button and Station ID

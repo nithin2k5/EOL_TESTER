@@ -157,11 +157,19 @@ class EOLTesterGUI:
         """Create the specifications display quadrant."""
         q2 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
         
+        # Define camera frame dimensions
+        cam_width = 120  # Width for camera frames
+        cam_height = 90  # Height for camera frames
+        
         # Add header
         header = tk.Label(q2, text="TEST SPECIFICATIONS",
                          bg="#00BFFF", fg="black",
                          font=("Arial", 12, "bold"))
         header.pack(fill="x")
+        
+        # Create specifications table frame (70% of height)
+        spec_frame = tk.Frame(q2, relief="solid", borderwidth=1)  # Add border to spec frame
+        spec_frame.pack(fill="x", expand=True, padx=2, pady=2)  # Add padding
         
         # Create specifications table with numbered ID
         columns = (
@@ -173,7 +181,34 @@ class EOLTesterGUI:
             "Actual",
             "Result"
         )
-        self.spec_tree = ttk.Treeview(q2, columns=columns, show="headings", height=10)
+        
+        # Configure style for Treeview
+        style = ttk.Style()
+        style.configure("Custom.Treeview",
+                       borderwidth=1,  # Border width
+                       relief="solid",  # Border style
+                       fieldbackground="black",  # Background color
+                       background="black",  # Row background color
+                       foreground="white")  # Text color
+        
+        style.configure("Custom.Treeview.Heading",
+                       borderwidth=1,
+                       relief="solid",
+                       background="#1e1e1e",  # Dark header background
+                       foreground="white",  # Header text color
+                       font=("Arial", 9, "bold"))  # Header font
+        
+        # Configure selection colors
+        style.map("Custom.Treeview",
+                 background=[("selected", "#404040")],  # Selected row background
+                 foreground=[("selected", "white")])  # Selected row text color
+        
+        # Create Treeview with custom style
+        self.spec_tree = ttk.Treeview(spec_frame, 
+                                     columns=columns, 
+                                     show="headings", 
+                                     height=15,
+                                     style="Custom.Treeview")
         
         # Configure columns with specific widths
         column_widths = {
@@ -182,27 +217,61 @@ class EOLTesterGUI:
             "Unit": 80,
             "Min": 50,
             "Max": 50,
-            "Acutal": 50,
+            "Actual": 50,
             "Result": 50
         }
         
-        # Set up each column
+        # Set up each column with borders
         for col in columns:
             self.spec_tree.heading(col, text=col)
             self.spec_tree.column(col, width=column_widths.get(col, 100), anchor='center')
         
         # Add scrollbars
-        scrollbar = ttk.Scrollbar(q2, orient="vertical", command=self.spec_tree.yview)
+        scrollbar = ttk.Scrollbar(spec_frame, orient="vertical", command=self.spec_tree.yview)
         self.spec_tree.configure(yscrollcommand=scrollbar.set)
         
-        h_scrollbar = ttk.Scrollbar(q2, orient="horizontal", command=self.spec_tree.xview)
+        h_scrollbar = ttk.Scrollbar(spec_frame, orient="horizontal", command=self.spec_tree.xview)
         self.spec_tree.configure(xscrollcommand=h_scrollbar.set)
         
         # Pack the treeview and scrollbars
-        self.spec_tree.pack(side="top", fill="both", expand=True, padx=5, pady=5)
+        self.spec_tree.pack(side="top", fill="both", expand=True, padx=0, pady=0)
         scrollbar.pack(side="right", fill="y")
         h_scrollbar.pack(side="bottom", fill="x")
         
+        # Create camera frame container (30% of height)
+        camera_container = tk.Frame(q2, bg='#f0f0f0')
+        camera_container.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        # Configure grid for equal spacing
+        camera_container.grid_columnconfigure(0, weight=1)  # First camera
+        camera_container.grid_columnconfigure(1, weight=1)  # Second camera
+        camera_container.grid_columnconfigure(2, weight=1)  # Spacing
+        camera_container.grid_columnconfigure(3, weight=1)  # Text box
+        
+        # Camera 1 section
+        cam1_label = tk.Label(camera_container, text="CAM 1", fg='black', bg='white', font=("Arial", 10, "bold"))
+        cam1_label.grid(row=0, column=0, pady=(0, 5))
+        
+        self.cam1_frame = tk.Frame(camera_container, width=cam_width, height=cam_height, 
+                                  bg='white', relief='solid', borderwidth=1)
+        self.cam1_frame.grid(row=1, column=0, padx=10)
+        self.cam1_frame.grid_propagate(False)
+        
+        # Camera 2 section
+        cam2_label = tk.Label(camera_container, text="CAM 2", bg='white', fg='black', font=("Arial", 10, "bold"))
+        cam2_label.grid(row=0, column=1, pady=(0, 5))
+        
+        self.cam2_frame = tk.Frame(camera_container, width=cam_width, height=cam_height, 
+                                  bg='white', relief='solid', borderwidth=1)
+        self.cam2_frame.grid(row=1, column=1, padx=10)
+        self.cam2_frame.grid_propagate(False)
+
+        # Text box (moved to column 3 for equal spacing)
+
+        textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT", bg='white', fg='black', font=("Arial", 10, "bold"))
+        textbox_label.grid(row=0, column=3, pady=(0, 5))
+        self.cam_textbox = tk.Text(camera_container, width=40, height=7)
+        self.cam_textbox.grid(row=1, column=3, padx=10, pady=1)
         return q2
 
     def create_third_quadrant(self):
@@ -282,8 +351,8 @@ class EOLTesterGUI:
         
         # ALC Code Entry (initially disabled)
         self.alc_entry = tk.Entry(bottom_frame,
-                                 bg="#fff9c4",
-                                 fg="#424242",
+                                 bg="white",
+                                 fg="black",
                                  font=("Arial", 9, "bold"),
                                  justify="center",
                                  relief="flat",
@@ -454,7 +523,7 @@ class EOLTesterGUI:
 
     def create_footer(self):
         footer = tk.Label(self.main_container,
-                        text="Powered By: IRACRAT TECHNOLOGIES Contact: INFO@IRACRAT.COM, (+91) 99623 46614",
+                        text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
                         bg="#FFB6C1", height=2)
         footer.pack(fill="x", side="bottom")
 
@@ -1058,12 +1127,12 @@ class EOLTesterGUI:
                 current_values[5] = actual_value  # Update ACTUAL column
                 current_values[6] = result        # Update RESULT column
                 
-                # Update row color based on result
+                # Update row color based on result with darker shades
                 if result == "PASS":
-                    self.spec_tree.tag_configure('pass', background='lightgreen')
+                    self.spec_tree.tag_configure('pass', background='#006400')  # Dark green
                     self.spec_tree.item(item, values=current_values, tags=('pass',))
                 elif result == "FAIL":
-                    self.spec_tree.tag_configure('fail', background='pink')
+                    self.spec_tree.tag_configure('fail', background='#8B0000')  # Dark red
                     self.spec_tree.item(item, values=current_values, tags=('fail',))
                 else:
                     self.spec_tree.item(item, values=current_values)
