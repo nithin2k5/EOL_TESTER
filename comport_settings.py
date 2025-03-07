@@ -110,35 +110,142 @@ class ComPortSettings:
         top_frame = tk.Frame(frame, bg=frame['bg'])
         top_frame.pack(fill='x', padx=5, pady=5)
         
-        test_button = tk.Button(top_frame, text="TEST", bg='darkred', fg='white', 
-                              width=8, font=('Arial', 9, 'bold'),
-                              command=self.test_plc_connection)
-        test_button.pack(side='left', padx=5)
+        # Test Button
+        self.test_button = tk.Button(top_frame, text="TEST", bg='darkred', fg='white', 
+                                    width=8, font=('Arial', 9, 'bold'),
+                                    command=self.read_plc_data)
+        self.test_button.pack(side='left', padx=5)
         
-        # Add instance variables for COM port and baud rate
-        self.plc_com_combo = ttk.Combobox(frame, width=25)
-        self.plc_baud_combo = ttk.Combobox(frame, width=25)
+        # Station ID
+        station_frame = tk.Frame(top_frame, bg=frame['bg'])
+        station_frame.pack(side='left', padx=5)
+        self.station_id_entry = tk.Entry(station_frame, width=10)
+        self.station_id_entry.pack(side='left', padx=2)
+        tk.Label(station_frame, text="Station ID", bg=frame['bg']).pack(side='left')
         
         # Style the labels and comboboxes
         label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
         
+        # COM Port
         tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=2)
+        self.plc_com_combo = ttk.Combobox(frame, width=25, state="readonly")
         self.plc_com_combo.pack(anchor='w', padx=5)
         
+        # BAUD Rate
         tk.Label(frame, text="BAUD Rate", **label_style).pack(anchor='w', padx=5, pady=2)
+        self.plc_baud_combo = ttk.Combobox(frame, width=25, state="readonly")
         self.plc_baud_combo.pack(anchor='w', padx=5)
         
         # Get available COM ports
         available_ports = [port.device for port in serial.tools.list_ports.comports()]
         
-        # Update combobox values with detected ports
-        self.plc_com_combo['values'] = available_ports
+        # Update combobox values
+        self.plc_com_combo['values'] = available_ports if available_ports else ["No Ports"]
+        self.plc_com_combo.set(available_ports[0] if available_ports else "No Ports")
         self.plc_baud_combo['values'] = [9600, 19200, 38400, 57600, 115200]
+        self.plc_baud_combo.set(9600)
         
-        # Rx String with better styling
+        # Connect Button
+        self.connect_button = tk.Button(frame, text="Connect", bg='green', fg='white',
+                                      font=('Arial', 9, 'bold'), command=self.connect_to_plc)
+        self.connect_button.pack(anchor='w', padx=5, pady=5)
+        
+        # Rx String
         tk.Label(frame, text="Rx String", **label_style).pack(anchor='w', padx=5, pady=2)
-        rx_text = tk.Text(frame, height=10, width=30, font=('Consolas', 10))
-        rx_text.pack(padx=5, pady=5)
+        self.rx_text = tk.Text(frame, height=10, width=30, font=('Consolas', 10))
+        self.rx_text.pack(padx=5, pady=5)
+        
+        # Initially disable test button
+        self.test_button.config(state="disabled")
+
+    def connect_to_plc(self):
+        """Connect to PLC using Modbus RTU"""
+        port = self.plc_com_combo.get()
+        baudrate = int(self.plc_baud_combo.get())
+        slave_id = self.station_id_entry.get().strip()
+
+        try:
+            if port == "No Ports":
+                raise ValueError("No COM ports available.")
+            if not slave_id.isdigit():
+                raise ValueError("Station ID must be a valid number.")
+
+            slave_id = int(slave_id)
+
+            # Close existing connection if any
+            if self.modbus_client and self.modbus_client.is_socket_open():
+                self.modbus_client.close()
+
+            self.modbus_client = ModbusSerialClient(
+                port=port,
+                baudrate=baudrate,
+                parity='N',
+                stopbits=1,
+                bytesize=8,
+                timeout=1
+            )
+
+            if self.modbus_client.connect():
+                messagebox.showinfo("Connection Status", "Connected to PLC!")
+                self.test_button.config(state="normal")
+            else:
+                self.modbus_client.close()
+                messagebox.showerror("Connection Status", "Failed to connect to PLC.")
+        except ValueError as ve:
+            messagebox.showerror("Input Error", str(ve))
+        except Exception as e:
+            messagebox.showerror("Error", f"Connection Error: {str(e)}")
+
+    def read_plc_data(self):
+        """Read data from PLC registers"""
+        if self.modbus_client is None or not self.modbus_client.is_socket_open():
+            messagebox.showerror("Error", "Not connected to PLC.")
+            return
+
+        try:
+            slave_id = int(self.station_id_entry.get())
+
+            # Read Holding Registers (D)
+            d_response = self.modbus_client.read_holding_registers(
+                address=100,
+                count=5,
+                slave=slave_id
+            )
+            d_values = d_response.registers if not getattr(d_response, 'isError', lambda: True)() else "Error"
+
+            # Read Coils (M)
+            m_response = self.modbus_client.read_coils(
+                address=10,
+                count=5,
+                slave=slave_id
+            )
+            m_values = m_response.bits if not getattr(m_response, 'isError', lambda: True)() else "Error"
+
+            # Read Discrete Inputs (X)
+            x_response = self.modbus_client.read_discrete_inputs(
+                address=5,
+                count=5,
+                slave=slave_id
+            )
+            x_values = x_response.bits if not getattr(x_response, 'isError', lambda: True)() else "Error"
+
+            # Read Input Registers (W)
+            w_response = self.modbus_client.read_input_registers(
+                address=20,
+                count=5,
+                slave=slave_id
+            )
+            w_values = w_response.registers if not getattr(w_response, 'isError', lambda: True)() else "Error"
+
+            # Display results
+            self.rx_text.delete("1.0", tk.END)
+            self.rx_text.insert(tk.END, f"D100-104: {d_values}\n")
+            self.rx_text.insert(tk.END, f"M10-14: {m_values}\n")
+            self.rx_text.insert(tk.END, f"X5-9: {x_values}\n")
+            self.rx_text.insert(tk.END, f"W20-24: {w_values}\n")
+
+        except Exception as e:
+            messagebox.showerror("Read Error", str(e))
 
     def add_loadcell_content(self, frame):
         # Test button with consistent styling
@@ -243,46 +350,6 @@ class ComPortSettings:
                 
         except Error as e:
             messagebox.showerror("Database Error", f"Failed to save settings!\nError: {str(e)}")
-            return False
-
-    def test_plc_connection(self):
-        """Establish Modbus RTU connection to PLC"""
-        try:
-            # Close existing connection if any
-            if self.modbus_client and self.modbus_client.is_socket_open():
-                self.modbus_client.close()
-            
-            # Create new Modbus RTU client
-            self.modbus_client = ModbusSerialClient(
-                method='rtu',
-                port=self.plc_com_combo.get(),
-                baudrate=int(self.plc_baud_combo.get()),
-                bytesize=8,
-                parity='N',
-                stopbits=1,
-                timeout=1
-            )
-            
-            # Try to connect
-            if self.modbus_client.connect():
-                # Test communication by reading first register
-                result = self.modbus_client.read_holding_registers(
-                    address=0,
-                    count=1,
-                    slave=1
-                )
-                if result.isError():
-                    raise ModbusException("Failed to read from PLC")
-                    
-                messagebox.showinfo("Success", "Successfully connected to PLC!")
-                return True
-            else:
-                raise ModbusException("Failed to connect to PLC")
-                
-        except Exception as e:
-            messagebox.showerror("Connection Error", f"Failed to connect to PLC!\nError: {str(e)}")
-            if self.modbus_client:
-                self.modbus_client.close()
             return False
 
 def main():
