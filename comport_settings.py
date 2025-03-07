@@ -5,6 +5,7 @@ from mysql.connector import Error
 from pymodbus.client import ModbusSerialClient
 from pymodbus.exceptions import ModbusException
 import serial.tools.list_ports
+import os
 
 class ComPortSettings:
     def __init__(self, root):
@@ -112,7 +113,7 @@ class ComPortSettings:
         
         # Test Button
         self.test_button = tk.Button(top_frame, text="TEST", bg='darkred', fg='white', 
-                                    width=8, font=('Arial', 9, 'bold'),
+                              width=8, font=('Arial', 9, 'bold'),
                                     command=self.read_plc_data)
         self.test_button.pack(side='left', padx=5)
         
@@ -176,13 +177,14 @@ class ComPortSettings:
             if self.modbus_client and self.modbus_client.is_socket_open():
                 self.modbus_client.close()
 
+            # Initialize Modbus client with RTU settings
             self.modbus_client = ModbusSerialClient(
                 port=port,
                 baudrate=baudrate,
-                parity='N',
+                timeout=1,
                 stopbits=1,
                 bytesize=8,
-                timeout=1
+                parity='N'
             )
 
             if self.modbus_client.connect():
@@ -197,55 +199,121 @@ class ComPortSettings:
             messagebox.showerror("Error", f"Connection Error: {str(e)}")
 
     def read_plc_data(self):
-        """Read data from PLC registers"""
+        """Read data from PLC registers and coils"""
         if self.modbus_client is None or not self.modbus_client.is_socket_open():
             messagebox.showerror("Error", "Not connected to PLC.")
             return
 
         try:
-            slave_id = int(self.station_id_entry.get())
+            slave_id = self.station_id_entry.get().strip()
+            
+            # Validate inputs
+            if not slave_id:
+                messagebox.showerror("Error", "Station ID is mandatory!")
+                return
 
-            # Read Holding Registers (D)
-            d_response = self.modbus_client.read_holding_registers(
-                address=100,
-                count=5,
-                slave=slave_id
-            )
-            d_values = d_response.registers if not getattr(d_response, 'isError', lambda: True)() else "Error"
-
-            # Read Coils (M)
-            m_response = self.modbus_client.read_coils(
-                address=10,
-                count=5,
-                slave=slave_id
-            )
-            m_values = m_response.bits if not getattr(m_response, 'isError', lambda: True)() else "Error"
-
-            # Read Discrete Inputs (X)
-            x_response = self.modbus_client.read_discrete_inputs(
-                address=5,
-                count=5,
-                slave=slave_id
-            )
-            x_values = x_response.bits if not getattr(x_response, 'isError', lambda: True)() else "Error"
-
-            # Read Input Registers (W)
-            w_response = self.modbus_client.read_input_registers(
-                address=20,
-                count=5,
-                slave=slave_id
-            )
-            w_values = w_response.registers if not getattr(w_response, 'isError', lambda: True)() else "Error"
-
-            # Display results
+            slave_id = int(slave_id)
+            
+            # Clear the text box
             self.rx_text.delete("1.0", tk.END)
-            self.rx_text.insert(tk.END, f"D100-104: {d_values}\n")
-            self.rx_text.insert(tk.END, f"M10-14: {m_values}\n")
-            self.rx_text.insert(tk.END, f"X5-9: {x_values}\n")
-            self.rx_text.insert(tk.END, f"W20-24: {w_values}\n")
+            
+            # Define file paths relative to the script location
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            process_status_file = os.path.join(current_dir, "ProcessStatus.txt")
+            input_sensors_file = os.path.join(current_dir, "InputSensors.txt")
+            program_selection_file = os.path.join(current_dir, "ProgramSelectionInPLC.txt")
+            
+            # Initialize arrays
+            process_status_array = []
+            input_sensors_array = []
+            program_selection_array = []
+            
+            # Read and process each file
+            for file_path, array_name in [
+                (process_status_file, "Process Status"),
+                (input_sensors_file, "Input Sensors"),
+                (program_selection_file, "Program Selection")
+            ]:
+                try:
+                    if not os.path.exists(file_path):
+                        self.rx_text.insert(tk.END, f"Warning: {os.path.basename(file_path)} not found\n")
+                        continue
+                        
+                    with open(file_path, 'r') as f:
+                        content = f.read().strip()
+                        if not content:
+                            self.rx_text.insert(tk.END, f"Warning: {os.path.basename(file_path)} is empty\n")
+                            continue
+                            
+                        # Split by comma and clean the addresses
+                        addresses = [addr.strip() for addr in content.split(',') if addr.strip()]
+                        
+                        if not addresses:
+                            self.rx_text.insert(tk.END, f"Warning: No valid addresses found in {os.path.basename(file_path)}\n")
+                            continue
+                            
+                        # Store addresses in appropriate array
+                        if "ProcessStatus" in file_path:
+                            process_status_array = addresses
+                        elif "InputSensors" in file_path:
+                            input_sensors_array = addresses
+                        else:
+                            program_selection_array = addresses
+                            
+#self.rx_text.insert(tk.END, f"Loaded {len(addresses)} {array_name} addresses\n")
+                        
+                except Exception as e:
+                    self.rx_text.insert(tk.END, f"Error reading {os.path.basename(file_path)}: {str(e)}\n")
+            
+          #  self.rx_text.insert(tk.END, "\n--- Reading PLC Data ---\n")
+            
+            # Read coils for each address array
+         #   if input_sensors_array:
+          #      self._read_coils(input_sensors_array, "Input Sensors", slave_id)
+            if process_status_array:
+                self._read_coils(process_status_array, "Process Status", slave_id)
+           # if program_selection_array:
+            #    self._read_coils(program_selection_array, "Program Selection", slave_id)
 
+            if not any([input_sensors_array, process_status_array, program_selection_array]):
+                self.rx_text.insert(tk.END, "\nNo valid addresses found in any configuration file.")
+
+        except ValueError as ve:
+            messagebox.showerror("Error", "Invalid Station ID")
         except Exception as e:
             messagebox.showerror("Read Error", str(e))
+
+    def _read_coils(self, addresses, section_name, slave_id):
+        """Helper method to read coils and display results"""
+        if not addresses:
+            return
+        
+        # Add section header
+        self.rx_text.insert(tk.END, f"\n{section_name}:\n")
+        
+        for address in addresses:
+            try:
+                # Convert hex address (ignoring first character)
+                coil_address = int(address[1:], 16)
+
+                # Read 1 coil from the PLC
+                response = self.modbus_client.read_coils(
+                    address=coil_address,
+                    count=1,
+                    slave=slave_id
+                )
+
+                if getattr(response, 'isError', lambda: True)():
+                    self.rx_text.insert(tk.END, f"{address} --> Error reading coil\n")
+                    continue
+
+                # Display result
+                status = "ON" if response.bits[0] else "OFF"
+                self.rx_text.insert(tk.END, f"{address} --> {status}\n")
+
+            except Exception as e:
+                self.rx_text.insert(tk.END, f"{address} --> Error: {str(e)}\n")
 
     def add_loadcell_content(self, frame):
         # Test button with consistent styling
