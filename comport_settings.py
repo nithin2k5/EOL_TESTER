@@ -9,14 +9,18 @@ import serial.tools.list_ports
 import os
 import time
 from dotenv import load_dotenv, set_key, find_dotenv
+import json
+from datetime import datetime
 
 class ComPortSettings:
     def __init__(self, root):
         self.root = root
         self.root.title("COM Port Settings")
         
-        # Initialize all_comboboxes list
-        self.all_comboboxes = []  # Add this line at the start
+        # Initialize lists and dictionaries at the start
+        self.all_comboboxes = []  # Move this to the top
+        self.loadcell_ports = {}  # Move this here too
+        self.modbus_client = None
         
         # Make it full screen
         self.root.state('zoomed')
@@ -74,8 +78,9 @@ class ComPortSettings:
             btn.pack(pady=5)
             self.control_buttons[text] = btn
 
-        # Initially disable Save button
-        self.control_buttons["SAVE"].config(state="disabled")
+        # Initially enable Save button and disable Edit button
+        self.control_buttons["SAVE"].config(state="normal")
+        self.control_buttons["EDIT"].config(state="disabled")
 
         # Panels frame using grid
         panels_frame = tk.Frame(main_frame, bg='#f0f0f0')
@@ -126,6 +131,9 @@ class ComPortSettings:
         # Initialize loadcell serial ports dictionary
         self.loadcell_ports = {}
 
+        # Initialize loadcell data in environment
+        self.initialize_loadcell_env()
+
     def create_section(self, parent, title, bg_color, width, height):
         frame = tk.Frame(parent, bg=bg_color, width=width, height=height, relief='solid', borderwidth=1)
         frame.pack_propagate(False)
@@ -170,11 +178,16 @@ class ComPortSettings:
         # Get available COM ports
         available_ports = [port.device for port in serial.tools.list_ports.comports()]
         
-        # Update combobox values
-        self.plc_com_combo['values'] = available_ports if available_ports else ["No Ports"]
-        self.plc_com_combo.set(available_ports[0] if available_ports else "No Ports")
+        # Update combobox values with empty default
+        self.plc_com_combo['values'] = available_ports if available_ports else [""]
+        self.plc_com_combo.set("")  # Empty default
         self.plc_baud_combo['values'] = [9600, 19200, 38400, 57600, 115200]
-        self.plc_baud_combo.set(9600)
+        self.plc_baud_combo.set("")  # Empty default
+        
+        # Initially enable all inputs
+        self.plc_com_combo.config(state="readonly")
+        self.plc_baud_combo.config(state="readonly")
+        self.station_id_entry.config(state="normal")
         
         # Connect Button
         self.connect_button = tk.Button(frame, text="Connect", bg='green', fg='white',
@@ -346,12 +359,8 @@ class ComPortSettings:
                 self.rx_text.insert(tk.END, f"{address} --> Error: {str(e)}\n")
 
     def add_loadcell_content(self, frame):
-        # Add serial port attribute for each loadcell
-        self.loadcell_ports = {}  # Store serial connections for each loadcell
-        
-        # Get loadcell number from frame title
-        loadcell_num = frame.winfo_children()[0]['text'].split('-')[1].strip()[:2]
-        frame.loadcell_num = loadcell_num  # Store loadcell number in frame
+        # Style settings
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
         
         # Test button with consistent styling
         test_button = tk.Button(
@@ -365,9 +374,6 @@ class ComPortSettings:
         )
         test_button.pack(anchor='w', padx=5, pady=5)
         
-        # Style settings
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
-        
         # COM Port
         tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=2)
         com_combo = ttk.Combobox(frame, width=25, state="readonly")
@@ -376,6 +382,8 @@ class ComPortSettings:
         # BAUD Rate
         tk.Label(frame, text="BAUD Rate", **label_style).pack(anchor='w', padx=5, pady=2)
         baud_combo = ttk.Combobox(frame, width=25, state="readonly")
+        baud_combo['values'] = [9600, 19200, 38400, 57600, 115200]
+        baud_combo.set("")  # Empty default
         baud_combo.pack(anchor='w', padx=5)
         
         # Add comboboxes to the list
@@ -384,21 +392,24 @@ class ComPortSettings:
         # Get available COM ports
         available_ports = [port.device for port in serial.tools.list_ports.comports()]
         
-        # Update combobox values with detected ports
+        # Get loadcell number and store it
+        loadcell_num = frame.winfo_children()[0].cget("text").split('-')[1].strip()[:2]
+        frame.loadcell_num = loadcell_num
+        
+        # Update combobox values with empty default
         if available_ports:
             com_combo['values'] = available_ports
-            com_combo.set(available_ports[0])
+            com_combo.set("")  # Empty default
         else:
-            com_combo['values'] = ["No Ports Available"]
-            com_combo.set("No Ports Available")
-            messagebox.showwarning("Port Warning", "No COM ports are currently available!")
+            com_combo['values'] = [""]
+            com_combo.set("")
         
-        # BAUD Rate
-        tk.Label(frame, text="BAUD Rate", **label_style).pack(anchor='w', padx=5, pady=2)
-        baud_combo = ttk.Combobox(frame, width=25, state="readonly")
         baud_combo['values'] = [9600, 19200, 38400, 57600, 115200]
-        baud_combo.set(9600)
-        baud_combo.pack(anchor='w', padx=5)
+        baud_combo.set("")  # Empty default
+        
+        # Initially enable all inputs
+        com_combo.config(state="readonly")
+        baud_combo.config(state="readonly")
         
         # Connect Button
         connect_button = tk.Button(
@@ -425,136 +436,115 @@ class ComPortSettings:
         # Store the test button reference
         frame.test_button = test_button
 
+    def test_loadcell(self, frame):
+        """Test loadcell communication and save data"""
+        try:
+            if frame not in self.loadcell_ports or not self.loadcell_ports[frame].is_open:
+                loadcell_num = frame.loadcell_num
+                messagebox.showerror("Connection Error", 
+                                   f"Loadcell {loadcell_num} is not connected!")
+                return
+            
+            frame.rx_text.delete("1.0", tk.END)
+            loadcell_num = frame.loadcell_num
+            
+            try:
+                # Clear buffers
+                self.loadcell_ports[frame].reset_input_buffer()
+                self.loadcell_ports[frame].reset_output_buffer()
+                
+                # Set timeout
+                self.loadcell_ports[frame].timeout = 0.5
+                
+                # Send command
+                command = f"ID{loadcell_num}P".encode()
+                self.loadcell_ports[frame].write(command)
+                frame.rx_text.insert(tk.END, f"Sent command: ID{loadcell_num}P\n")
+                
+                # Update GUI
+                self.root.update()
+                
+                # Read response
+                response = self.loadcell_ports[frame].readline()
+                
+                if response:
+                    decoded_response = response.decode('utf-8', errors='replace').strip()
+                    frame.rx_text.insert(tk.END, f"Response: {decoded_response}\n")
+                    
+                    # Parse and save data
+                    try:
+                        parts = decoded_response.split(',')
+                        if len(parts) > 1:
+                            value = parts[1]
+                            frame.rx_text.insert(tk.END, f"Parsed value: {value}\n")
+                            
+                            # Save to environment variable
+                            self.save_loadcell_data(loadcell_num, value)
+                            
+                    except IndexError:
+                        frame.rx_text.insert(tk.END, "Could not parse value\n")
+                else:
+                    frame.rx_text.insert(tk.END, "No response received\n")
+                    
+            except Exception as e:
+                frame.rx_text.insert(tk.END, f"Communication error: {str(e)}\n")
+                
+            finally:
+                self.loadcell_ports[frame].timeout = 1
+                
+        except Exception as e:
+            frame.rx_text.insert(tk.END, f"Error: {str(e)}\n")
+        
+        self.root.update()
+
     def connect_loadcell(self, frame, com_combo, baud_combo, test_button):
         """Connect to loadcell using serial communication"""
-        port = com_combo.get()
-        baudrate = int(baud_combo.get())
-        loadcell_num = frame.loadcell_num
-        
         try:
+            port = com_combo.get()
+            baudrate = int(baud_combo.get())
+            loadcell_num = frame.loadcell_num
+            
             # Check if port is "No Ports Available"
             if port == "No Ports Available":
                 messagebox.showerror("Connection Error", 
-                                   f"No COM ports available for Loadcell {loadcell_num}!\n"
-                                   "Please check your device connection and try again.")
+                                   f"No COM ports available for Loadcell {loadcell_num}!")
                 return
             
             # Check if port still exists
             available_ports = [port.device for port in serial.tools.list_ports.comports()]
             if port not in available_ports:
                 messagebox.showerror("Connection Error", 
-                                   f"COM Port {port} is no longer available!\n"
-                                   "The device may have been disconnected.")
-                
-                # Update the combobox with current available ports
-                if available_ports:
-                    com_combo['values'] = available_ports
-                    com_combo.set(available_ports[0])
-                else:
-                    com_combo['values'] = ["No Ports Available"]
-                    com_combo.set("No Ports Available")
+                                   f"COM Port {port} is no longer available!")
                 return
             
             # Close existing connection if any
             if frame in self.loadcell_ports and self.loadcell_ports[frame].is_open:
                 self.loadcell_ports[frame].close()
             
-            # Try to open the serial port
-            try:
-                ser = serial.Serial(
-                    port=port,
-                    baudrate=baudrate,
-                    bytesize=8,
-                    parity='N',
-                    stopbits=1,
-                    timeout=1
-                )
-                
-                if ser.is_open:
-                    self.loadcell_ports[frame] = ser
-                    messagebox.showinfo("Connection Status", 
-                                      f"Successfully connected to Loadcell {loadcell_num} on {port}!")
-                    test_button.config(state="normal")
-                else:
-                    raise serial.SerialException("Failed to open port")
-                    
-            except serial.SerialException as se:
-                messagebox.showerror("Connection Error", 
-                                   f"Could not open {port} for Loadcell {loadcell_num}!\n"
-                                   f"Error: {str(se)}\n"
-                                   "The port might be in use by another application.")
-                
-        except Exception as e:
-            messagebox.showerror("Error", 
-                               f"Unexpected error while connecting to Loadcell {loadcell_num}!\n"
-                               f"Error: {str(e)}")
-
-    def test_loadcell(self, frame):
-        """Test loadcell communication"""
-        try:
-            # Check if port is still available
-            if frame not in self.loadcell_ports or not self.loadcell_ports[frame].is_open:
-                loadcell_num = frame.loadcell_num
-                messagebox.showerror("Connection Error", 
-                                   f"Loadcell {loadcell_num} is not connected!\n"
-                                   "Please connect the device first.")
-                return
+            # Create new serial connection with timeout
+            ser = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                bytesize=8,
+                parity='N',
+                stopbits=1,
+                timeout=0.5,  # Shorter initial timeout
+                write_timeout=0.5  # Add write timeout
+            )
             
-            # Clear the rx text
-            frame.rx_text.delete("1.0", tk.END)
-            
-            # Get loadcell number
-            loadcell_num = frame.loadcell_num
-            
-            # Command structure for different loadcells
-            commands = {
-                "01": b"ID01P",  # Command for Loadcell 1
-                "02": b"ID02P"   # Command for Loadcell 2
-            }
-            
-            # Send the appropriate command based on loadcell number
-            command = commands.get(loadcell_num)
-            if not command:
-                raise ValueError(f"Invalid loadcell number: {loadcell_num}")
-            
-            # Clear any existing data in the buffer
-            self.loadcell_ports[frame].reset_input_buffer()
-            
-            # Send command
-            self.loadcell_ports[frame].write(command)
-            frame.rx_text.insert(tk.END, f"Sent command: {command.decode()}\n")
-            
-            # Wait for response (with timeout)
-            time.sleep(0.1)  # Give device time to respond
-            
-            # Read response
-            if self.loadcell_ports[frame].in_waiting:
-                try:
-                    response = self.loadcell_ports[frame].readline()
-                    if response:
-                        decoded_response = response.decode('utf-8', errors='replace').strip()
-                        frame.rx_text.insert(tk.END, f"Response: {decoded_response}\n")
-                        
-                        # Parse the response if needed
-                        # Example: If response format is "ID01,VALUE"
-                        try:
-                            parts = decoded_response.split(',')
-                            if len(parts) > 1:
-                                value = parts[1]
-                                frame.rx_text.insert(tk.END, f"Parsed value: {value}\n")
-                        except IndexError:
-                            frame.rx_text.insert(tk.END, "Could not parse value from response\n")
-                    else:
-                        frame.rx_text.insert(tk.END, "No response data received\n")
-                except UnicodeDecodeError:
-                    frame.rx_text.insert(tk.END, "Error: Received invalid data\n")
+            if ser.is_open:
+                self.loadcell_ports[frame] = ser
+                test_button.config(state="normal")
+                messagebox.showinfo("Success", f"Connected to Loadcell {loadcell_num}")
             else:
-                frame.rx_text.insert(tk.END, "No response from device\n")
-            
+                raise serial.SerialException("Failed to open port")
+                
         except ValueError as ve:
-            frame.rx_text.insert(tk.END, f"Error: {str(ve)}\n")
+            messagebox.showerror("Error", f"Invalid baudrate: {str(ve)}")
+        except serial.SerialException as se:
+            messagebox.showerror("Error", f"Serial port error: {str(se)}")
         except Exception as e:
-            frame.rx_text.insert(tk.END, f"Error: {str(e)}\n")
+            messagebox.showerror("Error", f"Unexpected error: {str(e)}")
 
     def add_modbus_tcp_content(self, frame):
         # Test button and IP Address
@@ -649,6 +639,11 @@ class ComPortSettings:
     def save_settings(self):
         """Save settings to environment variables and disable editing"""
         try:
+            # Validate all required fields are filled
+            if not self._validate_settings():
+                messagebox.showerror("Validation Error", "Please fill in all required fields!")
+                return
+
             # Get the .env file path
             env_path = find_dotenv()
             if not env_path:
@@ -657,23 +652,28 @@ class ComPortSettings:
             # Save PLC settings
             set_key(env_path, 'PLC_COM_PORT', self.plc_com_combo.get())
             set_key(env_path, 'PLC_BAUD_RATE', self.plc_baud_combo.get())
+            set_key(env_path, 'PLC_STATION_ID', self.station_id_entry.get())
             
             # Save Loadcell settings
-            for frame, port in self.loadcell_ports.items():
-                loadcell_num = frame.loadcell_num
-                com_port = frame.winfo_children()[2].get()  # Get COM port value
-                baud_rate = frame.winfo_children()[4].get()  # Get BAUD rate value
-                
-                set_key(env_path, f'LOADCELL_{loadcell_num}_COM_PORT', com_port)
-                set_key(env_path, f'LOADCELL_{loadcell_num}_BAUD_RATE', baud_rate)
+            for frame in self.root.winfo_children():
+                if isinstance(frame, tk.Frame):
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Frame):
+                            title_label = child.winfo_children()[0]
+                            if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
+                                loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
+                                com_combo = child.winfo_children()[2]  # COM port combo
+                                baud_combo = child.winfo_children()[4]  # BAUD rate combo
+                                
+                                set_key(env_path, f'LOADCELL_{loadcell_num}_COM_PORT', com_combo.get())
+                                set_key(env_path, f'LOADCELL_{loadcell_num}_BAUD_RATE', baud_combo.get())
             
             # Save Modbus TCP settings
             set_key(env_path, 'MODBUS_TCP_IP', self.ip_entry.get())
             set_key(env_path, 'MODBUS_TCP_PORT', self.port_entry.get())
             
-            # Disable all comboboxes
-            for combo in self.all_comboboxes:
-                combo.config(state="disabled")
+            # Disable all inputs
+            self._freeze_all_inputs()
             
             # Update button states
             self.control_buttons["SAVE"].config(state="disabled")
@@ -684,40 +684,65 @@ class ComPortSettings:
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save settings!\nError: {str(e)}")
 
-    def load_saved_settings(self):
-        """Load settings from environment variables"""
-        try:
-            # Load PLC settings
-            plc_port = os.getenv('PLC_COM_PORT')
-            plc_baud = os.getenv('PLC_BAUD_RATE')
-            if plc_port:
-                self.plc_com_combo.set(plc_port)
-            if plc_baud:
-                self.plc_baud_combo.set(plc_baud)
+    def _validate_settings(self):
+        """Validate that at least one frame has all fields filled"""
+        # Check if PLC frame is complete
+        if all([self.plc_com_combo.get(), self.plc_baud_combo.get(), self.station_id_entry.get()]):
+            return True
             
-            # Load Loadcell settings
-            for frame in self.loadcell_ports.keys():
-                loadcell_num = frame.loadcell_num
-                com_port = os.getenv(f'LOADCELL_{loadcell_num}_COM_PORT')
-                baud_rate = os.getenv(f'LOADCELL_{loadcell_num}_BAUD_RATE')
-                
-                if com_port:
-                    frame.winfo_children()[2].set(com_port)
-                if baud_rate:
-                    frame.winfo_children()[4].set(baud_rate)
+        # Check if any Loadcell frame is complete
+        for frame in self.root.winfo_children():
+            if isinstance(frame, tk.Frame):
+                for child in frame.winfo_children():
+                    if isinstance(child, tk.Frame):
+                        title_label = child.winfo_children()[0]
+                        if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
+                            com_combo = child.winfo_children()[2]  # COM port combo
+                            baud_combo = child.winfo_children()[4]  # BAUD rate combo
+                            if all([com_combo.get(), baud_combo.get()]):
+                                return True
+        
+        # Check if Modbus TCP frame is complete
+        if all([self.ip_entry.get(), self.port_entry.get()]):
+            return True
             
-            # Load Modbus TCP settings
-            modbus_ip = os.getenv('MODBUS_TCP_IP')
-            modbus_port = os.getenv('MODBUS_TCP_PORT')
-            if modbus_ip:
-                self.ip_entry.delete(0, tk.END)
-                self.ip_entry.insert(0, modbus_ip)
-            if modbus_port:
-                self.port_entry.delete(0, tk.END)
-                self.port_entry.insert(0, modbus_port)
-                
-        except Exception as e:
-            messagebox.showerror("Load Error", f"Failed to load settings!\nError: {str(e)}")
+        return False
+
+    def _freeze_all_inputs(self):
+        """Helper method to disable all input fields"""
+        # Disable PLC inputs
+        self.plc_com_combo.config(state="disabled")
+        self.plc_baud_combo.config(state="disabled")
+        self.station_id_entry.config(state="disabled")
+        
+        # Disable all comboboxes
+        for combo in self.all_comboboxes:
+            combo.config(state="disabled")
+        
+        # Disable Modbus TCP inputs
+        self.ip_entry.config(state="disabled")
+        self.port_entry.config(state="disabled")
+
+    def enable_editing(self):
+        """Enable editing of all input fields"""
+        # Enable PLC inputs
+        self.plc_com_combo.config(state="readonly")
+        self.plc_baud_combo.config(state="readonly")
+        self.station_id_entry.config(state="normal")
+        
+        # Enable all comboboxes
+        for combo in self.all_comboboxes:
+            combo.config(state="readonly")
+        
+        # Enable Modbus TCP inputs
+        self.ip_entry.config(state="normal")
+        self.port_entry.config(state="normal")
+        
+        # Update button states
+        self.control_buttons["SAVE"].config(state="normal")
+        self.control_buttons["EDIT"].config(state="disabled")
+        
+        messagebox.showinfo("Edit Mode", "Settings are now editable")
 
     def reset_settings(self):
         """Reset all settings and clear environment variables"""
@@ -734,13 +759,13 @@ class ComPortSettings:
             
             # Clear environment variables
             env_vars = [
-                'PLC_COM_PORT', 'PLC_BAUD_RATE',
+                'PLC_COM_PORT', 'PLC_BAUD_RATE', 'PLC_STATION_ID',
                 'MODBUS_TCP_IP', 'MODBUS_TCP_PORT'
             ]
             
             # Add loadcell environment variables
-            for frame in self.loadcell_ports.keys():
-                loadcell_num = frame.loadcell_num
+            for i in range(1, 3):  # For LOADCELL-01 and LOADCELL-02
+                loadcell_num = f"{i:02d}"
                 env_vars.extend([
                     f'LOADCELL_{loadcell_num}_COM_PORT',
                     f'LOADCELL_{loadcell_num}_BAUD_RATE'
@@ -750,28 +775,8 @@ class ComPortSettings:
             for var in env_vars:
                 set_key(env_path, var, '')
             
-            # Reset PLC settings
-            available_ports = [port.device for port in serial.tools.list_ports.comports()]
-            
-            # Reset COM port combos
-            for combo in self.all_comboboxes:
-                if 'values' in combo.configure():  # Check if it's a COM port combo
-                    if available_ports:
-                        combo['values'] = available_ports
-                        combo.set(available_ports[0])
-                    else:
-                        combo['values'] = ["No Ports Available"]
-                        combo.set("No Ports Available")
-            
-            # Reset BAUD rate combos
-            for combo in self.all_comboboxes:
-                if 'values' in combo.configure():  # Check if it's a BAUD rate combo
-                    if '9600' in combo['values']:
-                        combo.set('9600')
-            
-            # Reset Modbus TCP settings
-            self.ip_entry.delete(0, tk.END)
-            self.port_entry.delete(0, tk.END)
+            # Reset all inputs to default values
+            self._reset_to_defaults()
             
             # Enable editing
             self.enable_editing()
@@ -784,31 +789,182 @@ class ComPortSettings:
         except Exception as e:
             messagebox.showerror("Reset Error", f"Error during reset: {str(e)}")
 
-    def enable_editing(self):
-        """Enable editing of comboboxes"""
-        # Enable all comboboxes
-        for combo in self.all_comboboxes:
-            combo.config(state="readonly")
+    def _reset_to_defaults(self):
+        """Helper method to reset all inputs to default values"""
+        # Get available COM ports
+        available_ports = [port.device for port in serial.tools.list_ports.comports()]
         
-        # Update button states
-        self.control_buttons["SAVE"].config(state="normal")
-        self.control_buttons["EDIT"].config(state="disabled")
+        # Reset PLC settings
+        self.plc_com_combo.set("")
+        self.plc_baud_combo.set("")
+        self.station_id_entry.delete(0, tk.END)
+        self.rx_text.delete("1.0", tk.END)  # Clear PLC Rx string
         
-        messagebox.showinfo("Edit Mode", "Settings are now editable")
+        # Reset all COM port combos and Rx strings for Loadcells
+        for frame in self.root.winfo_children():
+            if isinstance(frame, tk.Frame):
+                for child in frame.winfo_children():
+                    if isinstance(child, tk.Frame):
+                        if "LOADCELL" in child.winfo_children()[0].cget("text"):
+                            com_combo = child.winfo_children()[2]  # COM port combo
+                            baud_combo = child.winfo_children()[4]  # BAUD rate combo
+                            rx_text = child.winfo_children()[-1]  # Rx text widget
+                            
+                            com_combo['values'] = available_ports if available_ports else [""]
+                            com_combo.set("")
+                            baud_combo.set("")
+                            rx_text.delete("1.0", tk.END)  # Clear Loadcell Rx string
+        
+        # Reset Modbus TCP settings
+        self.ip_entry.delete(0, tk.END)
+        self.port_entry.delete(0, tk.END)
+        self.rx_tcp_text.delete("1.0", tk.END)  # Clear Modbus TCP Rx string
+
+    def load_saved_settings(self):
+        """Load settings from environment variables"""
+        try:
+            # Load PLC settings
+            plc_port = os.getenv('PLC_COM_PORT', '')
+            plc_baud = os.getenv('PLC_BAUD_RATE', '')
+            plc_station_id = os.getenv('PLC_STATION_ID', '')
+            
+            self.plc_com_combo.set(plc_port)
+            self.plc_baud_combo.set(plc_baud)
+            self.station_id_entry.delete(0, tk.END)
+            self.station_id_entry.insert(0, plc_station_id)
+            
+            # Load Loadcell settings
+            for frame in self.root.winfo_children():
+                if isinstance(frame, tk.Frame):
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Frame):
+                            title_label = child.winfo_children()[0]
+                            if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
+                                loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
+                                com_combo = child.winfo_children()[2]
+                                baud_combo = child.winfo_children()[4]
+                                
+                                com_port = os.getenv(f'LOADCELL_{loadcell_num}_COM_PORT', '')
+                                baud_rate = os.getenv(f'LOADCELL_{loadcell_num}_BAUD_RATE', '')
+                                
+                                com_combo.set(com_port)
+                                baud_combo.set(baud_rate)
+            
+            # Load Modbus TCP settings
+            modbus_ip = os.getenv('MODBUS_TCP_IP', '')
+            modbus_port = os.getenv('MODBUS_TCP_PORT', '')
+            
+            self.ip_entry.delete(0, tk.END)
+            self.ip_entry.insert(0, modbus_ip)
+            self.port_entry.delete(0, tk.END)
+            self.port_entry.insert(0, modbus_port)
+            
+            # If we have saved settings, freeze the inputs
+            if any([plc_port, plc_baud, plc_station_id, modbus_ip, modbus_port]):
+                self._freeze_all_inputs()
+                self.control_buttons["SAVE"].config(state="disabled")
+                self.control_buttons["EDIT"].config(state="normal")
+                
+        except Exception as e:
+            messagebox.showerror("Load Error", f"Failed to load settings!\nError: {str(e)}")
+
+    def initialize_loadcell_env(self):
+        """Initialize environment variables for loadcell data if they don't exist"""
+        try:
+            for i in range(1, 3):  # For loadcell 1 and 2
+                env_key = f'LOADCELL_{i}_DATA'
+                if not os.getenv(env_key):
+                    # Initialize with empty data list
+                    os.environ[env_key] = json.dumps([])
+        except Exception as e:
+            print(f"Error initializing environment variables: {str(e)}")
+
+    def save_loadcell_data(self, loadcell_num, value):
+        """Save loadcell data to environment variable"""
+        try:
+            env_key = f'LOADCELL_{loadcell_num}_DATA'
+            
+            # Get existing data
+            existing_data = json.loads(os.getenv(env_key, '[]'))
+            
+            # Create new data entry
+            new_entry = {
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'value': value
+            }
+            
+            # Add new entry and keep only last 100 readings
+            existing_data.append(new_entry)
+            if len(existing_data) > 100:  # Limit to last 100 readings
+                existing_data = existing_data[-100:]
+            
+            # Save back to environment variable
+            os.environ[env_key] = json.dumps(existing_data)
+            
+        except Exception as e:
+            print(f"Error saving loadcell data: {str(e)}")
+
+    def load_loadcell_data(self, frame):
+        """Load previous loadcell data from environment variable"""
+        try:
+            loadcell_num = frame.loadcell_num
+            env_key = f'LOADCELL_{loadcell_num}_DATA'
+            
+            # Get data from environment variable
+            data = json.loads(os.getenv(env_key, '[]'))
+            
+            # Clear current display
+            frame.rx_text.delete("1.0", tk.END)
+            
+            if data:
+                # Display last 5 entries
+                frame.rx_text.insert(tk.END, "Previous readings:\n")
+                for entry in data[-5:]:
+                    frame.rx_text.insert(tk.END, 
+                                       f"{entry['timestamp']}: {entry['value']}\n")
+            else:
+                frame.rx_text.insert(tk.END, "No previous readings available\n")
+            
+        except Exception as e:
+            frame.rx_text.insert(tk.END, f"Error loading previous data: {str(e)}\n")
 
     def cleanup(self):
-        """Close all connections"""
+        """Close all connections and save final readings"""
         try:
-            # Close loadcell connections
-            for ser in self.loadcell_ports.values():
-                if ser.is_open:
-                    ser.close()
+            # Save final readings from loadcells
+            for frame, ser in self.loadcell_ports.items():
+                try:
+                    if ser and ser.is_open:
+                        loadcell_num = frame.loadcell_num
+                        
+                        # Clear buffers
+                        ser.reset_input_buffer()
+                        ser.reset_output_buffer()
+                        
+                        # Get final reading
+                        command = f"ID{loadcell_num}P".encode()
+                        ser.write(command)
+                        time.sleep(0.1)
+                        
+                        response = ser.readline()
+                        if response:
+                            decoded_response = response.decode('utf-8', errors='replace').strip()
+                            parts = decoded_response.split(',')
+                            if len(parts) > 1:
+                                value = parts[1]
+                                # Save final reading with special marker
+                                self.save_loadcell_data(loadcell_num, f"{value} (Final Reading)")
+                        
+                        # Close connection
+                        ser.close()
+                        
+                except Exception as e:
+                    print(f"Error saving final reading for Loadcell {loadcell_num}: {str(e)}")
             
-            # Close PLC connection if exists
+            # Close other connections
             if hasattr(self, 'modbus_client') and self.modbus_client:
                 self.modbus_client.close()
             
-            # Close Modbus TCP connection if exists
             if hasattr(self, 'modbus_tcp_client') and self.modbus_tcp_client:
                 self.modbus_tcp_client.close()
                 
