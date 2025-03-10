@@ -6,6 +6,9 @@ import mysql.connector
 from pynput import keyboard
 import threading
 import json
+from pymodbus.client import ModbusSerialClient
+import serial
+from dotenv import load_dotenv
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -26,8 +29,34 @@ class EOLTesterGUI:
         self.barcode_data = ""
         self.label_widgets = {}
         
+        # Get machine ID from environment variable and store it
+        self.machineid = os.getenv('MACHINE_ID', 'Not Set')
+        
+        # Initialize arrays for different data types
+        self.process_status_array = []
+        self.program_selection_array = []
+        self.input_sensors_array = []
+        self.employee_codes = []
+        
+        # Load data from files
+        self.load_configuration_data()
+        
+        # Load environment variables
+        load_dotenv()
+        
+        # Initialize communication clients
+        self.plc_client = None
+        self.loadcell1_client = None
+        self.loadcell2_client = None
+        
+        # Connect to devices on startup
+        self.connect_to_devices()
+        
         self.setup_gui()
         self.setup_barcode_listener()
+        
+        # Start monitoring P0000 state
+        self.monitor_p0000_state()
 
     def setup_gui(self):
         # Main container
@@ -59,14 +88,59 @@ class EOLTesterGUI:
         title_frame.pack(fill="x")
         
         # INFAC Logo (left side)
-        logo_label = tk.Label(title_frame, text="INFAC\nINDIA", 
-                            bg="#FFB6C1", font=("Arial", 10, "bold"))
+        logo_label = tk.Label(
+            title_frame, 
+            text="INFAC\nINDIA", 
+            bg="#FFB6C1", 
+            font=("Arial", 10, "bold")
+        )
         logo_label.pack(side="left", padx=10)
         
+        # Add Test PLC Button (left side, after logo)
+        self.test_plc_button = tk.Button(
+            title_frame,
+            text="P0000: LOW",  # Initial state
+            bg="#4CAF50",  # Green background
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief="raised",
+            command=self.test_plc_communication,
+            width=12,
+            height=1
+        )
+        self.test_plc_button.pack(side="left", padx=10)
+        
+        # Add status indicator
+        self.status_label = tk.Label(
+            title_frame,
+            text="●",  # Dot indicator
+            font=("Arial", 16, "bold"),
+            bg="#FFB6C1",
+            fg="gray"  # Initial color
+        )
+        self.status_label.pack(side="left")
+        
         # Title (center)
-        title_label = tk.Label(title_frame, text="EOL (END OF LINE) TESTER",
-                             font=("Arial", 16, "bold"), bg="#FFB6C1")
+        title_label = tk.Label(
+            title_frame, 
+            text="EOL (END OF LINE) TESTER",
+            font=("Arial", 16, "bold"), 
+            bg="#FFB6C1"
+        )
         title_label.pack(pady=5)
+        
+        # Machine ID (right side)
+        machine_label = tk.Label(
+            title_frame, 
+            text=f"Machine ID: {self.machineid}",
+            bg="#FFB6C1", 
+            font=("Arial", 12, "bold")
+        )
+        machine_label.pack(side="right", padx=20)
+
+        # Add hover effect for the test button
+        self.test_plc_button.bind('<Enter>', lambda e: self.test_plc_button.config(bg="#45a049"))
+        self.test_plc_button.bind('<Leave>', lambda e: self.test_plc_button.config(bg="#4CAF50"))
 
     def create_quadrants(self):
         """Update the create_quadrants method to remove borders"""
@@ -600,7 +674,20 @@ class EOLTesterGUI:
 
     # Button command methods
     def auto_command(self):
-        messagebox.showinfo("Auto", "Auto mode activated")
+        """Example of using the communication methods"""
+        try:
+            # Read PLC status
+            plc_status = self.read_plc_data()
+            
+            # Read both loadcells
+            lc1_value = self.read_loadcell(1)
+            lc2_value = self.read_loadcell(2)
+            
+            # Update your UI with the values
+            self.update_display(plc_status, lc1_value, lc2_value)
+            
+        except Exception as e:
+            messagebox.showerror("Communication Error", str(e))
 
     def home_command(self):
         messagebox.showinfo("Home", "Returning to home position")
@@ -687,6 +774,155 @@ class EOLTesterGUI:
         part_number = self.barcode_data.strip()
         if part_number:
             self.retrieve_part_specifications(part_number)
+
+    def load_configuration_data(self):
+        """Load configuration data from files"""
+        try:
+            # Load ProcessStatus
+            with open('ProcessStatus.txt', 'r') as file:
+                self.process_status_array = [line.strip() for line in file.readlines()]
+            
+            # Load ProgramSelectionInPLC
+            with open('ProgramSelectionInPLC.txt', 'r') as file:
+                self.program_selection_array = [line.strip() for line in file.readlines()]
+            
+            # Load InputSensors
+            with open('InputSensors.txt', 'r') as file:
+                self.input_sensors_array = [line.strip() for line in file.readlines()]
+            
+            # Load EmployeeCodes
+            with open('EmployeeCodes.txt', 'r') as file:
+                self.employee_codes = [line.strip() for line in file.readlines()]
+            
+            # Check if any array is empty
+            if not all([self.process_status_array, self.program_selection_array, self.input_sensors_array, self.employee_codes]):
+                messagebox.showwarning("Empty File", "One or more configuration files are empty.")
+            
+        except FileNotFoundError:
+            messagebox.showerror("File Not Found", "One or more configuration files not found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error loading configuration data: {str(e)}")
+
+    def connect_to_devices(self):
+        """Connect to PLC and loadcells using saved configurations"""
+        try:
+            # Connect to PLC
+            plc_port = os.getenv('PLC_COM_PORT')
+            plc_baud = os.getenv('PLC_BAUD_RATE')
+            plc_station_id = os.getenv('PLC_STATION_ID')
+            
+            if all([plc_port, plc_baud, plc_station_id]):
+                self.plc_client = ModbusSerialClient(
+                    port=plc_port,
+                    baudrate=int(plc_baud),
+                    timeout=1,
+                    stopbits=1,
+                    bytesize=8,
+                    parity='N'
+                )
+                if not self.plc_client.connect():
+                    print(f"Failed to connect to PLC on {plc_port}")
+            
+            # Connect to Loadcell 1
+            lc1_port = os.getenv('LOADCELL_01_COM_PORT')
+            lc1_baud = os.getenv('LOADCELL_01_BAUD_RATE')
+            
+            if all([lc1_port, lc1_baud]):
+                self.loadcell1_client = serial.Serial(
+                    port=lc1_port,
+                    baudrate=int(lc1_baud),
+                    bytesize=8,
+                    parity='N',
+                    stopbits=1,
+                    timeout=0.5
+                )
+            
+            # Connect to Loadcell 2
+            lc2_port = os.getenv('LOADCELL_02_COM_PORT')
+            lc2_baud = os.getenv('LOADCELL_02_BAUD_RATE')
+            
+            if all([lc2_port, lc2_baud]):
+                self.loadcell2_client = serial.Serial(
+                    port=lc2_port,
+                    baudrate=int(lc2_baud),
+                    bytesize=8,
+                    parity='N',
+                    stopbits=1,
+                    timeout=0.5
+                )
+                
+        except Exception as e:
+            print(f"Error connecting to devices: {str(e)}")
+            messagebox.showerror("Connection Error", f"Failed to connect to devices: {str(e)}")
+
+    def read_plc_data(self):
+        """Read data from PLC"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                raise Exception("PLC not connected")
+                
+            station_id = int(os.getenv('PLC_STATION_ID'))
+            
+            # Read process status
+            response = self.plc_client.read_coils(
+                address=0,  # Adjust address as needed
+                count=1,
+                slave=station_id
+            )
+            
+            if not response.isError():
+                return response.bits[0]
+            else:
+                raise Exception("Error reading PLC data")
+                
+        except Exception as e:
+            print(f"Error reading PLC: {str(e)}")
+            return None
+
+    def read_loadcell(self, loadcell_num):
+        """Read data from specified loadcell"""
+        try:
+            client = self.loadcell1_client if loadcell_num == 1 else self.loadcell2_client
+            
+            if not client or not client.is_open:
+                raise Exception(f"Loadcell {loadcell_num} not connected")
+            
+            # Clear buffers
+            client.reset_input_buffer()
+            client.reset_output_buffer()
+            
+            # Send command
+            command = f"ID{loadcell_num:02d}P".encode()
+            client.write(command)
+            
+            # Read response
+            response = client.readline()
+            if response:
+                decoded = response.decode('utf-8', errors='replace').strip()
+                parts = decoded.split(',')
+                if len(parts) > 1:
+                    return parts[1]  # Return the value part
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error reading Loadcell {loadcell_num}: {str(e)}")
+            return None
+
+    def cleanup(self):
+        """Close all connections before exiting"""
+        try:
+            if self.plc_client:
+                self.plc_client.close()
+            
+            if self.loadcell1_client and self.loadcell1_client.is_open:
+                self.loadcell1_client.close()
+                
+            if self.loadcell2_client and self.loadcell2_client.is_open:
+                self.loadcell2_client.close()
+                
+        except Exception as e:
+            print(f"Error during cleanup: {str(e)}")
 
     def retrieve_part_specifications(self, part_number):
         """Retrieve specifications and label coordinates from database."""
@@ -1131,16 +1367,124 @@ class EOLTesterGUI:
                 if result == "PASS":
                     self.spec_tree.tag_configure('pass', background='#006400')  # Dark green
                     self.spec_tree.item(item, values=current_values, tags=('pass',))
-                elif result == "FAIL":
-                    self.spec_tree.tag_configure('fail', background='#8B0000')  # Dark red
-                    self.spec_tree.item(item, values=current_values, tags=('fail',))
-                else:
-                    self.spec_tree.item(item, values=current_values)
-                break
+
+    def test_plc_communication(self):
+        """Test PLC communication by toggling P0000 input address"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                messagebox.showerror("Error", "PLC not connected. Please check COM port settings.")
+                return
+
+            # Get the station ID from environment variable
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+
+            # First read the current state of P0000
+            read_response = self.plc_client.read_coils(
+                address=0x0000,  # Change to your desired address
+                count=1,
+                slave=station_id
+            )
+
+            if read_response.isError():
+                raise Exception(f"Failed to read P0000 state: {read_response}")
+
+            current_state = read_response.bits[0]
+            new_state = not current_state  # Toggle the state
+
+            # Write the new state to P0000
+            write_response = self.plc_client.write_coil(
+                address=0x0000,  # Change to your desired address
+                value=new_state,
+                slave=station_id
+            )
+
+            if write_response.isError():
+                raise Exception(f"Failed to write to P0000: {write_response}")
+
+            # Read back to confirm the change
+            verify_response = self.plc_client.read_coils(
+                address=0x0000,
+                count=1,
+                slave=station_id
+            )
+
+            if verify_response.isError():
+                raise Exception(f"Failed to verify P0000 state: {verify_response}")
+
+            verified_state = verify_response.bits[0]
+
+            # Show success message with state change
+            messagebox.showinfo("Success", 
+                f"P0000 state changed successfully!\n"
+                f"Previous state: {'HIGH' if current_state else 'LOW'}\n"
+                f"Current state: {'HIGH' if verified_state else 'LOW'}"
+            )
+
+            # Update button text to show current state
+            self.test_plc_button.config(
+                text=f"P0000: {'HIGH' if verified_state else 'LOW'}"
+            )
+
+            # Flash the button to indicate success
+            self.flash_button_success()
+
+        except Exception as e:
+            messagebox.showerror("Communication Error", f"Failed to communicate with PLC:\n{str(e)}")
+            self.flash_button_failure()
+
+    def flash_button_success(self):
+        """Visual feedback for successful communication"""
+        def reset_colors():
+            self.test_plc_button.config(bg="#4CAF50")  # Reset button color
+            self.status_label.config(fg="green")  # Keep status indicator green
+        
+        self.test_plc_button.config(bg="#00FF00")  # Bright green for success
+        self.status_label.config(fg="#00FF00")  # Bright green for status
+        self.root.after(200, reset_colors)
+
+    def flash_button_failure(self):
+        """Visual feedback for failed communication"""
+        def reset_colors():
+            self.test_plc_button.config(bg="#4CAF50")  # Reset button color
+            self.status_label.config(fg="red")  # Keep status indicator red
+        
+        self.test_plc_button.config(bg="#FF0000")  # Red for failure
+        self.status_label.config(fg="#FF0000")  # Red for status
+        self.root.after(200, reset_colors)
+
+    def monitor_p0000_state(self):
+        """Continuously monitor P0000 state"""
+        try:
+            if self.plc_client and self.plc_client.is_socket_open():
+                station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                
+                response = self.plc_client.read_coils(
+                    address=0x0000,
+                    count=1,
+                    slave=station_id
+                )
+                
+                if not response.isError():
+                    state = response.bits[0]
+                    self.test_plc_button.config(
+                        text=f"P0000: {'HIGH' if state else 'LOW'}"
+                    )
+                    self.status_label.config(
+                        fg="green" if state else "gray"
+                    )
+            
+        except Exception as e:
+            print(f"Monitoring error: {e}")
+            self.status_label.config(fg="red")
+        
+        # Schedule next update
+        self.root.after(1000, self.monitor_p0000_state)  # Update every second
 
 def main():
     root = tk.Tk()
     app = EOLTesterGUI(root)
+    # Add this line to ensure cleanup on window close
+    root.protocol("WM_DELETE_WINDOW", lambda: [app.cleanup(), root.destroy()])
     root.mainloop()
 
 if __name__ == "__main__":

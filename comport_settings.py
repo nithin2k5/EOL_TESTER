@@ -28,6 +28,31 @@ class ComPortSettings:
         # Configure the main background color
         self.root.configure(bg='#f0f0f0')  # Light gray background
         
+        # Get machine ID from environment variable
+        self.machine_id = os.getenv('MACHINE_ID', 'Not Set')
+        
+        # Create and setup the UI
+        self.setup_ui()
+        
+        # Load environment variables
+        self.env_file = '.env'
+        load_dotenv(self.env_file)
+        
+        # Create .env file if it doesn't exist
+        if not os.path.exists(self.env_file):
+            with open(self.env_file, 'w') as f:
+                f.write('# COM Port Settings\n')
+
+        # Add Modbus client attribute
+        self.modbus_client = None
+
+        # Initialize loadcell serial ports dictionary
+        self.loadcell_ports = {}
+
+        # Initialize loadcell data in environment
+        self.initialize_loadcell_env()
+
+    def setup_ui(self):
         # Header with border lines
         header_frame = tk.Frame(self.root, bg='#f0f0f0')
         header_frame.pack(fill=tk.X, padx=5)
@@ -35,15 +60,29 @@ class ComPortSettings:
         # Top border line
         tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
         
-        # Title
+        # Header content frame
+        header_content = tk.Frame(header_frame, bg='#f0f0f0')
+        header_content.pack(fill=tk.X, pady=5)
+        
+        # Title (Center)
         title_label = tk.Label(
-            header_frame, 
+            header_content, 
             text="COM PORT SETTINGS",
             bg='#f0f0f0',
             fg='#2c3e50',
             font=('Arial', 28, 'bold')
         )
-        title_label.pack(pady=10)
+        title_label.pack(expand=True)
+        
+        # Machine ID Label (Right side)
+        machine_label = tk.Label(
+            header_content, 
+            text=f"Machine ID: {self.machine_id}",
+            bg='#f0f0f0',
+            fg='#2c3e50',
+            font=('Arial', 12, 'bold')
+        )
+        machine_label.pack(side=tk.RIGHT, padx=20)
         
         # Bottom border line
         tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
@@ -115,24 +154,6 @@ class ComPortSettings:
         )
         modbus_tcp_frame.grid(row=1, column=0, padx=10, sticky='nsew')
         self.add_modbus_tcp_content(modbus_tcp_frame)
-
-        # Load environment variables
-        self.env_file = '.env'
-        load_dotenv(self.env_file)
-        
-        # Create .env file if it doesn't exist
-        if not os.path.exists(self.env_file):
-            with open(self.env_file, 'w') as f:
-                f.write('# COM Port Settings\n')
-
-        # Add Modbus client attribute
-        self.modbus_client = None
-
-        # Initialize loadcell serial ports dictionary
-        self.loadcell_ports = {}
-
-        # Initialize loadcell data in environment
-        self.initialize_loadcell_env()
 
     def create_section(self, parent, title, bg_color, width, height):
         frame = tk.Frame(parent, bg=bg_color, width=width, height=height, relief='solid', borderwidth=1)

@@ -1,13 +1,25 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk
 import mysql.connector
 from tkcalendar import DateEntry
+import os
+import json
+from datetime import datetime, timedelta
+import csv
+import shutil
 
 class AdminConsole:
     def __init__(self, root):
         self.root = root
         self.root.title("ADMIN CONSOLE")
+        
+        # Initialize backup paths and machine ID from environment variables
+        self.backup_paths = {
+            'primary': os.getenv('PRIMARY_BACKUP_PATH', ''),
+            'secondary': os.getenv('SECONDARY_BACKUP_PATH', '')
+        }
+        self.machine_id = os.getenv('MACHINE_ID', '')  # Get machine ID from env
         
         # Database configuration
         self.db_config = {
@@ -41,20 +53,46 @@ class AdminConsole:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS EMPLOYEE_INFO (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    EMPLOYEE_FULL_NAME VARCHAR(255),
-                    EMPLOYEE_NUMBER VARCHAR(50) UNIQUE,
-                    PASSWORD VARCHAR(255),
-                    DESIGNATION VARCHAR(100),
-                    DEPARTMENT VARCHAR(100),
-                    MOBILE_NUMBER VARCHAR(20),
-                    IS_ACTIVE BOOLEAN DEFAULT TRUE
-                )
-            ''')
+            # First, check if MACHINE_ID column exists
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.columns 
+                WHERE table_schema = 'EOL'
+                AND table_name = 'EMPLOYEE_INFO'
+                AND column_name = 'MACHINE_ID'
+            """)
             
-            conn.commit()
+            has_machine_id = cursor.fetchone()[0] > 0
+            
+            if not has_machine_id:
+                # Add MACHINE_ID column if it doesn't exist
+                try:
+                    cursor.execute("""
+                        ALTER TABLE EMPLOYEE_INFO
+                        ADD COLUMN MACHINE_ID VARCHAR(100) AFTER MOBILE_NUMBER
+                    """)
+                    conn.commit()
+                except mysql.connector.Error as err:
+                    # If table doesn't exist, create it with all columns
+                    if err.errno == 1146:  # Table doesn't exist
+                        cursor.execute('''
+                            CREATE TABLE EMPLOYEE_INFO (
+                                ID INT AUTO_INCREMENT PRIMARY KEY,
+                                EMPLOYEE_FULL_NAME VARCHAR(255),
+                                EMPLOYEE_NUMBER VARCHAR(50) UNIQUE,
+                                PASSWORD VARCHAR(255),
+                                DESIGNATION VARCHAR(100),
+                                DEPARTMENT VARCHAR(100),
+                                MOBILE_NUMBER VARCHAR(20),
+                                MACHINE_ID VARCHAR(100),
+                                IS_ACTIVE BOOLEAN DEFAULT TRUE,
+                                CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                        ''')
+                        conn.commit()
+                    else:
+                        raise
+            
             cursor.close()
             conn.close()
             
@@ -91,7 +129,7 @@ class AdminConsole:
     def add_record(self):
         """Add a new employee record"""
         try:
-            # Get values from entries, ignoring placeholder text
+            # Get values from entries
             values = {}
             for field, entry in self.entries.items():
                 value = entry.get().strip()
@@ -100,14 +138,20 @@ class AdminConsole:
                     return
                 values[field] = value
             
+            # Add machine ID to the record
+            machine_id = self.machine_id_var.get().strip()
+            if not machine_id:
+                messagebox.showwarning("Warning", "Please set Machine ID first")
+                return
+            
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
             query = """
                 INSERT INTO EMPLOYEE_INFO (
                     EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD,
-                    DESIGNATION, DEPARTMENT, MOBILE_NUMBER, IS_ACTIVE
-                ) VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    DESIGNATION, DEPARTMENT, MOBILE_NUMBER, MACHINE_ID, IS_ACTIVE
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
             """
             
             cursor.execute(query, (
@@ -116,7 +160,8 @@ class AdminConsole:
                 values["PASSWORD :"],
                 values["DESIGNATION :"],
                 values["DEPARTMENT :"],
-                values["MOBILE NUMBER :"]
+                values["MOBILE NUMBER :"],
+                machine_id
             ))
             
             conn.commit()
@@ -277,16 +322,17 @@ class AdminConsole:
                 self.entries[field].insert(0, value)
 
     def setup_ui(self):
-        # Load icons
+        # Load icons with fallback text
         try:
-            self.add_icon = ImageTk.PhotoImage(Image.open("icons/add_icon.png").resize((20, 20)))
-            self.edit_icon = ImageTk.PhotoImage(Image.open("icons/edit_icon.png").resize((20, 20)))
-            self.save_icon = ImageTk.PhotoImage(Image.open("icons/save_icon.png").resize((20, 20)))
-            self.delete_icon = ImageTk.PhotoImage(Image.open("icons/delete_icon.png").resize((20, 20)))
-            self.clear_icon = ImageTk.PhotoImage(Image.open("icons/clear_icon.png").resize((20, 20)))
+            icon_path = os.path.join(os.path.dirname(__file__), "icons")
+            self.add_icon = ImageTk.PhotoImage(Image.open(os.path.join(icon_path, "add_icon.png")).resize((20, 20)))
+            self.edit_icon = ImageTk.PhotoImage(Image.open(os.path.join(icon_path, "edit_icon.png")).resize((20, 20)))
+            self.save_icon = ImageTk.PhotoImage(Image.open(os.path.join(icon_path, "save_icon.png")).resize((20, 20)))
+            self.delete_icon = ImageTk.PhotoImage(Image.open(os.path.join(icon_path, "delete_icon.png")).resize((20, 20)))
+            self.clear_icon = ImageTk.PhotoImage(Image.open(os.path.join(icon_path, "clear_icon.png")).resize((20, 20)))
         except Exception as e:
             print(f"Error loading icons: {e}")
-            # Fallback to text-only buttons if icons fail to load
+            # Set icons to None for fallback to text-only buttons
             self.add_icon = self.edit_icon = self.save_icon = self.delete_icon = self.clear_icon = None
 
         # Header
@@ -362,6 +408,9 @@ class AdminConsole:
             )
             entry.pack(side=tk.LEFT, padx=5)
             self.entries[field] = entry
+
+        # Add Backup Path Selection frames after Machine ID
+        self.create_backup_path_section(entries_frame)
 
         # Right side - Buttons frame (30% of width)
         right_frame = tk.Frame(top_container, bg='white')
@@ -530,6 +579,333 @@ class AdminConsole:
             
         except Exception as e:
             print(f"Error loading image: {e}")
+
+    def create_backup_path_section(self, parent):
+        """Create backup path section with machine ID"""
+        # Create a frame with a border and title
+        backup_frame = ttk.LabelFrame(parent, text="Backup Configuration", padding=(10, 5))
+        backup_frame.pack(fill=tk.X, pady=10, padx=5)
+        
+        # Machine ID
+        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame.pack(fill=tk.X, pady=5)
+        
+        label = tk.Label(
+            row_frame, 
+            text="MACHINE ID :",
+            bg='white',
+            fg='black',
+            font=('Arial', 10, 'bold'),
+            width=20,
+            anchor='e'
+        )
+        label.pack(side=tk.LEFT, padx=5)
+        
+        # Text entry for Machine ID
+        self.machine_id_var = tk.StringVar(value=self.machine_id)
+        self.machine_id_entry = tk.Entry(
+            row_frame,
+            textvariable=self.machine_id_var,
+            width=40,
+            bg='white',
+            fg='black',
+            font=('Arial', 9)
+        )
+        self.machine_id_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Save Machine ID button
+        save_machine_id_btn = tk.Button(
+            row_frame,
+            text="Save ID",
+            command=self.save_machine_id,
+            bg='#3498db',
+            fg='white',
+            font=('Arial', 9, 'bold'),
+            relief='raised',
+            bd=2,
+            padx=10
+        )
+        save_machine_id_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Add hover effect for save button
+        save_machine_id_btn.bind('<Enter>', lambda e: save_machine_id_btn.configure(bg='#2980b9'))
+        save_machine_id_btn.bind('<Leave>', lambda e: save_machine_id_btn.configure(bg='#3498db'))
+
+        # Primary Backup Path
+        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame.pack(fill=tk.X, pady=5)
+        
+        label = tk.Label(
+            row_frame, 
+            text="PRIMARY BACKUP PATH :",
+            bg='white',
+            fg='black',
+            font=('Arial', 10, 'bold'),
+            width=20,
+            anchor='e'
+        )
+        label.pack(side=tk.LEFT, padx=5)
+        
+        # Text entry for primary path
+        self.primary_path_var = tk.StringVar(value=self.backup_paths.get('primary', 'Click to select primary backup path...'))
+        self.primary_path_entry = tk.Entry(
+            row_frame,
+            textvariable=self.primary_path_var,
+            width=40,
+            bg='#f0f0f0',  # Light gray background
+            fg='#333333',  # Dark text color
+            font=('Arial', 9)
+        )
+        self.primary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Bind click event to primary path entry
+        self.primary_path_entry.bind('<Button-1>', lambda e: self.browse_backup_path('primary'))
+        
+        # Secondary Backup Path
+        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame.pack(fill=tk.X, pady=5)
+        
+        label = tk.Label(
+            row_frame, 
+            text="SECONDARY BACKUP PATH :",
+            bg='white',
+            fg='black',
+            font=('Arial', 10, 'bold'),
+            width=20,
+            anchor='e'
+        )
+        label.pack(side=tk.LEFT, padx=5)
+        
+        # Text entry for secondary path
+        self.secondary_path_var = tk.StringVar(value=self.backup_paths.get('secondary', 'Click to select secondary backup path...'))
+        self.secondary_path_entry = tk.Entry(
+            row_frame,
+            textvariable=self.secondary_path_var,
+            width=40,
+            bg='#f0f0f0',  # Light gray background
+            fg='#333333',  # Dark text color
+            font=('Arial', 9)
+        )
+        self.secondary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Bind click event to secondary path entry
+        self.secondary_path_entry.bind('<Button-1>', lambda e: self.browse_backup_path('secondary'))
+
+        # Backup Now button with improved styling
+        backup_btn = tk.Button(
+            backup_frame,
+            text="Backup Now",
+            command=self.create_backup,
+            bg='#2ecc71',
+            fg='white',
+            font=('Arial', 10, 'bold'),
+            relief='raised',
+            bd=2,
+            padx=20,
+            pady=5
+        )
+        backup_btn.pack(pady=10)
+        
+        # Add hover effects for backup button
+        backup_btn.bind('<Enter>', lambda e: backup_btn.configure(bg='#27ae60'))
+        backup_btn.bind('<Leave>', lambda e: backup_btn.configure(bg='#2ecc71'))
+
+        # Add hover effects for text entries
+        def on_enter(event):
+            event.widget.config(bg='#e8e8e8')  # Slightly darker on hover
+
+        def on_leave(event):
+            event.widget.config(bg='#f0f0f0')  # Back to normal color
+
+        for entry in [self.primary_path_entry, self.secondary_path_entry]:
+            entry.bind('<Enter>', on_enter)
+            entry.bind('<Leave>', on_leave)
+
+    def browse_backup_path(self, path_type):
+        """Open folder selection dialog and update backup path"""
+        try:
+            # Open folder selection dialog
+            initial_dir = self.backup_paths.get(path_type, os.path.expanduser('~'))
+            folder_path = filedialog.askdirectory(
+                title=f"Select {path_type.title()} Backup Location",
+                initialdir=initial_dir
+            )
+            
+            if folder_path:
+                # Update the path in the interface and storage
+                if path_type == 'primary':
+                    self.primary_path_var.set(folder_path)
+                    self.primary_path_entry.config(fg='#000000')  # Black text for selected path
+                else:
+                    self.secondary_path_var.set(folder_path)
+                    self.secondary_path_entry.config(fg='#000000')  # Black text for selected path
+                
+                # Store in backup_paths dictionary
+                self.backup_paths[path_type] = folder_path
+                
+                # Save to environment variable
+                os.environ[f'{path_type.upper()}_BACKUP_PATH'] = folder_path
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to set {path_type} backup path:\n{str(e)}"
+            )
+
+    def create_backup(self):
+        """Create backup of last 3 months data"""
+        try:
+            # Validate backup paths
+            primary_path = self.primary_path_var.get()
+            secondary_path = self.secondary_path_var.get()
+            
+            if not primary_path and not secondary_path:
+                messagebox.showerror("Error", "Please select at least one backup location!")
+                return
+            
+            # Calculate date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=90)  # 3 months
+            
+            # Connect to database
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Get data for last 3 months
+            query = """
+                SELECT 
+                    EMPLOYEE_FULL_NAME, 
+                    EMPLOYEE_NUMBER, 
+                    DESIGNATION, 
+                    DEPARTMENT, 
+                    MOBILE_NUMBER, 
+                    MACHINE_ID,
+                    IS_ACTIVE,
+                    CREATED_DATE
+                FROM EMPLOYEE_INFO 
+                WHERE CREATED_DATE BETWEEN %s AND %s
+            """
+            
+            cursor.execute(query, (start_date, end_date))
+            data = cursor.fetchall()
+            
+            if not data:
+                messagebox.showinfo("Info", "No data found for the last 3 months")
+                return
+            
+            # Create backup files
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"employee_backup_{timestamp}.csv"
+            
+            # Headers for CSV file
+            headers = [
+                "Employee Name", 
+                "Employee Number", 
+                "Designation", 
+                "Department", 
+                "Mobile Number", 
+                "Machine ID",
+                "Status",
+                "Created Date"
+            ]
+            
+            def save_backup(path):
+                if path:
+                    full_path = os.path.join(path, filename)
+                    with open(full_path, 'w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(headers)
+                        for row in data:
+                            writer.writerow(row)
+                    return full_path
+                return None
+            
+            # Create primary backup
+            primary_file = save_backup(primary_path)
+            
+            # Create secondary backup
+            secondary_file = save_backup(secondary_path)
+            
+            # Create backup info file
+            backup_info = {
+                'timestamp': timestamp,
+                'date_range': {
+                    'start': start_date.strftime("%Y-%m-%d"),
+                    'end': end_date.strftime("%Y-%m-%d")
+                },
+                'record_count': len(data),
+                'primary_location': primary_file,
+                'secondary_location': secondary_file
+            }
+            
+            if primary_path:
+                info_file = os.path.join(primary_path, f"backup_info_{timestamp}.json")
+                with open(info_file, 'w') as f:
+                    json.dump(backup_info, f, indent=4)
+            
+            messagebox.showinfo("Success", 
+                              f"Backup created successfully!\n"
+                              f"Records backed up: {len(data)}\n"
+                              f"Date range: {start_date.date()} to {end_date.date()}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create backup: {str(e)}")
+        finally:
+            if 'conn' in locals():
+                cursor.close()
+                conn.close()
+
+    def save_machine_id(self):
+        """Save Machine ID to environment variable and update database"""
+        try:
+            machine_id = self.machine_id_var.get().strip()
+            if not machine_id:
+                messagebox.showwarning("Warning", "Please enter a Machine ID")
+                return
+            
+            # Save to environment variable
+            os.environ['MACHINE_ID'] = machine_id
+            self.machine_id = machine_id
+            
+            # Update database with machine ID for all records
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Update all records with the new machine ID where it's NULL or empty
+            cursor.execute("""
+                UPDATE EMPLOYEE_INFO 
+                SET MACHINE_ID = %s 
+                WHERE MACHINE_ID IS NULL OR MACHINE_ID = ''
+            """, (machine_id,))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            messagebox.showinfo("Success", f"Machine ID saved: {machine_id}")
+            
+            # Refresh the display
+            self.load_records()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save Machine ID: {str(e)}")
+
+    def cleanup(self):
+        """Cleanup function called when closing the application"""
+        try:
+            # Save backup paths and machine ID to environment variables
+            if self.backup_paths['primary']:
+                os.environ['PRIMARY_BACKUP_PATH'] = self.backup_paths['primary']
+            if self.backup_paths['secondary']:
+                os.environ['SECONDARY_BACKUP_PATH'] = self.backup_paths['secondary']
+            if self.machine_id_var.get().strip():
+                os.environ['MACHINE_ID'] = self.machine_id_var.get().strip()
+            
+            # Create final backup before closing
+            self.create_backup()
+            
+        except Exception as e:
+            print(f"Error during cleanup: {str(e)}")
 
 def main():
     root = tk.Tk()
