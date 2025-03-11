@@ -99,15 +99,16 @@ class WorkspaceApp:
     def create_quadrants(self):
         self.quadrants = []
         
-        # Create first quadrant (image quadrant)
-        self.image_quadrant = tk.Frame(self.workspace_frame,
-                                     relief="groove",
-                                     borderwidth=1,
-                                     bg='white',
-                                     width=self.min_quadrant_size[0],
-                                     height=self.min_quadrant_size[1])
-        self.image_quadrant.grid(row=0, column=0, sticky="nsew")
-        self.image_quadrant.grid_propagate(False)
+        # First quadrant (Image Display)
+        first_quadrant = tk.Frame(self.workspace_frame, bg='white')
+        first_quadrant.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        first_quadrant.grid_propagate(False)
+        first_quadrant.config(width=800, height=600)  # This sets the overall quadrant size
+
+        # Image frame within first quadrant
+        self.image_frame = tk.Frame(first_quadrant, bg='white')
+        self.image_frame.place(relx=0.5, rely=0.5, anchor='center')
+        self.image_frame.config(width=750, height=550)  # These are the actual image frame dimensions
         
         # Create second quadrant
         self.second_quadrant = tk.Frame(self.workspace_frame,
@@ -120,11 +121,11 @@ class WorkspaceApp:
         self.second_quadrant.grid_propagate(False)
         
         # Add both quadrants to the list
-        self.quadrants.append(self.image_quadrant)
+        self.quadrants.append(first_quadrant)
         self.quadrants.append(self.second_quadrant)
         
         # Create coordinate display label
-        self.coord_label = tk.Label(self.image_quadrant, 
+        self.coord_label = tk.Label(first_quadrant, 
                                   text="Coordinates: ", 
                                   bg='white',
                                   font=('Arial', 10))
@@ -579,19 +580,19 @@ class WorkspaceApp:
                 return
             
             # Create new label in the image quadrant
-            new_label = tk.Label(self.image_quadrant, 
+            new_label = tk.Label(self.image_frame, 
                                text=label_text,
                                width=4,
                                relief="raised",
                                bg="lightblue")
             
             # Get the cursor position relative to the image quadrant
-            x = event.x_root - self.image_quadrant.winfo_rootx() - (new_label.winfo_reqwidth() // 2)
-            y = event.y_root - self.image_quadrant.winfo_rooty() - (new_label.winfo_reqheight() // 2)
+            x = event.x_root - self.image_frame.winfo_rootx() - (new_label.winfo_reqwidth() // 2)
+            y = event.y_root - self.image_frame.winfo_rooty() - (new_label.winfo_reqheight() // 2)
             
             # Ensure the label stays within the quadrant boundaries
-            x = max(0, min(x, self.image_quadrant.winfo_width() - new_label.winfo_reqwidth()))
-            y = max(0, min(y, self.image_quadrant.winfo_height() - new_label.winfo_reqheight()))
+            x = max(0, min(x, self.image_frame.winfo_width() - new_label.winfo_reqwidth()))
+            y = max(0, min(y, self.image_frame.winfo_height() - new_label.winfo_reqheight()))
             
             new_label.place(x=x, y=y)
             
@@ -631,12 +632,12 @@ class WorkspaceApp:
             return
         
         # Get the current cursor position relative to the image quadrant
-        x = event.x_root - self.image_quadrant.winfo_rootx() - (self.current_label.winfo_reqwidth() // 2)
-        y = event.y_root - self.image_quadrant.winfo_rooty() - (self.current_label.winfo_reqheight() // 2)
+        x = event.x_root - self.image_frame.winfo_rootx() - (self.current_label.winfo_reqwidth() // 2)
+        y = event.y_root - self.image_frame.winfo_rooty() - (self.current_label.winfo_reqheight() // 2)
         
         # Ensure the label stays within the quadrant boundaries
-        x = max(0, min(x, self.image_quadrant.winfo_width() - self.current_label.winfo_reqwidth()))
-        y = max(0, min(y, self.image_quadrant.winfo_height() - self.current_label.winfo_reqheight()))
+        x = max(0, min(x, self.image_frame.winfo_width() - self.current_label.winfo_reqwidth()))
+        y = max(0, min(y, self.image_frame.winfo_height() - self.current_label.winfo_reqheight()))
         
         # Update label position
         self.current_label.place(x=x, y=y)
@@ -1410,7 +1411,7 @@ class WorkspaceApp:
                 # Place labels using coordinates
                 for label_num, coord_data in coordinates.items():
                     label_text = f'L{label_num}'
-                    new_label = tk.Label(self.image_quadrant,
+                    new_label = tk.Label(self.image_frame,
                                        text=coord_data['text'],
                                        width=len(coord_data['text']) + 2,
                                        relief="raised",

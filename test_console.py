@@ -15,13 +15,16 @@ class EOLTesterGUI:
         self.root = root
         self.root.title("EOL (END OF LINE) TESTER")
         
-        # Set window to full screen
-        self.root.attributes('-fullscreen', True)  # Change from state('zoomed') to true fullscreen
+        # Initialize variables before setting up the window
+        self.initialize_variables()
         
-        # Add escape key binding to exit fullscreen
-        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        # Set up the window after initialization
+        self.root.after(100, self.setup_window)  # Delay window setup slightly
         
-        # Initialize variables
+        # Continue with the rest of your initialization...
+
+    def initialize_variables(self):
+        """Initialize all variables before window setup"""
         self.image_label = None
         self.current_image = None
         self.label_positions = {}
@@ -38,33 +41,52 @@ class EOLTesterGUI:
         self.input_sensors_array = []
         self.employee_codes = []
         
-        # Load data from files
+        # Initialize additional variables
+        self.keepWriting = False
+        self.breakLoop = False
+        self.failCounter = 0
+        self.startingNGCableValidation = False
+        self.endingNGCableValidation = False
+        self.noOfValues = 0
+        self.resetPLCOnFormClosing = True
+        
+        # Initialize timers
+        self.alc_timer = None
+        self.alcInput_TimeInterval = 200  # milliseconds
+
+    def setup_window(self):
+        """Set up the window after initialization"""
+        # Set window to full screen
+        self.root.attributes('-fullscreen', True)
+        self.root.lift()  # Bring window to front
+        self.root.focus_force()  # Force focus
+        
+        # Add escape key binding to exit fullscreen
+        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        
+        # Load data and connect to devices
         self.load_configuration_data()
-        
-        # Load environment variables
         load_dotenv()
-        
-        # Initialize communication clients
-        self.plc_client = None
-        self.loadcell1_client = None
-        self.loadcell2_client = None
-        
-        # Connect to devices on startup
         self.connect_to_devices()
         
+        # Set up GUI components
         self.setup_gui()
         self.setup_barcode_listener()
         
-        # Start monitoring P0000 state
+        # Start monitoring
         self.monitor_p0000_state()
+        self.start_check_async()
+        
+        # Ensure window stays on top during initialization
+        self.root.after(500, lambda: self.root.attributes('-topmost', False))
 
     def setup_gui(self):
         # Main container
         self.main_container = tk.Frame(self.root)
         self.main_container.pack(fill="both", expand=True)
 
-        # Add message label for status updates
-        self.message_label = tk.Label(self.main_container, text="", font=("Arial", 10))
+        # Add message label for status updates with empty initial text
+        self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
         self.message_label.pack(fill="x", pady=2)
         
         # Title bar with INFAC logo
@@ -168,7 +190,7 @@ class EOLTesterGUI:
 
     def create_first_quadrant(self):
         """Create the image display quadrant with correct dimensions."""
-        q1 = tk.Frame(self.workspace)
+        q1 = tk.Frame(self.workspace, bg='white')
         
         # Create header frame at the top
         header_frame = tk.Frame(q1, bg="#00BFFF", height=30)
@@ -181,13 +203,13 @@ class EOLTesterGUI:
                                     font=("Arial", 12, "bold"))
         self.model_header.pack(pady=2)
         
-        # Create a frame to hold the image with specific dimensions
+        # Create a frame to hold the image with exact dimensions
         self.image_frame = tk.Frame(q1, bg='white')
-        self.image_frame.pack(fill="both", expand=True, padx=0, pady=0)
+        self.image_frame.pack(expand=True, padx=2, pady=2)
         self.image_frame.pack_propagate(False)
         
-        # Set size for the image frame - increasing width to 550 while keeping height at 300
-        self.image_frame.config(width=527, height=340)
+        # Set exact size to match model_settings.py image dimensions
+        self.image_frame.config(width=640, height=480)  # Exact match to model_settings.py
         
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame, 
@@ -910,8 +932,13 @@ class EOLTesterGUI:
             return None
 
     def cleanup(self):
-        """Close all connections before exiting"""
+        """Enhanced cleanup method"""
         try:
+            # Reset PLC if configured
+            if self.resetPLCOnFormClosing:
+                self.reset_plc()
+            
+            # Close all connections
             if self.plc_client:
                 self.plc_client.close()
             
@@ -1000,35 +1027,29 @@ class EOLTesterGUI:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_image_with_path(self, image_path):
-        """Load and fit image to match the exact width of the image frame."""
+        """Load and fit image to match the exact dimensions of model_settings.py"""
         try:
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            # Get the first quadrant dimensions
-            frame_width = self.image_frame.winfo_width()
-            frame_height = self.image_frame.winfo_height()
-            
-            # Load original image
+            # Load and resize image to exactly 640x480 to match model_settings.py
             original_image = Image.open(image_path)
-            
-            # Resize image to fill the entire frame
-            resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
+            resized_image = original_image.resize((640, 480), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
             
             # Remove old image label if it exists
-            if self.image_label:
+            if hasattr(self, 'image_label'):
                 self.image_label.destroy()
             
-            # Create new image label that fills the entire frame
+            # Create new image label with exact same dimensions
             self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
             self.image_label.image = photo  # Keep a reference
-            self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
+            self.image_label.place(relx=0.5, rely=0.5, anchor='center')
             
             # Store image dimensions for label positioning
             self.image_dimensions = {
-                'width': frame_width,
-                'height': frame_height,
+                'width': 640,
+                'height': 480,
                 'x_offset': 0,
                 'y_offset': 0
             }
@@ -1191,7 +1212,7 @@ class EOLTesterGUI:
     def start_monitoring(self):
         """Start monitoring sensors and PLC status"""
         self.message_label.configure(text="Please Validate NG Cable...")
-        self.starting_ng_cable_validation = True
+        self.startingNGCableValidation = True
         # Start your monitoring threads/processes here
 
     def on_emp_entry_focus(self, is_focused):
@@ -1479,6 +1500,218 @@ class EOLTesterGUI:
         
         # Schedule next update
         self.root.after(1000, self.monitor_p0000_state)  # Update every second
+
+    def start_check_async(self):
+        """Main monitoring and test sequence"""
+        try:
+            # Reset message label
+            self.message_label.config(text="")
+            
+            # Initial readings
+            self.read_plc_coils()
+            self.read_sensor_inputs()
+            
+            # Start continuous monitoring loop
+            self.keepWriting = True
+            self.monitor_serial_ports()
+            
+            # Handle NG validation
+            if self.startingNGCableValidation:
+                self.root.after(2000, self.validate_ng_cable)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error in monitoring sequence: {str(e)}")
+
+    def monitor_serial_ports(self):
+        """Continuous monitoring of serial ports"""
+        try:
+            if self.keepWriting and not self.breakLoop:
+                # Send commands to loadcells
+                if self.loadcell1_client and self.loadcell1_client.is_open:
+                    self.loadcell1_client.write(b"ID01P")
+                if self.loadcell2_client and self.loadcell2_client.is_open:
+                    self.loadcell2_client.write(b"ID02P")
+                
+                # Read responses
+                self.read_loadcell_data()
+                
+                # Schedule next check
+                if not self.breakLoop and self.noOfValues == 0:
+                    self.root.after(50, self.monitor_serial_ports)
+                
+        except Exception as e:
+            print(f"Error monitoring ports: {e}")
+
+    def process_test_results(self):
+        """Process and validate test results"""
+        try:
+            # Only process if we have actual values
+            if self.noOfValues == 0:
+                return
+            
+            self.failCounter = 0
+            has_actual_values = False
+            
+            # Process each specification
+            for item in self.spec_tree.get_children():
+                values = self.spec_tree.item(item)['values']
+                device = values[1]
+                actual = values[5]
+                
+                if actual:  # Only process if there's an actual value
+                    has_actual_values = True
+                    min_val = float(values[3]) if values[3] != "N/A" else None
+                    max_val = float(values[4]) if values[4] != "N/A" else None
+                    
+                    if min_val is not None and max_val is not None:
+                        actual_val = float(actual)
+                        if min_val <= actual_val <= max_val:
+                            self.update_specification_result(device, actual, "PASS")
+                else:
+                            self.update_specification_result(device, actual, "NG")
+                            self.failCounter += 1
+            
+            # Update UI based on results only if we have processed values
+            if has_actual_values:
+                if self.failCounter > 0:
+                    self.message_label.config(text="Test Failed - NG", fg="red")
+                else:
+                    self.message_label.config(text="Test Passed - OK", fg="green")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error processing results: {str(e)}")
+
+    def validate_ng_cable(self):
+        """Handle NG cable validation"""
+        try:
+            if self.startingNGCableValidation:
+                if self.failCounter > 0:
+                    messagebox.showinfo("Validation", "NG Validation successful")
+                    self.startingNGCableValidation = False
+                else:
+                    if messagebox.askyesno("Validation", "No failures detected. Repeat validation?"):
+                        self.start_check_async()
+                    else:
+                        self.startingNGCableValidation = False
+                    
+            elif self.endingNGCableValidation:
+                if self.failCounter > 0:
+                    self.reset_plc()
+                else:
+                    if messagebox.askyesno("Validation", "No failures detected. Repeat validation?"):
+                        self.start_check_async()
+                    else:
+                        self.endingNGCableValidation = False
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Error in validation: {str(e)}")
+
+    def reset_plc(self):
+        """Reset PLC to initial state"""
+        try:
+            if self.plc_client and self.plc_client.is_socket_open():
+                station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                
+                # Write 0 to all relevant coils
+                for address in range(10):  # Adjust range as needed
+                    self.plc_client.write_coil(
+                        address=address,
+                        value=False,
+                        slave=station_id
+                    )
+                
+                messagebox.showinfo("PLC Reset", "PLC has been reset successfully")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset PLC: {str(e)}")
+
+    def read_loadcell_data(self):
+        """Read and process loadcell data"""
+        try:
+            for i, client in enumerate([self.loadcell1_client, self.loadcell2_client], 1):
+                if client and client.is_open:
+                    response = client.readline()
+                    if response:
+                        decoded = response.decode('utf-8', errors='replace').strip()
+                        parts = decoded.split(',')
+                        if len(parts) > 1:
+                            value = float(parts[1])
+                            # Update specification tree with actual value
+                            self.update_specification_result(f"L{i}", value, "")
+                            self.noOfValues += 1
+                            
+        except Exception as e:
+            print(f"Error reading loadcell data: {e}")
+
+    def read_plc_coils(self):
+        """Read all configured coils from PLC"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                raise Exception("PLC not connected")
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Read process status addresses
+            for address in self.process_status_array:
+                try:
+                    # Convert hex address (ignoring first character)
+                    coil_address = int(address[1:], 16)
+                    
+                    response = self.plc_client.read_coils(
+                        address=coil_address,
+                        count=1,
+                        slave=station_id
+                    )
+                    
+                    if not response.isError():
+                        status = response.bits[0]
+                        print(f"Address {address}: {'ON' if status else 'OFF'}")
+                    else:
+                        print(f"Error reading coil {address}")
+                    
+                except Exception as e:
+                    print(f"Error reading coil {address}: {str(e)}")
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error reading PLC coils: {str(e)}")
+            return False
+
+    def read_sensor_inputs(self):
+        """Read all configured sensor inputs"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                raise Exception("PLC not connected")
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Read input sensor addresses
+            for address in self.input_sensors_array:
+                try:
+                    # Convert hex address (ignoring first character)
+                    input_address = int(address[1:], 16)
+                    
+                    response = self.plc_client.read_discrete_inputs(
+                        address=input_address,
+                        count=1,
+                        slave=station_id
+                    )
+                    
+                    if not response.isError():
+                        status = response.bits[0]
+                        print(f"Sensor {address}: {'ON' if status else 'OFF'}")
+                    else:
+                        print(f"Error reading sensor {address}")
+                    
+                except Exception as e:
+                    print(f"Error reading sensor {address}: {str(e)}")
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error reading sensor inputs: {str(e)}")
+            return False
 
 def main():
     root = tk.Tk()

@@ -52,6 +52,10 @@ class ComPortSettings:
         # Initialize loadcell data in environment
         self.initialize_loadcell_env()
 
+        # Load saved settings and values
+        self.load_saved_settings()
+        self.load_device_values()
+
     def setup_ui(self):
         # Header with border lines
         header_frame = tk.Frame(self.root, bg='#f0f0f0')
@@ -343,6 +347,9 @@ class ComPortSettings:
             if not any([input_sensors_array, process_status_array, program_selection_array]):
                 self.rx_text.insert(tk.END, "\nNo valid addresses found in any configuration file.")
 
+            # After reading data, save the values
+            self.save_device_values()
+
         except ValueError as ve:
             messagebox.showerror("Error", "Invalid Station ID")
         except Exception as e:
@@ -513,6 +520,9 @@ class ComPortSettings:
             finally:
                 self.loadcell_ports[frame].timeout = 1
                 
+            # After reading data, save the values
+            self.save_device_values()
+            
         except Exception as e:
             frame.rx_text.insert(tk.END, f"Error: {str(e)}\n")
         
@@ -812,34 +822,48 @@ class ComPortSettings:
 
     def _reset_to_defaults(self):
         """Helper method to reset all inputs to default values"""
-        # Get available COM ports
-        available_ports = [port.device for port in serial.tools.list_ports.comports()]
-        
-        # Reset PLC settings
-        self.plc_com_combo.set("")
-        self.plc_baud_combo.set("")
-        self.station_id_entry.delete(0, tk.END)
-        self.rx_text.delete("1.0", tk.END)  # Clear PLC Rx string
-        
-        # Reset all COM port combos and Rx strings for Loadcells
-        for frame in self.root.winfo_children():
-            if isinstance(frame, tk.Frame):
-                for child in frame.winfo_children():
-                    if isinstance(child, tk.Frame):
-                        if "LOADCELL" in child.winfo_children()[0].cget("text"):
-                            com_combo = child.winfo_children()[2]  # COM port combo
-                            baud_combo = child.winfo_children()[4]  # BAUD rate combo
-                            rx_text = child.winfo_children()[-1]  # Rx text widget
-                            
-                            com_combo['values'] = available_ports if available_ports else [""]
-                            com_combo.set("")
-                            baud_combo.set("")
-                            rx_text.delete("1.0", tk.END)  # Clear Loadcell Rx string
-        
-        # Reset Modbus TCP settings
-        self.ip_entry.delete(0, tk.END)
-        self.port_entry.delete(0, tk.END)
-        self.rx_tcp_text.delete("1.0", tk.END)  # Clear Modbus TCP Rx string
+        try:
+            # Get the .env file path
+            env_path = find_dotenv()
+            if not env_path:
+                env_path = self.env_file
+
+            # Clear saved values from environment
+            set_key(env_path, 'PLC_RX_DATA', '')
+            set_key(env_path, 'LOADCELL_01_RX_DATA', '')
+            set_key(env_path, 'LOADCELL_02_RX_DATA', '')
+
+            # Get available COM ports
+            available_ports = [port.device for port in serial.tools.list_ports.comports()]
+            
+            # Reset PLC settings
+            self.plc_com_combo.set("")
+            self.plc_baud_combo.set("")
+            self.station_id_entry.delete(0, tk.END)
+            self.rx_text.delete("1.0", tk.END)
+            
+            # Reset all COM port combos and Rx strings for Loadcells
+            for frame in self.root.winfo_children():
+                if isinstance(frame, tk.Frame):
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Frame):
+                            if "LOADCELL" in child.winfo_children()[0].cget("text"):
+                                com_combo = child.winfo_children()[2]
+                                baud_combo = child.winfo_children()[4]
+                                rx_text = child.rx_text
+                                
+                                com_combo['values'] = available_ports if available_ports else [""]
+                                com_combo.set("")
+                                baud_combo.set("")
+                                rx_text.delete("1.0", tk.END)
+            
+            # Reset Modbus TCP settings
+            self.ip_entry.delete(0, tk.END)
+            self.port_entry.delete(0, tk.END)
+            self.rx_tcp_text.delete("1.0", tk.END)
+
+        except Exception as e:
+            print(f"Error resetting to defaults: {str(e)}")
 
     def load_saved_settings(self):
         """Load settings from environment variables"""
@@ -949,45 +973,75 @@ class ComPortSettings:
         except Exception as e:
             frame.rx_text.insert(tk.END, f"Error loading previous data: {str(e)}\n")
 
-    def cleanup(self):
-        """Close all connections and save final readings"""
+    def save_device_values(self):
+        """Save PLC and loadcell values to environment variables"""
         try:
-            # Save final readings from loadcells
-            for frame, ser in self.loadcell_ports.items():
-                try:
-                    if ser and ser.is_open:
-                        loadcell_num = frame.loadcell_num
-                        
-                        # Clear buffers
-                        ser.reset_input_buffer()
-                        ser.reset_output_buffer()
-                        
-                        # Get final reading
-                        command = f"ID{loadcell_num}P".encode()
-                        ser.write(command)
-                        time.sleep(0.1)
-                        
-                        response = ser.readline()
-                        if response:
-                            decoded_response = response.decode('utf-8', errors='replace').strip()
-                            parts = decoded_response.split(',')
-                            if len(parts) > 1:
-                                value = parts[1]
-                                # Save final reading with special marker
-                                self.save_loadcell_data(loadcell_num, f"{value} (Final Reading)")
-                        
-                        # Close connection
-                        ser.close()
-                        
-                except Exception as e:
-                    print(f"Error saving final reading for Loadcell {loadcell_num}: {str(e)}")
+            env_path = find_dotenv()
+            if not env_path:
+                env_path = self.env_file
+
+            # Save PLC Rx string
+            plc_rx = self.rx_text.get("1.0", tk.END).strip()
+            set_key(env_path, 'PLC_RX_DATA', plc_rx)
+
+            # Save Loadcell Rx strings
+            for frame in self.root.winfo_children():
+                if isinstance(frame, tk.Frame):
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Frame):
+                            title_label = child.winfo_children()[0]
+                            if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
+                                loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
+                                rx_text = child.rx_text  # Get the Text widget reference
+                                rx_data = rx_text.get("1.0", tk.END).strip()
+                                set_key(env_path, f'LOADCELL_{loadcell_num}_RX_DATA', rx_data)
+
+        except Exception as e:
+            print(f"Error saving device values: {str(e)}")
+
+    def load_device_values(self):
+        """Load PLC and loadcell values from environment variables"""
+        try:
+            # Load PLC Rx string
+            plc_rx = os.getenv('PLC_RX_DATA', '')
+            if plc_rx:
+                self.rx_text.delete("1.0", tk.END)
+                self.rx_text.insert(tk.END, plc_rx)
+
+            # Load Loadcell Rx strings
+            for frame in self.root.winfo_children():
+                if isinstance(frame, tk.Frame):
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Frame):
+                            title_label = child.winfo_children()[0]
+                            if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
+                                loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
+                                rx_text = child.rx_text  # Get the Text widget reference
+                                rx_data = os.getenv(f'LOADCELL_{loadcell_num}_RX_DATA', '')
+                                if rx_data:
+                                    rx_text.delete("1.0", tk.END)
+                                    rx_text.insert(tk.END, rx_data)
+
+        except Exception as e:
+            print(f"Error loading device values: {str(e)}")
+
+    def cleanup(self):
+        """Close all connections and save values before closing"""
+        try:
+            # Save all current values
+            self.save_device_values()
             
-            # Close other connections
+            # Close all connections
             if hasattr(self, 'modbus_client') and self.modbus_client:
                 self.modbus_client.close()
             
             if hasattr(self, 'modbus_tcp_client') and self.modbus_tcp_client:
                 self.modbus_tcp_client.close()
+                
+            # Close loadcell connections
+            for frame, ser in self.loadcell_ports.items():
+                if ser and ser.is_open:
+                    ser.close()
                 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
@@ -995,8 +1049,10 @@ class ComPortSettings:
 def main():
     root = tk.Tk()
     app = ComPortSettings(root)
-    app.load_saved_settings()  # Load saved settings on startup
+    
+    # Add cleanup on window close
     root.protocol("WM_DELETE_WINDOW", lambda: [app.cleanup(), root.destroy()])
+    
     root.mainloop()
 
 if __name__ == "__main__":
