@@ -56,13 +56,13 @@ class EOLTesterGUI:
 
     def setup_window(self):
         """Set up the window after initialization"""
-        # Set window to full screen
-        self.root.attributes('-fullscreen', True)
+        # Change from fullscreen to maximized state
+        self.root.state('zoomed')  # Replace fullscreen with maximized state
         self.root.lift()  # Bring window to front
         self.root.focus_force()  # Force focus
         
-        # Add escape key binding to exit fullscreen
-        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        # Remove escape key binding since we're not using fullscreen
+        # self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
         
         # Load data and connect to devices
         self.load_configuration_data()
@@ -191,6 +191,8 @@ class EOLTesterGUI:
     def create_first_quadrant(self):
         """Create the image display quadrant with correct dimensions."""
         q1 = tk.Frame(self.workspace, bg='white')
+        q1.grid_propagate(False)  # Prevent frame from resizing
+        q1.config(width=800, height=600)  # Match model_settings.py quadrant size
         
         # Create header frame at the top
         header_frame = tk.Frame(q1, bg="#00BFFF", height=30)
@@ -209,7 +211,7 @@ class EOLTesterGUI:
         self.image_frame.pack_propagate(False)
         
         # Set exact size to match model_settings.py image dimensions
-        self.image_frame.config(width=640, height=480)  # Exact match to model_settings.py
+        self.image_frame.config(width=750, height=550)  # Match model_settings.py image frame size
         
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame, 
@@ -798,36 +800,55 @@ class EOLTesterGUI:
             self.retrieve_part_specifications(part_number)
 
     def load_configuration_data(self):
-        """Load configuration data from files"""
+        """Load configuration data from txt_files subdirectory"""
         try:
+            # Define the subdirectory path
+            txt_files_dir = os.path.join(os.path.dirname(__file__), 'txt_files')
+            
+            # Ensure the directory exists
+            if not os.path.exists(txt_files_dir):
+                raise FileNotFoundError(f"Directory not found: {txt_files_dir}")
+            
             # Load ProcessStatus
-            with open('ProcessStatus.txt', 'r') as file:
+            process_status_path = os.path.join(txt_files_dir, 'ProcessStatus.txt')
+            with open(process_status_path, 'r') as file:
                 self.process_status_array = [line.strip() for line in file.readlines()]
             
             # Load ProgramSelectionInPLC
-            with open('ProgramSelectionInPLC.txt', 'r') as file:
+            program_selection_path = os.path.join(txt_files_dir, 'ProgramSelectionInPLC.txt')
+            with open(program_selection_path, 'r') as file:
                 self.program_selection_array = [line.strip() for line in file.readlines()]
             
             # Load InputSensors
-            with open('InputSensors.txt', 'r') as file:
+            input_sensors_path = os.path.join(txt_files_dir, 'InputSensors.txt')
+            with open(input_sensors_path, 'r') as file:
                 self.input_sensors_array = [line.strip() for line in file.readlines()]
             
             # Load EmployeeCodes
-            with open('EmployeeCodes.txt', 'r') as file:
+            employee_codes_path = os.path.join(txt_files_dir, 'EmployeeCodes.txt')
+            with open(employee_codes_path, 'r') as file:
                 self.employee_codes = [line.strip() for line in file.readlines()]
             
             # Check if any array is empty
-            if not all([self.process_status_array, self.program_selection_array, self.input_sensors_array, self.employee_codes]):
+            if not all([self.process_status_array, self.program_selection_array, 
+                       self.input_sensors_array, self.employee_codes]):
                 messagebox.showwarning("Empty File", "One or more configuration files are empty.")
             
-        except FileNotFoundError:
-            messagebox.showerror("File Not Found", "One or more configuration files not found.")
+        except FileNotFoundError as e:
+            messagebox.showerror("File Not Found", 
+                               f"Configuration file not found in txt_files directory:\n{str(e)}")
         except Exception as e:
-            messagebox.showerror("Error", f"Error loading configuration data: {str(e)}")
+            messagebox.showerror("Error", 
+                               f"Error loading configuration data:\n{str(e)}")
 
     def connect_to_devices(self):
         """Connect to PLC and loadcells using saved configurations"""
         try:
+            # Initialize clients as None first
+            self.plc_client = None
+            self.loadcell1_client = None
+            self.loadcell2_client = None
+            
             # Connect to PLC
             plc_port = os.getenv('PLC_COM_PORT')
             plc_baud = os.getenv('PLC_BAUD_RATE')
@@ -844,34 +865,46 @@ class EOLTesterGUI:
                 )
                 if not self.plc_client.connect():
                     print(f"Failed to connect to PLC on {plc_port}")
+                    messagebox.showwarning("Warning", f"Failed to connect to PLC on {plc_port}")
+            else:
+                print("Missing PLC configuration in environment variables")
+                messagebox.showwarning("Warning", "Missing PLC configuration in environment variables")
             
             # Connect to Loadcell 1
             lc1_port = os.getenv('LOADCELL_01_COM_PORT')
             lc1_baud = os.getenv('LOADCELL_01_BAUD_RATE')
             
             if all([lc1_port, lc1_baud]):
-                self.loadcell1_client = serial.Serial(
-                    port=lc1_port,
-                    baudrate=int(lc1_baud),
-                    bytesize=8,
-                    parity='N',
-                    stopbits=1,
-                    timeout=0.5
-                )
+                try:
+                    self.loadcell1_client = serial.Serial(
+                        port=lc1_port,
+                        baudrate=int(lc1_baud),
+                        bytesize=8,
+                        parity='N',
+                        stopbits=1,
+                        timeout=0.5
+                    )
+                except serial.SerialException as e:
+                    print(f"Failed to connect to Loadcell 1: {e}")
+                    messagebox.showwarning("Warning", f"Failed to connect to Loadcell 1 on {lc1_port}")
             
             # Connect to Loadcell 2
             lc2_port = os.getenv('LOADCELL_02_COM_PORT')
             lc2_baud = os.getenv('LOADCELL_02_BAUD_RATE')
             
             if all([lc2_port, lc2_baud]):
-                self.loadcell2_client = serial.Serial(
-                    port=lc2_port,
-                    baudrate=int(lc2_baud),
-                    bytesize=8,
-                    parity='N',
-                    stopbits=1,
-                    timeout=0.5
-                )
+                try:
+                    self.loadcell2_client = serial.Serial(
+                        port=lc2_port,
+                        baudrate=int(lc2_baud),
+                        bytesize=8,
+                        parity='N',
+                        stopbits=1,
+                        timeout=0.5
+                    )
+                except serial.SerialException as e:
+                    print(f"Failed to connect to Loadcell 2: {e}")
+                    messagebox.showwarning("Warning", f"Failed to connect to Loadcell 2 on {lc2_port}")
                 
         except Exception as e:
             print(f"Error connecting to devices: {str(e)}")
@@ -1032,9 +1065,13 @@ class EOLTesterGUI:
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            # Load and resize image to exactly 640x480 to match model_settings.py
+            # Get the frame dimensions
+            frame_width = self.image_frame.winfo_width()
+            frame_height = self.image_frame.winfo_height()
+            
+            # Load and resize image to exactly match model_settings.py dimensions
             original_image = Image.open(image_path)
-            resized_image = original_image.resize((640, 480), Image.Resampling.LANCZOS)
+            resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
             
             # Remove old image label if it exists
@@ -1044,12 +1081,12 @@ class EOLTesterGUI:
             # Create new image label with exact same dimensions
             self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
             self.image_label.image = photo  # Keep a reference
-            self.image_label.place(relx=0.5, rely=0.5, anchor='center')
+            self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             
             # Store image dimensions for label positioning
             self.image_dimensions = {
-                'width': 640,
-                'height': 480,
+                'width': frame_width,
+                'height': frame_height,
                 'x_offset': 0,
                 'y_offset': 0
             }
@@ -1063,7 +1100,7 @@ class EOLTesterGUI:
             return False
 
     def place_labels_from_positions(self, coordinates_data):
-        """Place labels exactly according to database coordinates without drag functionality."""
+        """Place labels exactly according to database coordinates."""
         try:
             # Clear any existing placed labels
             for label in getattr(self, 'placed_labels', {}).values():
@@ -1083,10 +1120,6 @@ class EOLTesterGUI:
                 y = coord_data.get('y')
                 
                 if x is not None and y is not None:
-                    # Validate coordinates are within frame boundaries
-                    x = max(0, min(int(x), frame_width - 40))  # 40 is approximate label width
-                    y = max(0, min(int(y), frame_height - 25)) # 25 is approximate label height
-                    
                     # Create label with exact specifications
                     label_text = f'L{label_num}'
                     new_label = tk.Label(self.image_frame,
@@ -1107,7 +1140,7 @@ class EOLTesterGUI:
                     
                     print(f"Placed {label_text} at coordinates x={x}, y={y}")
             
-            # Update label info with sorted list of placed labels
+            # Update label info
             if self.placed_labels:
                 sorted_labels = sorted(self.placed_labels.keys(), key=lambda x: int(x[1:]))
                 self.label_info.config(text=f"Placed Labels: {', '.join(sorted_labels)}")

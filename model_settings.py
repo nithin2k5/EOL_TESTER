@@ -13,11 +13,8 @@ class WorkspaceApp:
         self.root = root
         self.root.title("EOL Tester - Model Settings")
         
-        # Set window to full screen
-        self.root.attributes('-fullscreen', True)  # Change from state('zoomed') to true fullscreen
-        
-        # Add escape key binding to exit fullscreen
-        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        # Set window state to zoomed instead of fullscreen
+        self.root.state('zoomed')  # Change from fullscreen to maximized
         
         # Track placed labels
         self.placed_labels = {}
@@ -37,7 +34,6 @@ class WorkspaceApp:
         self.style = ttk.Style()
         self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
         self.style.configure("Custom.TEntry", padding=5)
-        
         
         self.image_uploaded = False  # Flag to track image upload
         
@@ -495,39 +491,47 @@ class WorkspaceApp:
             self.moveable_labels.append(label)
 
     def create_buttons(self):
-        # Modern button styles with gradients and hover effects
+        # Modern button styles with gradients and hover effects - only for image operations
         button_styles = [
             {
-                'text': "RESET",
-                'main_color': "#ff4757",      # Soft red
-                'hover_color': "#ff6b81",     # Lighter red
-                'width': 12,
-                'icon': "🔄"                  # Reset icon
+                'text': "RESET IMAGE LABELS",  # Clarified purpose
+                'main_color': "#ff4757",      
+                'hover_color': "#ff6b81",      
+                'width': 15,
+                'icon': "��",                 
+                'command': self.reset_labels   # Only resets the image labels
             },
             {
-                'text': "UPDATE",
-                'main_color': "#2ed573",      # Fresh green
-                'hover_color': "#7bed9f",     # Lighter green
-                'width': 12,
-                'icon': "💾"                  # Save icon
+                'text': "SAVE LABEL POSITIONS",  # Clarified purpose
+                'main_color': "#2ed573",      
+                'hover_color': "#7bed9f",      
+                'width': 15,
+                'icon': "💾",                 
+                'command': lambda: self.update_positions()  # Only saves label positions
             },
             {
-                'text': "UPLOAD",
-                'main_color': "#1e90ff",      # Bright blue
-                'hover_color': "#70a1ff",     # Lighter blue
-                'width': 12,
-                'icon': "📁"                  # Upload icon
+                'text': "UPLOAD NEW IMAGE",    # Clarified purpose
+                'main_color': "#1e90ff",      
+                'hover_color': "#70a1ff",      
+                'width': 15,
+                'icon': "📁",                 
+                'command': self.upload_image   # Only handles image upload
             }
         ]
 
+        # Create a frame for image-related buttons with a label
+        image_buttons_frame = tk.Frame(self.buttons_frame)
+        image_buttons_frame.pack(side=tk.LEFT, padx=10)
+
+        
+        # Create buttons container
+        buttons_container = tk.Frame(image_buttons_frame)
+        buttons_container.pack()
+
         for style in button_styles:
             # Create button frame for gradient effect
-            btn_frame = tk.Frame(self.buttons_frame, 
-                                
-                               padx=2, pady=2)
-            btn_frame.pack(side=tk.LEFT, padx=5, pady=5)
-
-
+            btn_frame = tk.Frame(buttons_container, padx=2, pady=2)
+            btn_frame.pack(side=tk.LEFT, padx=5, pady=2)
 
             # Create the actual button
             btn = tk.Button(btn_frame,
@@ -535,16 +539,17 @@ class WorkspaceApp:
                           width=style['width'],
                           bg=style['main_color'],
                           fg="white",
-                          font=('Arial', 10, 'bold'),
+                          font=('Arial', 9, 'bold'),
                           relief="flat",
                           bd=0,
-                          padx=15,
-                          pady=8,
-                          cursor="hand2")  # Hand cursor on hover
+                          padx=10,
+                          pady=5,
+                          cursor="hand2",
+                          command=style['command'])
             btn.pack()
 
-        
-            
+            # Add tooltip
+            self.create_tooltip(btn, f"Click to {style['text'].lower()}")
 
             # Bind hover effects
             btn.bind('<Enter>', lambda e, b=btn, c=style['hover_color']: 
@@ -552,14 +557,24 @@ class WorkspaceApp:
             btn.bind('<Leave>', lambda e, b=btn, c=style['main_color']: 
                     self.on_button_hover(b, c))
 
-            # Assign commands
-            if style['text'] == "RESET":
-                btn.config(command=self.reset_form)
-            elif style['text'] == "UPDATE":
-                btn.config(command=self.update_positions)
-            else:  # UPLOAD
-                btn.config(command=self.upload_image)
+    def create_tooltip(self, widget, text):
+        """Create a tooltip for a given widget"""
+        def show_tooltip(event):
+            tooltip = tk.Toplevel()
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
 
+            label = tk.Label(tooltip, text=text, bg="lightyellow", 
+                            padx=5, pady=2, relief="solid", borderwidth=1)
+            label.pack()
+
+            def hide_tooltip():
+                tooltip.destroy()
+
+            widget.tooltip = tooltip
+            widget.bind('<Leave>', lambda e: hide_tooltip())
+
+        widget.bind('<Enter>', show_tooltip)
 
     def on_button_hover(self, button, color):
         """Handle button hover effect"""
@@ -1193,7 +1208,7 @@ class WorkspaceApp:
             part_number = self.textboxes["Part Number"].get()
             data_with_part_number = (part_number,) + data
             
-            # Ensure the number of placeholders matches the number of data elements
+ 
             query = """
             INSERT INTO TBL_MODEL_SPECIFICATION 
             (MS_PART_NUMBER, MS_DESCRIPTION, MS_DEVICE, MS_UNIT, MS_MASTER_MIN, MS_MASTER_MAX, MS_NORMAL_MIN, MS_NORMAL_MAX)
