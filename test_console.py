@@ -152,9 +152,10 @@ class EOLTesterGUI:
         title_label.pack(pady=5)
         
         # Machine ID (right side)
+        machine_id = os.getenv('MACHINE_ID', 'Not Set')  # Get from environment variable
         machine_label = tk.Label(
             title_frame, 
-            text=f"Machine ID: {self.machineid}",
+            text=f"Machine ID: {machine_id}",
             bg="#FFB6C1", 
             font=("Arial", 12, "bold")
         )
@@ -1267,11 +1268,21 @@ class EOLTesterGUI:
             return
         
         try:
-            with open('employecode.txt', 'r') as file:
-                valid_codes = [code.strip() for code in file.read().split(',')]
+            # Use the correct path in txt_files subdirectory
+            employee_codes_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'EmployeeCodes.txt')
             
+            # Check if file exists
+            if not os.path.exists(employee_codes_path):
+                messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
+                return
+            
+            # Read from the correct file path
+            with open(employee_codes_path, 'r') as file:
+                valid_codes = [code.strip() for code in file.readlines()]
+            
+            # Check if the code exists in the list
             if emp_code in valid_codes:
-                self.alc_entry.configure(state='normal')
+                self.alc_entry.configure(state='normal')  # Only enable ALC entry
                 self.emp_entry.configure(bg="lightgreen")
                 messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
             else:
@@ -1280,7 +1291,7 @@ class EOLTesterGUI:
                 messagebox.showerror("Error", "Employee code unauthorized")
                 
         except FileNotFoundError:
-            messagebox.showerror("Error", "Employee code file not found")
+            messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
 
@@ -1311,7 +1322,7 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
 
-            # First query to get basic part details
+            # Query to get part details based on ALC code
             part_query = """
             SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, MM_LABEL_COORDINATES
             FROM TBL_MODEL_MASTER 
@@ -1332,15 +1343,28 @@ class EOLTesterGUI:
                     fg="green"
                 )
 
-                # Second query to get specifications
+                # Update model header
+                self.model_header.config(text=f"{model_name} - {part_number}")
+
+                # Load image if path exists
+                if image_path and os.path.exists(image_path):
+                    if self.load_image_with_path(image_path):
+                        # After image is loaded, place labels if coordinates exist
+                        if label_coordinates:
+                            try:
+                                coordinates_data = json.loads(label_coordinates)
+                                self.place_labels_from_positions(coordinates_data)
+                            except json.JSONDecodeError:
+                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
+
+                # Get specifications
                 spec_query = """
                 SELECT 
                     MS_DESCRIPTION,
                     MS_DEVICE,
                     MS_UNIT,
                     MS_NORMAL_MIN,
-                    MS_NORMAL_MAX,
-                    MS_SPECIAL_DATA
+                    MS_NORMAL_MAX
                 FROM TBL_MODEL_SPECIFICATION 
                 WHERE MS_PART_NUMBER = %s
                 ORDER BY MS_DEVICE
@@ -1352,14 +1376,13 @@ class EOLTesterGUI:
                 self.spec_tree.delete(*self.spec_tree.get_children())
 
                 # Add specifications to tree
-                for i, spec in enumerate(specs, 1):
-                    description, device, unit, min_val, max_val, special_data = spec
+                for spec in specs:
+                    description, device, unit, min_val, max_val = spec
                     
                     # Format values for display
                     min_val = f"{float(min_val):.2f}" if min_val is not None else "N/A"
                     max_val = f"{float(max_val):.2f}" if max_val is not None else "N/A"
                     
-                    # Insert into tree with ID number
                     values = (
                         description,
                         device,
@@ -1369,22 +1392,7 @@ class EOLTesterGUI:
                         "",  # Empty Actual column
                         ""   # Empty Result column
                     )
-                    item_id = self.spec_tree.insert('', 'end', values=values)
-                    
-                    # Add special styling if needed
-                    if special_data:
-                        self.spec_tree.item(item_id, tags=('special',))
-                        self.spec_tree.tag_configure('special', background='#fff3cd')
-
-                # Load image if path exists
-                if image_path and os.path.exists(image_path):
-                    if self.load_image_with_path(image_path):
-                        if label_coordinates:
-                            try:
-                                coordinates = json.loads(label_coordinates)
-                                self.place_labels_from_positions(coordinates)
-                            except json.JSONDecodeError:
-                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
+                    self.spec_tree.insert('', 'end', values=values)
 
             else:
                 self.message_label.config(

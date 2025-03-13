@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timedelta
 import csv
 import shutil
+from dotenv import find_dotenv, set_key
 
 class AdminConsole:
     def __init__(self, root):
@@ -863,8 +864,13 @@ class AdminConsole:
                 messagebox.showwarning("Warning", "Please enter a Machine ID")
                 return
             
-            # Save to environment variable
-            os.environ['MACHINE_ID'] = machine_id
+            # Get the .env file path
+            env_path = find_dotenv()
+            if not env_path:
+                env_path = '.env'
+            
+            # Save to .env file
+            set_key(env_path, 'MACHINE_ID', machine_id)
             self.machine_id = machine_id
             
             # Update database with machine ID for all records

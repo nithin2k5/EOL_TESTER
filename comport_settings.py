@@ -79,9 +79,10 @@ class ComPortSettings:
         title_label.pack(expand=True)
         
         # Machine ID Label (Right side)
+        machine_id = os.getenv('MACHINE_ID', 'Not Set')  # Get from environment variable
         machine_label = tk.Label(
             header_content, 
-            text=f"Machine ID: {self.machine_id}",
+            text=f"Machine ID: {machine_id}",
             bg='#f0f0f0',
             fg='#2c3e50',
             font=('Arial', 12, 'bold')
