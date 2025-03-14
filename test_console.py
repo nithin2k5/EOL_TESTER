@@ -967,6 +967,16 @@ class EOLTesterGUI:
 
     def cleanup(self):
         """Enhanced cleanup method"""
+        # Stop all blinking labels
+        if hasattr(self, 'blinking_labels'):
+            for label in self.blinking_labels.values():
+                if hasattr(label, 'blink_job'):
+                    self.root.after_cancel(label.blink_job)
+            
+            # Clear blinking labels dictionary
+            self.blinking_labels.clear()
+        
+        # Call original cleanup code
         try:
             # Reset PLC if configured
             if self.resetPLCOnFormClosing:
@@ -1346,10 +1356,10 @@ class EOLTesterGUI:
                 # Update model header
                 self.model_header.config(text=f"{model_name} - {part_number}")
 
-                # Load image if path exists
+                # Step 1: Load image if path exists
                 if image_path and os.path.exists(image_path):
                     if self.load_image_with_path(image_path):
-                        # After image is loaded, place labels if coordinates exist
+                        # Step 2: Place labels if coordinates exist
                         if label_coordinates:
                             try:
                                 coordinates_data = json.loads(label_coordinates)
@@ -1357,7 +1367,7 @@ class EOLTesterGUI:
                             except json.JSONDecodeError:
                                 print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
 
-                # Get specifications
+                # Step 3: Get specifications
                 spec_query = """
                 SELECT 
                     MS_DESCRIPTION,
@@ -1394,6 +1404,16 @@ class EOLTesterGUI:
                     )
                     self.spec_tree.insert('', 'end', values=values)
 
+                # Step 4: Only after all data is loaded, start PLC reading and sensor monitoring
+                self.message_label.config(text="Starting PLC and sensor monitoring...", fg="blue")
+                self.root.update()  # Update UI before starting monitoring
+                
+                # Start PLC reading and sensor monitoring
+                self.load_and_monitor_sensors()
+                self.start_check_async()  # Your existing PLC monitoring method
+
+                self.message_label.config(text=f"Model: {model_name} | Part Number: {part_number}", fg="green")
+
             else:
                 self.message_label.config(
                     text=f"No data found for ALC code: {alc_code}",
@@ -1417,18 +1437,83 @@ class EOLTesterGUI:
             )
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
-    def update_specification_result(self, device, actual_value, result):
-        """Update the actual value and result for a specific device in the specifications tree"""
-        for item in self.spec_tree.get_children():
-            if self.spec_tree.item(item)['values'][1] == device:  # Check DEVICE column
-                current_values = list(self.spec_tree.item(item)['values'])
-                current_values[5] = actual_value  # Update ACTUAL column
-                current_values[6] = result        # Update RESULT column
-                
-                # Update row color based on result with darker shades
-                if result == "PASS":
-                    self.spec_tree.tag_configure('pass', background='#006400')  # Dark green
-                    self.spec_tree.item(item, values=current_values, tags=('pass',))
+    def load_and_monitor_sensors(self):
+        """Load and monitor input sensors and process status"""
+        try:
+            # Read input sensors file
+            sensors_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'InputSensors.txt')
+            with open(sensors_path, 'r') as f:
+                sensor_data = f.read().strip().split(',')
+            
+            # Read process status file
+            status_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'ProcessStatus.txt')
+            with open(status_path, 'r') as f:
+                process_data = f.read().strip().split(',')
+            
+            # Start monitoring sensors
+            self.start_sensor_monitoring(sensor_data)
+            
+        except FileNotFoundError as e:
+            messagebox.showerror("Error", f"Configuration file not found: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error loading configuration: {str(e)}")
+
+    def start_sensor_monitoring(self, sensor_data):
+        """Start monitoring sensors and update labels accordingly"""
+        self.sensor_data = sensor_data
+        self.blinking_labels = {}  # Store blinking label references
+        
+        # Map sensors to placed labels
+        for i, (label_text, label_widget) in enumerate(self.placed_labels.items()):
+            if i < len(sensor_data):
+                self.setup_label_blinking(label_widget, i)
+        
+        # Start the monitoring loop
+        self.monitor_sensors()
+
+    def setup_label_blinking(self, label_widget, sensor_index):
+        """Setup blinking for a label"""
+        label_widget.blink_state = False
+        label_widget.sensor_index = sensor_index
+        label_widget.original_bg = label_widget.cget('bg')
+        self.blinking_labels[id(label_widget)] = label_widget
+
+    def monitor_sensors(self):
+        """Monitor sensors and update label states"""
+        try:
+            # Read current sensor states
+            with open(os.path.join(os.path.dirname(__file__), 'txt_files', 'InputSensors.txt'), 'r') as f:
+                current_states = f.read().strip().split(',')
+            
+            # Update each label based on sensor state
+            for label_widget in self.blinking_labels.values():
+                sensor_index = label_widget.sensor_index
+                if sensor_index < len(current_states):
+                    if current_states[sensor_index].strip().upper() == 'HIGH':
+                        # Stop blinking, set normal background
+                        if hasattr(label_widget, 'blink_job'):
+                            self.root.after_cancel(label_widget.blink_job)
+                            delattr(label_widget, 'blink_job')
+                        label_widget.configure(bg=label_widget.original_bg)
+                    else:
+                        # Start/continue blinking if not already blinking
+                        if not hasattr(label_widget, 'blink_job'):
+                            self.blink_label(label_widget)
+            
+            # Schedule next monitoring cycle
+            self.root.after(100, self.monitor_sensors)  # Check every 100ms
+            
+        except Exception as e:
+            print(f"Error monitoring sensors: {e}")
+
+    def blink_label(self, label):
+        """Make a label blink red"""
+        if not hasattr(label, 'blink_state'):
+            label.blink_state = False
+        
+        label.blink_state = not label.blink_state
+        label.configure(bg='red' if label.blink_state else 'white')
+        label.blink_job = self.root.after(500, lambda: self.blink_label(label))  # Blink every 500ms
 
     def test_plc_communication(self):
         """Test PLC communication by toggling P0000 input address"""
