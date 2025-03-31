@@ -453,13 +453,15 @@ class WorkspaceApp:
         """Handle entry field focus in - remove placeholder text"""
         if entry.get() == placeholder:
             entry.delete(0, tk.END)
-            entry.config(fg='white')
+            entry.config(fg='black')  # Set text color to black when typing
 
     def on_entry_focus_out(self, event, entry, placeholder):
         """Handle entry field focus out - restore placeholder if empty"""
         if entry.get() == '':
             entry.insert(0, placeholder)
-            entry.config(fg='white')
+            entry.config(fg='gray')  # Set placeholder text color to gray
+        else:
+            entry.config(fg='black')  # Keep actual text black
 
     def on_text_focus_in(self, event, text_widget, placeholder):
         """Handle text widget focus in - remove placeholder text"""
@@ -780,11 +782,11 @@ class WorkspaceApp:
 
     def on_add_button_click(self, entries, tree):
         def add_specification():
-            data = tuple(entry.get() for entry in entries)
+            # Convert all entry values to uppercase
+            data = tuple(entry.get().upper() for entry in entries)
             self.insert_specification(data)
             tree.insert('', 'end', values=data)
 
-        # Run the add_specification function in a separate thread
         threading.Thread(target=add_specification).start()
 
     def on_remove_button_click(self, tree):
@@ -1403,12 +1405,13 @@ class WorkspaceApp:
         self.update_part_list_view()
 
     def load_label_positions(self, part_number):
+        """Load and place labels on the image"""
         try:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
             query = """
-            SELECT MM_LABEL_POSITIONS, MM_LABEL_COORDINATES 
+            SELECT MM_LABEL_COORDINATES 
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
@@ -1416,9 +1419,8 @@ class WorkspaceApp:
             cursor.execute(query, (part_number,))
             result = cursor.fetchone()
             
-            if result and (result[0] or result[1]):
-                positions = json.loads(result[0]) if result[0] else {}
-                coordinates = json.loads(result[1]) if result[1] else {}
+            if result and result[0]:
+                coordinates = json.loads(result[0])
                 
                 # Clear existing labels
                 self.reset_labels()
@@ -1426,11 +1428,15 @@ class WorkspaceApp:
                 # Place labels using coordinates
                 for label_num, coord_data in coordinates.items():
                     label_text = f'L{label_num}'
-                    new_label = tk.Label(self.image_frame,
-                                       text=coord_data['text'],
-                                       width=len(coord_data['text']) + 2,
-                                       relief="raised",
-                                       bg="lightblue")
+                    display_text = coord_data['text'] if coord_data['text'] else label_text
+                    
+                    new_label = tk.Label(
+                        self.image_frame,
+                        text=display_text,
+                        width=len(display_text) + 2,
+                        relief="raised",
+                        bg="lightblue"
+                    )
                     
                     new_label.place(x=coord_data['x'], y=coord_data['y'])
                     new_label.bind("<Button-1>", self.start_move)
@@ -1440,8 +1446,11 @@ class WorkspaceApp:
                     self.placed_labels[label_text] = new_label
                     
                     # Update original label appearance
-                    if label_text in self.original_positions:
+                    if label_text in self.original_positions and isinstance(self.original_positions[label_text], tk.Label):
                         self.original_positions[label_text].config(bg="lightgray")
+                
+                # Update the treeview to reflect label positions
+                self.update_treeview()
             
             cursor.close()
             conn.close()
@@ -1604,53 +1613,45 @@ class WorkspaceApp:
                 # Clear existing data
                 self.clear_all_data()
                 
-                # Populate textboxes with data
-                self.textboxes["Part Number"].delete(0, tk.END)
-                self.textboxes["Part Number"].insert(0, record[1] or "")  # MM_PART_NUMBER
+                # Populate textboxes with data - set as real values, not placeholders
+                field_mappings = {
+                    "Part Number": record[1],
+                    "Model & Part Name": record[2],
+                    "ALC Code": record[3],
+                    "Vendor Code": record[7],
+                    "EO Number": record[8],
+                    "Special Data": record[9],
+                    "Initial ID": record[10],
+                    "Supplier Section": record[11]
+                }
                 
-                self.textboxes["Model & Part Name"].delete(0, tk.END)
-                self.textboxes["Model & Part Name"].insert(0, record[2] or "")  # MM_MODEL_NAME
+                for key, value in field_mappings.items():
+                    if value:  # Only update if value exists
+                        self.textboxes[key].delete(0, tk.END)
+                        self.textboxes[key].insert(0, value)
+                        self.textboxes[key].config(fg='black')  # Set text color to black for real values
                 
-                self.textboxes["ALC Code"].delete(0, tk.END)
-                self.textboxes["ALC Code"].insert(0, record[3] or "")  # MM_ALC_CODE
+                # Set combobox values
+                if "PLC Address" in self.second_quad_combos and record[4]:
+                    self.second_quad_combos["PLC Address"].set(record[4])
                 
-                # Set PLC Address combobox
-                if "PLC Address" in self.second_quad_combos:
-                    self.second_quad_combos["PLC Address"].set(record[4] or "")  # MM_PLC_ADDRESS
-                
-                # Set Barcode Type combobox
-                if "Barcode Type" in self.second_quad_combos:
-                    self.second_quad_combos["Barcode Type"].set(record[5] or "")  # MM_BARCODE_LABEL_CODE
+                if "Barcode Type" in self.second_quad_combos and record[5]:
+                    self.second_quad_combos["Barcode Type"].set(record[5])
                 
                 # Update image path
-                self.textboxes["Image File Path"].config(state='normal')
-                self.textboxes["Image File Path"].delete(0, tk.END)
-                self.textboxes["Image File Path"].insert(0, record[6] or "")  # MM_IMAGE_PATH
-                self.textboxes["Image File Path"].config(state='readonly')
-                
-                self.textboxes["Vendor Code"].delete(0, tk.END)
-                self.textboxes["Vendor Code"].insert(0, record[7] or "")  # MM_VENDOR_CODE
-                
-                self.textboxes["EO Number"].delete(0, tk.END)
-                self.textboxes["EO Number"].insert(0, record[8] or "")  # MM_EO_NUMBER
-                
-                self.textboxes["Special Data"].delete(0, tk.END)
-                self.textboxes["Special Data"].insert(0, record[9] or "")  # MM_SPECIAL_DATA
-                
-                self.textboxes["Initial ID"].delete(0, tk.END)
-                self.textboxes["Initial ID"].insert(0, record[10] or "")  # MM_INITIAL_ID
-                
-                self.textboxes["Supplier Section"].delete(0, tk.END)
-                self.textboxes["Supplier Section"].insert(0, record[11] or "")  # MM_SUPPLIER_SECTION
-                
-                # Load label positions if they exist
-                if record[17]:  # MM_LABEL_COORDINATES
-                    self.load_label_positions(part_number)
-                
-                # Load image if path exists
-                if record[6]:  # MM_IMAGE_PATH
+                if record[6]:
+                    self.textboxes["Image File Path"].config(state='normal')
+                    self.textboxes["Image File Path"].delete(0, tk.END)
+                    self.textboxes["Image File Path"].insert(0, record[6])
+                    self.textboxes["Image File Path"].config(state='readonly')
+                    
+                    # Load the image first
                     self.load_image(record[6])
                     
+                    # Then load label positions after image is loaded
+                    if record[17]:  # MM_LABEL_COORDINATES
+                        self.root.after(100, lambda: self.load_label_positions(part_number))
+                
                 # Load specifications
                 self.load_specifications(part_number)
             
@@ -1729,7 +1730,7 @@ class WorkspaceApp:
         # Clear all textboxes and restore default placeholders
         for key, entry in self.textboxes.items():
             entry.config(state='normal')
-            entry.delete(0, tk.END)
+            entry.delete(0, 'end')
             
             # Set appropriate placeholder based on field
             if key == "Part Number":
