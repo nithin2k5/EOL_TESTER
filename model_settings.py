@@ -786,6 +786,10 @@ class WorkspaceApp:
             data = tuple(entry.get().upper() for entry in entries)
             self.insert_specification(data)
             tree.insert('', 'end', values=data)
+            
+            # Reset all specification entries after successful insertion
+            for entry in entries:
+                entry.delete(0, tk.END)
 
         threading.Thread(target=add_specification).start()
 
@@ -1711,13 +1715,22 @@ class WorkspaceApp:
             cursor.execute(query, (part_number,))
             specs = cursor.fetchall()
             
-            # Clear existing specs
+            # Clear existing specs from tree
             for item in self.spec_tree.get_children():
                 self.spec_tree.delete(item)
             
-            # Insert specifications into tree
-            for spec in specs:
-                self.spec_tree.insert('', 'end', values=spec[1:])  # Skip part number column
+            # Insert specifications into tree and populate the first spec into entry fields
+            if specs:
+                for spec in specs:
+                    self.spec_tree.insert('', 'end', values=spec[1:])  # Skip part number column
+                
+                # Populate the first specification into entry fields
+                first_spec = specs[0]
+                spec_fields = ['Description', 'Device', 'Unit', 'Master Min', 'Master Max', 'Normal Min', 'Normal Max']
+                for i, field in enumerate(spec_fields):
+                    if field in self.spec_entries:
+                        self.spec_entries[field].delete(0, tk.END)
+                        self.spec_entries[field].insert(0, first_spec[i+1])  # +1 to skip part number
             
             cursor.close()
             conn.close()
