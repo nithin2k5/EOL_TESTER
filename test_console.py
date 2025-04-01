@@ -980,34 +980,52 @@ class EOLTesterGUI:
             return None
 
     def cleanup(self):
-        """Enhanced cleanup method"""
-        # Stop all blinking labels
-        if hasattr(self, 'blinking_labels'):
-            for label in self.blinking_labels.values():
-                if hasattr(label, 'blink_job'):
-                    self.root.after_cancel(label.blink_job)
-            
-            # Clear blinking labels dictionary
-            self.blinking_labels.clear()
-        
-        # Call original cleanup code
+        """Enhanced cleanup method with proper connection handling"""
         try:
+            # Stop all blinking labels
+            if hasattr(self, 'blinking_labels'):
+                for label in self.blinking_labels.values():
+                    if hasattr(label, 'blink_job'):
+                        self.root.after_cancel(label.blink_job)
+            self.blinking_labels.clear()
+
             # Reset PLC if configured
-            if self.resetPLCOnFormClosing:
+            if hasattr(self, 'resetPLCOnFormClosing') and self.resetPLCOnFormClosing:
                 self.reset_plc()
+
+            # Close PLC connection
+            if hasattr(self, 'plc_client') and self.plc_client:
+                try:
+                    self.plc_client.close()
+                    print("PLC connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing PLC connection: {e}")
+
+            # Close Loadcell 1 connection
+            if hasattr(self, 'loadcell1_client') and self.loadcell1_client and self.loadcell1_client.is_open:
+                try:
+                    self.loadcell1_client.close()
+                    print("Loadcell 1 connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing Loadcell 1 connection: {e}")
+
+            # Close Loadcell 2 connection
+            if hasattr(self, 'loadcell2_client') and self.loadcell2_client and self.loadcell2_client.is_open:
+                try:
+                    self.loadcell2_client.close()
+                    print("Loadcell 2 connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing Loadcell 2 connection: {e}")
+
+            print("All connections closed successfully")
             
-            # Close all connections
-            if self.plc_client:
-                self.plc_client.close()
-            
-            if self.loadcell1_client and self.loadcell1_client.is_open:
-                self.loadcell1_client.close()
-                
-            if self.loadcell2_client and self.loadcell2_client.is_open:
-                self.loadcell2_client.close()
-                
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
+        finally:
+            # Ensure all connections are set to None
+            self.plc_client = None
+            self.loadcell1_client = None
+            self.loadcell2_client = None
 
     def retrieve_part_specifications(self, part_number):
         """Retrieve specifications and label coordinates from database."""
@@ -1285,7 +1303,7 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="white")
 
     def validate_employee_code(self, event=None):
-        """Validate employee code against employecode.txt"""
+        """Validate employee code only, without part number search"""
         emp_code = self.emp_entry.get().strip()
         if emp_code == "EMP CODE" or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
@@ -1295,18 +1313,15 @@ class EOLTesterGUI:
             # Use the correct path in txt_files subdirectory
             employee_codes_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'EmployeeCodes.txt')
             
-            # Check if file exists
             if not os.path.exists(employee_codes_path):
                 messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
                 return
             
-            # Read from the correct file path
             with open(employee_codes_path, 'r') as file:
                 valid_codes = [code.strip() for code in file.readlines()]
             
-            # Check if the code exists in the list
             if emp_code in valid_codes:
-                self.alc_entry.configure(state='normal')  # Only enable ALC entry
+                self.alc_entry.configure(state='normal')
                 self.emp_entry.configure(bg="lightgreen")
                 messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
             else:
@@ -1314,8 +1329,6 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="pink")
                 messagebox.showerror("Error", "Employee code unauthorized")
                 
-        except FileNotFoundError:
-            messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
 
@@ -1330,7 +1343,7 @@ class EOLTesterGUI:
                 self.alc_entry.insert(0, "ALC CODE")
                 self.alc_entry.configure(bg="#fff9c4")
 
-    def process_alc_code(self, event=None):
+    def process_alc_code(self):
         """Process the entered ALC code and retrieve specifications"""
         alc_code = self.alc_entry.get().strip()
         if not alc_code or alc_code == "ALC CODE":
@@ -1381,7 +1394,7 @@ class EOLTesterGUI:
                             except json.JSONDecodeError:
                                 print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
 
-                # Step 3: Get specifications
+                # Step 3: Get specifications - Fix the query and column mapping
                 spec_query = """
                 SELECT 
                     MS_DESCRIPTION,
@@ -1399,22 +1412,17 @@ class EOLTesterGUI:
                 # Clear existing items in specification tree
                 self.spec_tree.delete(*self.spec_tree.get_children())
 
-                # Add specifications to tree
+                # Add specifications to tree with proper column mapping
                 for spec in specs:
                     description, device, unit, min_val, max_val = spec
-                    
-                    # Format values for display
-                    min_val = f"{float(min_val):.2f}" if min_val is not None else "N/A"
-                    max_val = f"{float(max_val):.2f}" if max_val is not None else "N/A"
-                    
                     values = (
-                        description,
-                        device,
-                        unit,
-                        min_val,
-                        max_val,
-                        "",  # Empty Actual column
-                        ""   # Empty Result column
+                        description,  # Description
+                        device,      # Device
+                        unit,       # Unit
+                        min_val,    # Min
+                        max_val,    # Max
+                        "",         # Empty Actual column
+                        ""         # Empty Result column
                     )
                     self.spec_tree.insert('', 'end', values=values)
 
@@ -1856,8 +1864,12 @@ class EOLTesterGUI:
 def main():
     root = tk.Tk()
     app = EOLTesterGUI(root)
-    # Add this line to ensure cleanup on window close
-    root.protocol("WM_DELETE_WINDOW", lambda: [app.cleanup(), root.destroy()])
+    
+    def on_closing():
+        app.cleanup()
+        root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
 if __name__ == "__main__":
