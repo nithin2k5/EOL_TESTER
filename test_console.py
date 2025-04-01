@@ -226,22 +226,36 @@ class EOLTesterGUI:
         bottom_frame.pack(fill="x", side="bottom")
         bottom_frame.pack_propagate(False)
         
-        # Create status frame
+        # Create status frame with proper spacing and layout
         status_frame = tk.Frame(bottom_frame, bg="white")
         status_frame.pack(fill="x", pady=2)
-        
-        # Add HOME and AUTO status labels
-        status_labels = ['HOME', 'AUTO', '1st PULL', '2nd PULL', 'TEST']
-        for label_text in status_labels:
-            label = tk.Label(status_frame,
-                            text=label_text,
-                            bg=self.get_status_label_color(label_text),
-                            fg="white",
-                            font=("Arial", 10, "bold"),
-                            width=15,height=15,
-                            relief="raised",
-                            borderwidth=2)
-            label.pack(side="left", padx=5,pady=5)
+
+        # Define status labels with proper styling
+        status_labels = [
+            {'text': 'HOME', 'bg': '#4169E1'},    # Royal Blue
+            {'text': 'AUTO', 'bg': '#228B22'},     # Forest Green
+            {'text': '1st PULL', 'bg': '#DAA520'}, # Goldenrod
+            {'text': '2nd PULL', 'bg': '#B8860B'}, # Dark Goldenrod
+            {'text': 'TEST', 'bg': '#DC143C'}      # Crimson
+        ]
+
+        # Create and pack status labels with consistent sizing and spacing
+        for label_info in status_labels:
+            label = tk.Label(
+                status_frame,
+                text=label_info['text'],
+                bg=label_info['bg'],
+                fg="white",
+                font=("Arial", 10, "bold"),
+                width=10,  # Fixed width for consistency
+                height=1,  # Fixed height
+                relief="raised",
+                borderwidth=2
+            )
+            label.pack(side="left", padx=5, pady=5, expand=True)
+            
+            # Store reference to the label if needed
+            setattr(self, f"{label_info['text'].lower()}_label", label)
         
         # Add label info text
         self.label_info = tk.Label(bottom_frame,

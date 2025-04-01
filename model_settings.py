@@ -1254,20 +1254,42 @@ class WorkspaceApp:
 
     def save_specifications_to_db(self):
         try:
-            # Validate that all required fields are filled
-            if not all(entry.get() for entry in self.spec_entries.values()) or \
-               not all(self.textboxes[key].get() for key in self.textboxes):
-                messagebox.showwarning("Input Error", "Please fill in all the fields before saving.")
+            # Only validate required part list fields
+            required_fields = [
+                "Part Number",
+                "Model & Part Name",
+                "ALC Code",
+                "Vendor Code",
+                "EO Number",
+                "Special Data",
+                "Initial ID",
+                "Supplier Section"
+            ]
+            
+            # Check if required fields are filled
+            empty_fields = [field for field in required_fields 
+                           if not self.textboxes[field].get() or 
+                           self.textboxes[field].get() == f"Enter {field.lower()}"]
+            
+            if empty_fields:
+                messagebox.showwarning(
+                    "Input Error", 
+                    f"Please fill in the following required fields:\n{', '.join(empty_fields)}"
+                )
                 return
             
-            # Collect data from spec_entries
-            spec_data = tuple(entry.get() for entry in self.spec_entries.values())
+            # Collect data from spec_entries (can be empty)
+            spec_data = tuple(entry.get().upper() for entry in self.spec_entries.values())
+            
+            # Only save specification if all spec fields are filled
+            if all(spec_data):  # Only insert if all specification fields have values
+                self.insert_specification(spec_data)
             
             # Collect data from second quadrant with safe defaults
             plc_address = self.second_quad_combos.get("PLC Address", ttk.Combobox()).get()
             barcode_type = self.second_quad_combos.get("Barcode Type", ttk.Combobox()).get()
             
-            # Get supplier section from textboxes instead of text widget
+            # Get supplier section from textboxes
             supplier_section = self.textboxes.get("Supplier Section", tk.Entry()).get()
             if supplier_section == "Enter supplier details":
                 supplier_section = ""
@@ -1290,16 +1312,15 @@ class WorkspaceApp:
             
             # Insert data into the database
             self.insert_model_master(master_data)
-            self.insert_specification(spec_data)
             
             # Clear everything after successful save
             self.clear_all_data()
             
-            messagebox.showinfo("Success", "Specifications and part list details saved successfully!")
+            messagebox.showinfo("Success", "Part details saved successfully!")
             
         except Exception as e:
             print(f"Error: {e}")
-            messagebox.showerror("Error", f"Failed to save specifications: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save data: {str(e)}")
 
     def insert_model_master(self, data):
         try:

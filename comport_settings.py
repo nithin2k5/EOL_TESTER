@@ -286,12 +286,13 @@ class ComPortSettings:
             # Clear the text box
             self.rx_text.delete("1.0", tk.END)
             
-            # Define file paths relative to the script location
+            # Define file paths in txt_files directory
             current_dir = os.path.dirname(os.path.abspath(__file__))
+            txt_files_dir = os.path.join(current_dir, "txt_files")
             
-            process_status_file = os.path.join(current_dir, "ProcessStatus.txt")
-            input_sensors_file = os.path.join(current_dir, "InputSensors.txt")
-            program_selection_file = os.path.join(current_dir, "ProgramSelectionInPLC.txt")
+            process_status_file = os.path.join(txt_files_dir, "ProcessStatus.txt")
+            input_sensors_file = os.path.join(txt_files_dir, "InputSensors.txt")
+            program_selection_file = os.path.join(txt_files_dir, "ProgramSelectionInPLC.txt")
             
             # Initialize arrays
             process_status_array = []
@@ -306,7 +307,7 @@ class ComPortSettings:
             ]:
                 try:
                     if not os.path.exists(file_path):
-                        self.rx_text.insert(tk.END, f"Warning: {os.path.basename(file_path)} not found\n")
+                        self.rx_text.insert(tk.END, f"Warning: {os.path.basename(file_path)} not found in txt_files directory\n")
                         continue
                         
                     with open(file_path, 'r') as f:
@@ -330,20 +331,12 @@ class ComPortSettings:
                         else:
                             program_selection_array = addresses
                             
-#self.rx_text.insert(tk.END, f"Loaded {len(addresses)} {array_name} addresses\n")
-                        
                 except Exception as e:
                     self.rx_text.insert(tk.END, f"Error reading {os.path.basename(file_path)}: {str(e)}\n")
             
-          #  self.rx_text.insert(tk.END, "\n--- Reading PLC Data ---\n")
-            
             # Read coils for each address array
-         #   if input_sensors_array:
-          #      self._read_coils(input_sensors_array, "Input Sensors", slave_id)
             if process_status_array:
                 self._read_coils(process_status_array, "Process Status", slave_id)
-           # if program_selection_array:
-            #    self._read_coils(program_selection_array, "Program Selection", slave_id)
 
             if not any([input_sensors_array, process_status_array, program_selection_array]):
                 self.rx_text.insert(tk.END, "\nNo valid addresses found in any configuration file.")
@@ -1046,6 +1039,46 @@ class ComPortSettings:
                 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
+
+    def load_plc_options(self):
+        """Load PLC address options from plc_register.txt"""
+        try:
+            # Use path in txt_files directory
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            file_path = os.path.join(current_dir, "txt_files", "PLC_on_register.txt")
+            
+            with open(file_path, 'r') as file:
+                # Read content and split by commas
+                content = file.read().strip()
+                options = [opt.strip() for opt in content.split(',') if opt.strip()]
+                print(f"Loaded PLC options: {options}")  # Debug print
+                return options
+        except FileNotFoundError:
+            print(f"Warning: PLC_on_register.txt not found in txt_files directory at {file_path}")
+            return []
+        except Exception as e:
+            print(f"Error reading PLC options: {str(e)}")
+            return []
+
+    def load_barcode_options(self):
+        """Load barcode options from barcodeprintfilename.txt"""
+        try:
+            # Use path in txt_files directory
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            file_path = os.path.join(current_dir, "txt_files", "barcodeprintfilenames.txt")
+            
+            with open(file_path, 'r') as file:
+                # Read content and split by commas
+                content = file.read().strip()
+                options = [opt.strip() for opt in content.split(',') if opt.strip()]
+                print(f"Loaded barcode options: {options}")  # Debug print
+                return options
+        except FileNotFoundError:
+            print(f"Warning: barcodeprintfilenames.txt not found in txt_files directory at {file_path}")
+            return []
+        except Exception as e:
+            print(f"Error reading barcode options: {str(e)}")
+            return []
 
 def main():
     root = tk.Tk()
