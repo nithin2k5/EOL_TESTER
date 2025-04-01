@@ -1306,7 +1306,7 @@ class EOLTesterGUI:
             
             # Check if the code exists in the list
             if emp_code in valid_codes:
-                self.alc_entry.configure(state='normal')  # Only enable ALC entry
+                self.alc_entry.configure(state='normal')  # Enable ALC entry
                 self.emp_entry.configure(bg="lightgreen")
                 messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
             else:
@@ -1346,7 +1346,7 @@ class EOLTesterGUI:
             )
             cursor = conn.cursor()
 
-            # Query to get part details based on ALC code
+            # First get the part number from the ALC code
             part_query = """
             SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, MM_LABEL_COORDINATES
             FROM TBL_MODEL_MASTER 
@@ -1357,38 +1357,23 @@ class EOLTesterGUI:
 
             if part_result:
                 part_number, model_name, image_path, label_coordinates = part_result
-                
-                # Store the current part number
                 self.current_part_number = part_number
 
-                # Update message label with part info
+                # Update UI with model info
+                self.model_header.config(text=f"{model_name} - {part_number}")
                 self.message_label.config(
                     text=f"Model: {model_name} | Part Number: {part_number}",
                     fg="green"
                 )
 
-                # Update model header
-                self.model_header.config(text=f"{model_name} - {part_number}")
-
-                # Step 1: Load image if path exists
-                if image_path and os.path.exists(image_path):
-                    if self.load_image_with_path(image_path):
-                        # Step 2: Place labels if coordinates exist
-                        if label_coordinates:
-                            try:
-                                coordinates_data = json.loads(label_coordinates)
-                                self.place_labels_from_positions(coordinates_data)
-                            except json.JSONDecodeError:
-                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
-
-                # Step 3: Get specifications
+                # Get specifications for this part number
                 spec_query = """
                 SELECT 
-                    MS_DESCRIPTION,
-                    MS_DEVICE,
-                    MS_UNIT,
-                    MS_NORMAL_MIN,
-                    MS_NORMAL_MAX
+                    MS_DESCRIPTION as Description,
+                    MS_DEVICE as Device,
+                    MS_UNIT as Unit,
+                    CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
+                    CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
                 FROM TBL_MODEL_SPECIFICATION 
                 WHERE MS_PART_NUMBER = %s
                 ORDER BY MS_DEVICE
@@ -1396,37 +1381,36 @@ class EOLTesterGUI:
                 cursor.execute(spec_query, (part_number,))
                 specs = cursor.fetchall()
 
-                # Clear existing items in specification tree
+                # Clear existing specifications
                 self.spec_tree.delete(*self.spec_tree.get_children())
 
-                # Add specifications to tree
+                # Add new specifications
                 for spec in specs:
                     description, device, unit, min_val, max_val = spec
-                    
-                    # Format values for display
-                    min_val = f"{float(min_val):.2f}" if min_val is not None else "N/A"
-                    max_val = f"{float(max_val):.2f}" if max_val is not None else "N/A"
-                    
                     values = (
                         description,
                         device,
                         unit,
-                        min_val,
-                        max_val,
+                        f"{float(min_val):.2f}" if min_val is not None else "N/A",
+                        f"{float(max_val):.2f}" if max_val is not None else "N/A",
                         "",  # Empty Actual column
                         ""   # Empty Result column
                     )
                     self.spec_tree.insert('', 'end', values=values)
 
-                # Step 4: Only after all data is loaded, start PLC reading and sensor monitoring
-                self.message_label.config(text="Starting PLC and sensor monitoring...", fg="blue")
-                self.root.update()  # Update UI before starting monitoring
-                
-                # Start PLC reading and sensor monitoring
-                self.load_and_monitor_sensors()
-                self.start_check_async()  # Your existing PLC monitoring method
+                # Load image and place labels if available
+                if image_path and os.path.exists(image_path):
+                    if self.load_image_with_path(image_path):
+                        if label_coordinates:
+                            try:
+                                coordinates_data = json.loads(label_coordinates)
+                                self.place_labels_from_positions(coordinates_data)
+                            except json.JSONDecodeError:
+                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
 
-                self.message_label.config(text=f"Model: {model_name} | Part Number: {part_number}", fg="green")
+                # Start monitoring
+                self.load_and_monitor_sensors()
+                self.start_check_async()
 
             else:
                 self.message_label.config(
