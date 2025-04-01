@@ -982,50 +982,57 @@ class EOLTesterGUI:
     def cleanup(self):
         """Enhanced cleanup method with proper connection handling"""
         try:
+            # Cancel any pending after callbacks
+            for job in self.root.tk.call('after', 'info'):
+                self.root.after_cancel(job)
+
             # Stop all blinking labels
             if hasattr(self, 'blinking_labels'):
                 for label in self.blinking_labels.values():
                     if hasattr(label, 'blink_job'):
                         self.root.after_cancel(label.blink_job)
-            self.blinking_labels.clear()
+                self.blinking_labels.clear()
 
             # Reset PLC if configured
             if hasattr(self, 'resetPLCOnFormClosing') and self.resetPLCOnFormClosing:
-                self.reset_plc()
+                try:
+                    self.reset_plc()
+                except:
+                    pass
 
             # Close PLC connection
             if hasattr(self, 'plc_client') and self.plc_client:
                 try:
                     self.plc_client.close()
-                    print("PLC connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing PLC connection: {e}")
+                    print("PLC connection closed")
+                except:
+                    pass
+                self.plc_client = None
 
             # Close Loadcell 1 connection
-            if hasattr(self, 'loadcell1_client') and self.loadcell1_client and self.loadcell1_client.is_open:
+            if hasattr(self, 'loadcell1_client') and self.loadcell1_client:
                 try:
-                    self.loadcell1_client.close()
-                    print("Loadcell 1 connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing Loadcell 1 connection: {e}")
+                    if self.loadcell1_client.is_open:
+                        self.loadcell1_client.close()
+                    print("Loadcell 1 connection closed")
+                except:
+                    pass
+                self.loadcell1_client = None
 
             # Close Loadcell 2 connection
-            if hasattr(self, 'loadcell2_client') and self.loadcell2_client and self.loadcell2_client.is_open:
+            if hasattr(self, 'loadcell2_client') and self.loadcell2_client:
                 try:
-                    self.loadcell2_client.close()
-                    print("Loadcell 2 connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing Loadcell 2 connection: {e}")
+                    if self.loadcell2_client.is_open:
+                        self.loadcell2_client.close()
+                    print("Loadcell 2 connection closed")
+                except:
+                    pass
+                self.loadcell2_client = None
 
-            print("All connections closed successfully")
+            print("Cleanup completed successfully")
             
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
-        finally:
-            # Ensure all connections are set to None
-            self.plc_client = None
-            self.loadcell1_client = None
-            self.loadcell2_client = None
 
     def retrieve_part_specifications(self, part_number):
         """Retrieve specifications and label coordinates from database."""
@@ -1303,7 +1310,7 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="white")
 
     def validate_employee_code(self, event=None):
-        """Validate employee code only, without part number search"""
+        """Validate employee code only"""
         emp_code = self.emp_entry.get().strip()
         if emp_code == "EMP CODE" or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
@@ -1314,7 +1321,7 @@ class EOLTesterGUI:
             employee_codes_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'EmployeeCodes.txt')
             
             if not os.path.exists(employee_codes_path):
-                messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
+                messagebox.showerror("Error", "Employee codes file not found")
                 return
             
             with open(employee_codes_path, 'r') as file:
@@ -1323,14 +1330,14 @@ class EOLTesterGUI:
             if emp_code in valid_codes:
                 self.alc_entry.configure(state='normal')
                 self.emp_entry.configure(bg="lightgreen")
-                messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
+                messagebox.showinfo("Success", "Employee code validated")
             else:
                 self.alc_entry.configure(state='disabled')
                 self.emp_entry.configure(bg="pink")
-                messagebox.showerror("Error", "Employee code unauthorized")
+                messagebox.showerror("Error", "Invalid employee code")
                 
         except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            messagebox.showerror("Error", f"Validation error: {str(e)}")
 
     def on_alc_entry_focus(self, is_focused):
         """Handle ALC entry focus with visual feedback"""
@@ -1343,7 +1350,7 @@ class EOLTesterGUI:
                 self.alc_entry.insert(0, "ALC CODE")
                 self.alc_entry.configure(bg="#fff9c4")
 
-    def process_alc_code(self):
+    def process_alc_code(self, event=None):
         """Process the entered ALC code and retrieve specifications"""
         alc_code = self.alc_entry.get().strip()
         if not alc_code or alc_code == "ALC CODE":
@@ -1374,34 +1381,27 @@ class EOLTesterGUI:
                 # Store the current part number
                 self.current_part_number = part_number
 
-                # Update message label with part info
-                self.message_label.config(
-                    text=f"Model: {model_name} | Part Number: {part_number}",
-                    fg="green"
-                )
-
                 # Update model header
                 self.model_header.config(text=f"{model_name} - {part_number}")
 
-                # Step 1: Load image if path exists
+                # Load image if path exists
                 if image_path and os.path.exists(image_path):
-                    if self.load_image_with_path(image_path):
-                        # Step 2: Place labels if coordinates exist
-                        if label_coordinates:
-                            try:
-                                coordinates_data = json.loads(label_coordinates)
-                                self.place_labels_from_positions(coordinates_data)
-                            except json.JSONDecodeError:
-                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
+                    self.load_image_with_path(image_path)
+                    if label_coordinates:
+                        try:
+                            coordinates_data = json.loads(label_coordinates)
+                            self.place_labels_from_positions(coordinates_data)
+                        except json.JSONDecodeError:
+                            print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
 
-                # Step 3: Get specifications - Fix the query and column mapping
+                # Get specifications with explicit column names
                 spec_query = """
                 SELECT 
-                    MS_DESCRIPTION,
-                    MS_DEVICE,
-                    MS_UNIT,
-                    MS_NORMAL_MIN,
-                    MS_NORMAL_MAX
+                    MS_DESCRIPTION as Description,
+                    MS_DEVICE as Device,
+                    MS_UNIT as Unit,
+                    CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
+                    CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
                 FROM TBL_MODEL_SPECIFICATION 
                 WHERE MS_PART_NUMBER = %s
                 ORDER BY MS_DEVICE
@@ -1412,51 +1412,34 @@ class EOLTesterGUI:
                 # Clear existing items in specification tree
                 self.spec_tree.delete(*self.spec_tree.get_children())
 
-                # Add specifications to tree with proper column mapping
+                # Add specifications to tree with proper formatting
                 for spec in specs:
                     description, device, unit, min_val, max_val = spec
                     values = (
-                        description,  # Description
-                        device,      # Device
-                        unit,       # Unit
-                        min_val,    # Min
-                        max_val,    # Max
-                        "",         # Empty Actual column
-                        ""         # Empty Result column
+                        description,
+                        device,
+                        unit,
+                        f"{min_val:.2f}" if min_val is not None else "N/A",
+                        f"{max_val:.2f}" if max_val is not None else "N/A",
+                        "",  # Empty Actual column
+                        ""   # Empty Result column
                     )
                     self.spec_tree.insert('', 'end', values=values)
 
-                # Step 4: Only after all data is loaded, start PLC reading and sensor monitoring
-                self.message_label.config(text="Starting PLC and sensor monitoring...", fg="blue")
-                self.root.update()  # Update UI before starting monitoring
-                
-                # Start PLC reading and sensor monitoring
-                self.load_and_monitor_sensors()
-                self.start_check_async()  # Your existing PLC monitoring method
-
-                self.message_label.config(text=f"Model: {model_name} | Part Number: {part_number}", fg="green")
+                self.message_label.config(
+                    text=f"Model: {model_name} | Part Number: {part_number}",
+                    fg="green"
+                )
 
             else:
-                self.message_label.config(
-                    text=f"No data found for ALC code: {alc_code}",
-                    fg="red"
-                )
                 messagebox.showwarning("Warning", "No matching ALC code found")
 
             cursor.close()
             conn.close()
 
         except mysql.connector.Error as err:
-            self.message_label.config(
-                text=f"Database error: {err}",
-                fg="red"
-            )
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
         except Exception as e:
-            self.message_label.config(
-                text=f"Error: {str(e)}",
-                fg="red"
-            )
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_and_monitor_sensors(self):
@@ -1866,8 +1849,10 @@ def main():
     app = EOLTesterGUI(root)
     
     def on_closing():
-        app.cleanup()
-        root.destroy()
+        try:
+            app.cleanup()
+        finally:
+            root.destroy()
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
