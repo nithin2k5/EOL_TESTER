@@ -1,4 +1,5 @@
 import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import os
@@ -857,7 +858,7 @@ class EOLTesterGUI:
                                f"Error loading configuration data:\n{str(e)}")
 
     def connect_to_devices(self):
-        """Connect to PLC and loadcells using saved configurations"""
+        """Connect to PLC and loadcells with improved error handling"""
         try:
             # Initialize clients as None first
             self.plc_client = None
@@ -870,21 +871,41 @@ class EOLTesterGUI:
             plc_station_id = os.getenv('PLC_STATION_ID')
             
             if all([plc_port, plc_baud, plc_station_id]):
-                self.plc_client = ModbusSerialClient(
-                    port=plc_port,
-                    baudrate=int(plc_baud),
-                    timeout=1,
-                    stopbits=1,
-                    bytesize=8,
-                    parity='N'
-                )
-                if not self.plc_client.connect():
-                    print(f"Failed to connect to PLC on {plc_port}")
-                    messagebox.showwarning("Warning", f"Failed to connect to PLC on {plc_port}")
+                try:
+                    self.plc_client = ModbusSerialClient(
+                        method='rtu',
+                        port=plc_port,
+                        baudrate=int(plc_baud),
+                        timeout=1,
+                        stopbits=1,
+                        bytesize=8,
+                        parity='N'
+                    )
+                    
+                    # Attempt to connect and verify connection
+                    if not self.plc_client.connect():
+                        raise Exception(f"Failed to connect to PLC on {plc_port}")
+                    
+                    # Test connection by reading a coil
+                    test_response = self.plc_client.read_coils(
+                        address=0,
+                        count=1,
+                        slave=int(plc_station_id)
+                    )
+                    
+                    if test_response.isError():
+                        raise Exception("PLC connection test failed")
+                    
+                    print(f"Successfully connected to PLC on {plc_port}")
+                    
+                except Exception as e:
+                    print(f"PLC connection error: {e}")
+                    messagebox.showwarning("Warning", f"Failed to connect to PLC: {str(e)}")
+                    self.plc_client = None
             else:
                 print("Missing PLC configuration in environment variables")
                 messagebox.showwarning("Warning", "Missing PLC configuration in environment variables")
-            
+
             # Connect to Loadcell 1
             lc1_port = os.getenv('LOADCELL_01_COM_PORT')
             lc1_baud = os.getenv('LOADCELL_01_BAUD_RATE')
@@ -920,30 +941,35 @@ class EOLTesterGUI:
                 except serial.SerialException as e:
                     print(f"Failed to connect to Loadcell 2: {e}")
                     messagebox.showwarning("Warning", f"Failed to connect to Loadcell 2 on {lc2_port}")
-                
+                    
         except Exception as e:
             print(f"Error connecting to devices: {str(e)}")
             messagebox.showerror("Connection Error", f"Failed to connect to devices: {str(e)}")
 
     def read_plc_data(self):
-        """Read data from PLC"""
+        """Read data from PLC with improved error handling"""
         try:
-            if not self.plc_client or not self.plc_client.is_socket_open():
-                raise Exception("PLC not connected")
+            if not self.plc_client:
+                raise Exception("PLC client not initialized")
+                
+            if not self.plc_client.is_socket_open():
+                # Attempt to reconnect
+                if not self.plc_client.connect():
+                    raise Exception("PLC not connected and reconnection failed")
                 
             station_id = int(os.getenv('PLC_STATION_ID'))
             
             # Read process status
             response = self.plc_client.read_coils(
-                address=0,  # Adjust address as needed
+                address=0,
                 count=1,
                 slave=station_id
             )
             
-            if not response.isError():
-                return response.bits[0]
-            else:
+            if response is None or response.isError():
                 raise Exception("Error reading PLC data")
+                
+            return response.bits[0]
                 
         except Exception as e:
             print(f"Error reading PLC: {str(e)}")
@@ -980,31 +1006,52 @@ class EOLTesterGUI:
             return None
 
     def cleanup(self):
-        """Enhanced cleanup method"""
-        # Stop all blinking labels
-        if hasattr(self, 'blinking_labels'):
-            for label in self.blinking_labels.values():
-                if hasattr(label, 'blink_job'):
-                    self.root.after_cancel(label.blink_job)
-            
-            # Clear blinking labels dictionary
-            self.blinking_labels.clear()
-        
-        # Call original cleanup code
+        """Enhanced cleanup method with improved error handling"""
         try:
-            # Reset PLC if configured
-            if self.resetPLCOnFormClosing:
-                self.reset_plc()
+            # Stop all monitoring first
+            self.keepWriting = False
+            self.breakLoop = True
             
-            # Close all connections
-            if self.plc_client:
-                self.plc_client.close()
+            # Stop all blinking labels
+            if hasattr(self, 'blinking_labels'):
+                for label in self.blinking_labels.values():
+                    if hasattr(label, 'blink_job'):
+                        self.root.after_cancel(label.blink_job)
+                self.blinking_labels.clear()
             
-            if self.loadcell1_client and self.loadcell1_client.is_open:
-                self.loadcell1_client.close()
-                
-            if self.loadcell2_client and self.loadcell2_client.is_open:
-                self.loadcell2_client.close()
+            # Close PLC connection
+            if hasattr(self, 'plc_client') and self.plc_client:
+                try:
+                    if self.plc_client.is_socket_open():
+                        if self.resetPLCOnFormClosing:
+                            self.reset_plc()
+                        self.plc_client.close()
+                        print("PLC connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing PLC connection: {e}")
+                finally:
+                    self.plc_client = None
+            
+            # Close Loadcell connections
+            if hasattr(self, 'loadcell1_client') and self.loadcell1_client:
+                try:
+                    if self.loadcell1_client.is_open:
+                        self.loadcell1_client.close()
+                    print("Loadcell 1 connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing Loadcell 1 connection: {e}")
+                finally:
+                    self.loadcell1_client = None
+            
+            if hasattr(self, 'loadcell2_client') and self.loadcell2_client:
+                try:
+                    if self.loadcell2_client.is_open:
+                        self.loadcell2_client.close()
+                    print("Loadcell 2 connection closed successfully")
+                except Exception as e:
+                    print(f"Error closing Loadcell 2 connection: {e}")
+                finally:
+                    self.loadcell2_client = None
                 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
