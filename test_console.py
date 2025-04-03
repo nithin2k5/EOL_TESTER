@@ -1059,70 +1059,91 @@ class EOLTesterGUI:
     def retrieve_part_specifications(self, part_number):
         """Retrieve specifications and label coordinates from database."""
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="nk446420",
-                database="EOL"
-            )
-            cursor = conn.cursor()
+            # Connect to database with error handling
+            try:
+                conn = mysql.connector.connect(
+                    host="localhost",
+                    user="root",
+                    password="nk446420",
+                    database="EOL"
+                )
+            except mysql.connector.Error as err:
+                print(f"Database connection failed: {err}")
+                messagebox.showerror("Database Error", "Failed to connect to database. Please check your database connection.")
+                return
+
+            cursor = conn.cursor(dictionary=True)  # Use dictionary cursor for clearer data access
             
             # Get image path and label coordinates
             master_query = """
-            SELECT MM_IMAGE_PATH, MM_LABEL_COORDINATES, MM_MODEL_NAME
+            SELECT MM_IMAGE_PATH, MM_LABEL_COORDINATES, MM_MODEL_NAME, MM_PART_NUMBER
             FROM TBL_MODEL_MASTER 
             WHERE MM_PART_NUMBER = %s
             """
             cursor.execute(master_query, (part_number,))
             result = cursor.fetchone()
             
-            if result:
-                image_path, label_coordinates, model_name = result
-                
-                # Update model header
-                if model_name:
-                    self.model_header.config(text=f"{model_name} - {part_number}")
-                
-                # Load image first
-                if image_path and os.path.exists(image_path):
+            if not result:
+                messagebox.showwarning("Warning", f"No data found for part number: {part_number}")
+                return
+            
+            # Store current part number
+            self.current_part_number = result['MM_PART_NUMBER']
+            
+            # Update model header
+            if result['MM_MODEL_NAME']:
+                self.model_header.config(text=f"{result['MM_MODEL_NAME']} - {part_number}")
+            
+            # Load image if path exists
+            if result['MM_IMAGE_PATH']:
+                image_path = self.get_absolute_image_path(result['MM_IMAGE_PATH'])
+                if not image_path or not os.path.exists(image_path):
+                    messagebox.showwarning("Warning", f"Image file not found: {result['MM_IMAGE_PATH']}")
+                else:
                     if self.load_image_with_path(image_path):
-                        # After image is loaded, place labels using database coordinates
-                        if label_coordinates:
+                        # After successful image load, place labels if coordinates exist
+                        if result['MM_LABEL_COORDINATES']:
                             try:
-                                coordinates_data = json.loads(label_coordinates)
+                                coordinates_data = json.loads(result['MM_LABEL_COORDINATES'])
                                 self.place_labels_from_positions(coordinates_data)
-                                print(f"Label coordinates loaded: {coordinates_data}")
                             except json.JSONDecodeError as e:
                                 print(f"Warning: Invalid label coordinate data: {e}")
                                 messagebox.showwarning("Warning", "Invalid label coordinate data in database")
-                
-                # Get specifications
-                spec_query = """
-                SELECT 
-                    MS_DESCRIPTION,
-                    MS_DEVICE,
-                    MS_UNIT,
-                    MS_NORMAL_MIN,
-                    MS_NORMAL_MAX
-                FROM TBL_MODEL_SPECIFICATION 
-                WHERE MS_PART_NUMBER = %s
-                ORDER BY MS_DEVICE
-                """
-                cursor.execute(spec_query, (part_number,))
-                specs = cursor.fetchall()
-                
-                # Update specifications tree
-                self.spec_tree.delete(*self.spec_tree.get_children())
-                for index, spec in enumerate(specs, start=1):
-                    values = (index,) + spec
-                    self.spec_tree.insert('', 'end', values=values)
             
-            else:
-                print(f"No data found for part number: {part_number}")
-                messagebox.showwarning("Warning", f"No data found for part number: {part_number}")
+            # Get specifications
+            spec_query = """
+            SELECT 
+                MS_DESCRIPTION,
+                MS_DEVICE,
+                MS_UNIT,
+                CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as MIN_VAL,
+                CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as MAX_VAL
+            FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
+            ORDER BY MS_DEVICE
+            """
+            cursor.execute(spec_query, (part_number,))
+            specs = cursor.fetchall()
             
-            cursor.close()
-            conn.close()
+            # Update specifications tree
+            self.spec_tree.delete(*self.spec_tree.get_children())
+            for spec in specs:
+                values = (
+                    spec['MS_DESCRIPTION'],
+                    spec['MS_DEVICE'],
+                    spec['MS_UNIT'],
+                    f"{float(spec['MIN_VAL']):.2f}" if spec['MIN_VAL'] is not None else "N/A",
+                    f"{float(spec['MAX_VAL']):.2f}" if spec['MAX_VAL'] is not None else "N/A",
+                    "",  # Empty Actual column
+                    ""   # Empty Result column
+                )
+                self.spec_tree.insert('', 'end', values=values)
+            
+            # Update status message
+            self.message_label.config(
+                text=f"Loaded specifications for {result['MM_MODEL_NAME']} - {part_number}",
+                fg="green"
+            )
             
         except mysql.connector.Error as err:
             print(f"Database Error: {err}")
@@ -1130,6 +1151,24 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
+
+    def get_absolute_image_path(self, db_image_path):
+        """Convert database image path to absolute path if needed"""
+        if not db_image_path:
+            return None
+        
+        # If path is already absolute, return it
+        if os.path.isabs(db_image_path):
+            return db_image_path
+        
+        # Otherwise, assume it's relative to the application directory
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base_dir, db_image_path)
 
     def load_image_with_path(self, image_path):
         """Load and fit image to match the exact dimensions of model_settings.py"""
