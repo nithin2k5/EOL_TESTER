@@ -45,7 +45,7 @@ class WorkspaceApp:
         self.db_config = {
             'host': 'localhost',
             'user': 'root',
-            'password': 'nk446420',
+            'password': '12345',
             'database': 'EOL'
         }
         
@@ -1205,7 +1205,7 @@ class WorkspaceApp:
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
-                password="nk446420",
+                password="12345",
                 database="EOL"
             )
             cursor = conn.cursor()
@@ -1239,7 +1239,7 @@ class WorkspaceApp:
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
-                password="nk446420",
+                password="12345",
                 database="EOL"
             )
             cursor = conn.cursor()

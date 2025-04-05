@@ -192,7 +192,6 @@ class VisionInspectionGUI:
             
             # Create new Modbus RTU client
             self.modbus_client = ModbusSerialClient(
-                method='rtu',
                 port=self.plc_com_combo.get(),
                 baudrate=int(self.plc_baud_combo.get()),
                 bytesize=8,

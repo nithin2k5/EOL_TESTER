@@ -242,9 +242,25 @@ class ComPortSettings:
 
             slave_id = int(slave_id)
 
-            # Close existing connection if any
+            # Check if there's an existing connection
             if self.modbus_client and self.modbus_client.is_socket_open():
-                self.modbus_client.close()
+                try:
+                    # Test if the existing connection is still working
+                    test_response = self.modbus_client.read_coils(
+                        address=0,
+                        count=1,
+                        slave=slave_id
+                    )
+                    if not test_response.isError():
+                        messagebox.showinfo("Connection Status", "Already connected to PLC!")
+                        self.test_button.config(state="normal")
+                        return True
+                except:
+                    # If test fails, close the existing connection
+                    try:
+                        self.modbus_client.close()
+                    except:
+                        pass
 
             # Initialize Modbus client with RTU settings
             self.modbus_client = ModbusSerialClient(
@@ -256,16 +272,45 @@ class ComPortSettings:
                 parity='N'
             )
 
-            if self.modbus_client.connect():
-                messagebox.showinfo("Connection Status", "Connected to PLC!")
-                self.test_button.config(state="normal")
-            else:
+            # Try to connect with retries
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if self.modbus_client.connect():
+                        # Test connection by reading a coil
+                        test_response = self.modbus_client.read_coils(
+                            address=0,
+                            count=1,
+                            slave=slave_id
+                        )
+                        
+                        if not test_response.isError():
+                            messagebox.showinfo("Connection Status", "Connected to PLC!")
+                            self.test_button.config(state="normal")
+                            return True
+                    
+                    if attempt < max_retries - 1:
+                        time.sleep(1)  # Wait before retrying
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        time.sleep(1)
+                        continue
+                    raise e
+
+            # If we get here, connection failed after all retries
+            if self.modbus_client:
                 self.modbus_client.close()
-                messagebox.showerror("Connection Status", "Failed to connect to PLC.")
+            messagebox.showerror("Connection Status", "Failed to connect to PLC after multiple attempts.")
+            return False
+            
         except ValueError as ve:
             messagebox.showerror("Input Error", str(ve))
+            return False
         except Exception as e:
             messagebox.showerror("Error", f"Connection Error: {str(e)}")
+            if self.modbus_client:
+                self.modbus_client.close()
+            return False
 
     def read_plc_data(self):
         """Read data from PLC registers and coils"""
@@ -323,23 +368,16 @@ class ComPortSettings:
                             self.rx_text.insert(tk.END, f"Warning: No valid addresses found in {os.path.basename(file_path)}\n")
                             continue
                             
-                        # Store addresses in appropriate array
+                        # Store addresses in appropriate array and read coils
                         if "ProcessStatus" in file_path:
-                            process_status_array = addresses
+                            self._read_coils(addresses, "Process Status", slave_id)
                         elif "InputSensors" in file_path:
-                            input_sensors_array = addresses
-                        else:
-                            program_selection_array = addresses
+                            self._read_coils(addresses, "Input Sensors", slave_id)
+                        elif "ProgramSelection" in file_path:
+                            self._read_coils(addresses, "Program Selection", slave_id)
                             
                 except Exception as e:
                     self.rx_text.insert(tk.END, f"Error reading {os.path.basename(file_path)}: {str(e)}\n")
-            
-            # Read coils for each address array
-            if process_status_array:
-                self._read_coils(process_status_array, "Process Status", slave_id)
-
-            if not any([input_sensors_array, process_status_array, program_selection_array]):
-                self.rx_text.insert(tk.END, "\nNo valid addresses found in any configuration file.")
 
             # After reading data, save the values
             self.save_device_values()
@@ -357,10 +395,32 @@ class ComPortSettings:
         # Add section header
         self.rx_text.insert(tk.END, f"\n{section_name}:\n")
         
+        # If addresses is a string, split it into a list
+        if isinstance(addresses, str):
+            addresses = [addr.strip() for addr in addresses.split(',')]
+        
         for address in addresses:
             try:
-                # Convert hex address (ignoring first character)
-                coil_address = int(address[1:], 16)
+                # Clean up the address string
+                address = address.strip()
+                if not address:
+                    continue
+                    
+                # Extract the hex part based on whether it starts with M or P
+                if address.startswith('M'):
+                    hex_part = address[1:]  # Remove 'M'
+                elif address.startswith('P'):
+                    hex_part = address[1:]  # Remove 'P'
+                else:
+                    self.rx_text.insert(tk.END, f"{address} --> Invalid address format (must start with M or P)\n")
+                    continue
+                
+                # Convert hex address to integer
+                try:
+                    coil_address = int(hex_part, 16)
+                except ValueError:
+                    self.rx_text.insert(tk.END, f"{address} --> Invalid hex value: {hex_part}\n")
+                    continue
 
                 # Read 1 coil from the PLC
                 response = self.modbus_client.read_coils(

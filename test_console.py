@@ -10,6 +10,7 @@ import json
 from pymodbus.client import ModbusSerialClient
 import serial
 from dotenv import load_dotenv
+import time
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -301,21 +302,21 @@ class EOLTesterGUI:
         style.configure("Custom.Treeview",
                        borderwidth=1,  # Border width
                        relief="solid",  # Border style
-                       fieldbackground="black",  # Background color
-                       background="black",  # Row background color
-                       foreground="white")  # Text color
+                       fieldbackground="white",  # Background color
+                       background="white",  # Row background color
+                       foreground="black")  # Text color
         
         style.configure("Custom.Treeview.Heading",
                        borderwidth=1,
                        relief="solid",
-                       background="#1e1e1e",  # Dark header background
-                       foreground="white",  # Header text color
+                       background="#e0e0e0",  # Light gray header background
+                       foreground="black",  # Header text color
                        font=("Arial", 9, "bold"))  # Header font
         
         # Configure selection colors
         style.map("Custom.Treeview",
-                 background=[("selected", "#404040")],  # Selected row background
-                 foreground=[("selected", "white")])  # Selected row text color
+                 background=[("selected", "#cce5ff")],  # Light blue for selected row
+                 foreground=[("selected", "black")])  # Selected row text color
         
         # Create Treeview with custom style
         self.spec_tree = ttk.Treeview(spec_frame, 
@@ -811,9 +812,21 @@ class EOLTesterGUI:
 
     def process_barcode_data(self):
         """Process the captured barcode data."""
-        part_number = self.barcode_data.strip()
-        if part_number:
-            self.retrieve_part_specifications(part_number)
+        barcode = self.barcode_data.strip()
+        if not barcode:
+            return
+            
+        # Check if we're waiting for employee code
+        if not self.emp_entry.get() or self.emp_entry.get() == "EMP CODE":
+            self.emp_entry.delete(0, tk.END)
+            self.emp_entry.insert(0, barcode)
+            self.validate_employee_code()
+            
+        # If ALC code is enabled and a barcode is scanned, process it
+        elif self.alc_entry.cget('state') == 'normal':
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.insert(0, barcode)
+            self.process_alc_code()
 
     def load_configuration_data(self):
         """Load configuration data from txt_files subdirectory"""
@@ -872,8 +885,16 @@ class EOLTesterGUI:
             
             if all([plc_port, plc_baud, plc_station_id]):
                 try:
+                    # Close any existing connection first
+                    if hasattr(self, 'plc_client') and self.plc_client:
+                        try:
+                            if self.plc_client.is_socket_open():
+                                self.plc_client.close()
+                        except:
+                            pass
+                    
+                    # Create new PLC client
                     self.plc_client = ModbusSerialClient(
-                        method='rtu',
                         port=plc_port,
                         baudrate=int(plc_baud),
                         timeout=1,
@@ -882,21 +903,27 @@ class EOLTesterGUI:
                         parity='N'
                     )
                     
-                    # Attempt to connect and verify connection
-                    if not self.plc_client.connect():
-                        raise Exception(f"Failed to connect to PLC on {plc_port}")
-                    
-                    # Test connection by reading a coil
-                    test_response = self.plc_client.read_coils(
-                        address=0,
-                        count=1,
-                        slave=int(plc_station_id)
-                    )
-                    
-                    if test_response.isError():
-                        raise Exception("PLC connection test failed")
-                    
-                    print(f"Successfully connected to PLC on {plc_port}")
+                    # Attempt to connect with retries
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            if self.plc_client.connect():
+                                # Test connection by reading a coil
+                                test_response = self.plc_client.read_coils(
+                                    address=0,
+                                    count=1,
+                                    slave=int(plc_station_id)
+                                )
+                                
+                                if not test_response.isError():
+                                    print(f"Successfully connected to PLC on {plc_port}")
+                                    break
+                        except Exception as e:
+                            print(f"Attempt {attempt + 1} failed: {e}")
+                            if attempt < max_retries - 1:
+                                time.sleep(1)  # Wait before retrying
+                            else:
+                                raise Exception("Failed to establish PLC connection after multiple attempts")
                     
                 except Exception as e:
                     print(f"PLC connection error: {e}")
@@ -1019,20 +1046,7 @@ class EOLTesterGUI:
                         self.root.after_cancel(label.blink_job)
                 self.blinking_labels.clear()
             
-            # Close PLC connection
-            if hasattr(self, 'plc_client') and self.plc_client:
-                try:
-                    if self.plc_client.is_socket_open():
-                        if self.resetPLCOnFormClosing:
-                            self.reset_plc()
-                        self.plc_client.close()
-                        print("PLC connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing PLC connection: {e}")
-                finally:
-                    self.plc_client = None
-            
-            # Close Loadcell connections
+            # Only close loadcell connections, keep PLC connection alive
             if hasattr(self, 'loadcell1_client') and self.loadcell1_client:
                 try:
                     if self.loadcell1_client.is_open:
@@ -1064,7 +1078,7 @@ class EOLTesterGUI:
                 conn = mysql.connector.connect(
                     host="localhost",
                     user="root",
-                    password="nk446420",
+                    password="12345",
                     database="EOL"
                 )
             except mysql.connector.Error as err:
@@ -1328,7 +1342,7 @@ class EOLTesterGUI:
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
-                password="nk446420",
+                password="12345",
                 database="EOL"
             )
             cursor = conn.cursor()
@@ -1390,15 +1404,15 @@ class EOLTesterGUI:
             with open(employee_codes_path, 'r') as file:
                 valid_codes = [code.strip() for code in file.readlines()]
             
-            # Only validate the employee code, no part number search
             if emp_code in valid_codes:
+                messagebox.showinfo("Success", "Employee code validated successfully")
                 self.alc_entry.configure(state='normal')  # Enable ALC entry
                 self.emp_entry.configure(bg="lightgreen")
-                messagebox.showinfo("Success", "Employee code validated. You can now enter ALC code.")
+                self.alc_entry.focus_set()  # Set focus to ALC entry
             else:
+                messagebox.showerror("Error", "Employee code unauthorized")
                 self.alc_entry.configure(state='disabled')
                 self.emp_entry.configure(bg="pink")
-                messagebox.showerror("Error", "Employee code unauthorized")
                 
         except FileNotFoundError:
             messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
@@ -1427,92 +1441,89 @@ class EOLTesterGUI:
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
-                password="nk446420",
+                password="12345",
                 database="EOL"
             )
-            cursor = conn.cursor()
+            cursor = conn.cursor(dictionary=True)
 
-            # First get the part number from the ALC code
-            part_query = """
-            SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, MM_LABEL_COORDINATES
+            # Get model information using ALC code
+            model_query = """
+            SELECT 
+                MM_PART_NUMBER,
+                MM_MODEL_NAME,
+                MM_IMAGE_PATH,
+                MM_LABEL_COORDINATES
             FROM TBL_MODEL_MASTER 
             WHERE MM_ALC_CODE = %s
             """
-            cursor.execute(part_query, (alc_code,))
-            part_result = cursor.fetchone()
+            cursor.execute(model_query, (alc_code,))
+            model_result = cursor.fetchone()
 
-            if part_result:
-                part_number, model_name, image_path, label_coordinates = part_result
-                self.current_part_number = part_number
+            if not model_result:
+                messagebox.showwarning("Warning", f"No data found for ALC code: {alc_code}")
+                cursor.close()
+                conn.close()
+                return
 
-                # Update UI with model info
-                self.model_header.config(text=f"{model_name} - {part_number}")
-                self.message_label.config(
-                    text=f"Model: {model_name} | Part Number: {part_number}",
-                    fg="green"
+            # Store current part number and update UI
+            self.current_part_number = model_result['MM_PART_NUMBER']
+            self.model_header.config(text=f"{model_result['MM_MODEL_NAME']} - {self.current_part_number}")
+            
+            # Get specifications using the part number
+            spec_query = """
+            SELECT 
+                MS_DESCRIPTION as Description,
+                MS_DEVICE as Device,
+                MS_UNIT as Unit,
+                CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
+                CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
+            FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
+            ORDER BY MS_DEVICE
+            """
+            cursor.execute(spec_query, (self.current_part_number,))
+            specs = cursor.fetchall()
+
+            # Clear and update specifications tree
+            self.spec_tree.delete(*self.spec_tree.get_children())
+            for spec in specs:
+                values = (
+                    spec['Description'],
+                    spec['Device'],
+                    spec['Unit'],
+                    f"{float(spec['Min']):.2f}" if spec['Min'] is not None else "N/A",
+                    f"{float(spec['Max']):.2f}" if spec['Max'] is not None else "N/A",
+                    "",  # Empty Actual column
+                    ""   # Empty Result column
                 )
+                self.spec_tree.insert('', 'end', values=values)
 
-                # Get specifications for this part number
-                spec_query = """
-                SELECT 
-                    MS_DESCRIPTION as Description,
-                    MS_DEVICE as Device,
-                    MS_UNIT as Unit,
-                    CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
-                    CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
-                FROM TBL_MODEL_SPECIFICATION 
-                WHERE MS_PART_NUMBER = %s
-                ORDER BY MS_DEVICE
-                """
-                cursor.execute(spec_query, (part_number,))
-                specs = cursor.fetchall()
-
-                # Clear existing specifications
-                self.spec_tree.delete(*self.spec_tree.get_children())
-
-                # Add new specifications
-                for spec in specs:
-                    description, device, unit, min_val, max_val = spec
-                    values = (
-                        description,
-                        device,
-                        unit,
-                        f"{float(min_val):.2f}" if min_val is not None else "N/A",
-                        f"{float(max_val):.2f}" if max_val is not None else "N/A",
-                        "",  # Empty Actual column
-                        ""   # Empty Result column
-                    )
-                    self.spec_tree.insert('', 'end', values=values)
-
-                # Load image and place labels if available
-                if image_path and os.path.exists(image_path):
-                    if self.load_image_with_path(image_path):
-                        if label_coordinates:
+            # Handle image loading and label placement
+            if model_result['MM_IMAGE_PATH']:
+                abs_image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), model_result['MM_IMAGE_PATH']))
+                if os.path.exists(abs_image_path):
+                    if self.load_image(abs_image_path):
+                        if model_result['MM_LABEL_COORDINATES']:
                             try:
-                                coordinates_data = json.loads(label_coordinates)
+                                coordinates_data = json.loads(model_result['MM_LABEL_COORDINATES'])
                                 self.place_labels_from_positions(coordinates_data)
                             except json.JSONDecodeError:
-                                print(f"Warning: Invalid label coordinate data for ALC code {alc_code}")
+                                messagebox.showwarning("Warning", "Invalid label coordinate data")
+                else:
+                    messagebox.showwarning("Warning", f"Image not found: {abs_image_path}")
 
-                # Start monitoring
-                self.load_and_monitor_sensors()
-                self.start_check_async()
-
-            else:
-                self.message_label.config(
-                    text=f"No data found for ALC code: {alc_code}",
-                    fg="red"
-                )
-                messagebox.showwarning("Warning", "No matching ALC code found")
+            # Update status message
+            self.message_label.config(
+                text=f"Model: {model_result['MM_MODEL_NAME']} | Part Number: {self.current_part_number}",
+                fg="green"
+            )
 
             cursor.close()
             conn.close()
 
         except mysql.connector.Error as err:
-            self.message_label.config(text=f"Database error: {err}", fg="red")
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
         except Exception as e:
-            self.message_label.config(text=f"Error: {str(e)}", fg="red")
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
 
     def load_and_monitor_sensors(self):
@@ -1856,25 +1867,42 @@ class EOLTesterGUI:
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
             
             # Read process status addresses
-            for address in self.process_status_array:
+            for address_str in self.process_status_array:
                 try:
-                    # Convert hex address (ignoring first character)
-                    coil_address = int(address[1:], 16)
+                    # Split if comma-separated
+                    addresses = [addr.strip() for addr in address_str.split(',')]
                     
-                    response = self.plc_client.read_coils(
-                        address=coil_address,
-                        count=1,
-                        slave=station_id
-                    )
-                    
-                    if not response.isError():
-                        status = response.bits[0]
-                        print(f"Address {address}: {'ON' if status else 'OFF'}")
-                    else:
-                        print(f"Error reading coil {address}")
+                    for address in addresses:
+                        if not address:
+                            continue
+                            
+                        # Extract hex part based on prefix
+                        if address.startswith('M'):
+                            hex_part = address[1:]  # Remove 'M'
+                        else:
+                            print(f"Invalid address format: {address}")
+                            continue
+                        
+                        try:
+                            coil_address = int(hex_part, 16)
+                        except ValueError:
+                            print(f"Invalid hex value: {hex_part}")
+                            continue
+                        
+                        response = self.plc_client.read_coils(
+                            address=coil_address,
+                            count=1,
+                            slave=station_id
+                        )
+                        
+                        if not response.isError():
+                            status = response.bits[0]
+                            print(f"Address {address}: {'ON' if status else 'OFF'}")
+                        else:
+                            print(f"Error reading coil {address}")
                     
                 except Exception as e:
-                    print(f"Error reading coil {address}: {str(e)}")
+                    print(f"Error reading coil {address_str}: {str(e)}")
                 
             return True
             
@@ -1891,30 +1919,75 @@ class EOLTesterGUI:
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
             
             # Read input sensor addresses
-            for address in self.input_sensors_array:
+            for address_str in self.input_sensors_array:
                 try:
-                    # Convert hex address (ignoring first character)
-                    input_address = int(address[1:], 16)
+                    # Split if comma-separated
+                    addresses = [addr.strip() for addr in address_str.split(',')]
                     
-                    response = self.plc_client.read_discrete_inputs(
-                        address=input_address,
-                        count=1,
-                        slave=station_id
-                    )
-                    
-                    if not response.isError():
-                        status = response.bits[0]
-                        print(f"Sensor {address}: {'ON' if status else 'OFF'}")
-                    else:
-                        print(f"Error reading sensor {address}")
+                    for address in addresses:
+                        if not address:
+                            continue
+                            
+                        # Extract hex part based on prefix
+                        if address.startswith('P'):
+                            hex_part = address[1:]  # Remove 'P'
+                        else:
+                            print(f"Invalid address format: {address}")
+                            continue
+                        
+                        try:
+                            input_address = int(hex_part, 16)
+                        except ValueError:
+                            print(f"Invalid hex value: {hex_part}")
+                            continue
+                        
+                        response = self.plc_client.read_discrete_inputs(
+                            address=input_address,
+                            count=1,
+                            slave=station_id
+                        )
+                        
+                        if not response.isError():
+                            status = response.bits[0]
+                            print(f"Sensor {address}: {'ON' if status else 'OFF'}")
+                        else:
+                            print(f"Error reading sensor {address}")
                     
                 except Exception as e:
-                    print(f"Error reading sensor {address}: {str(e)}")
+                    print(f"Error reading sensor {address_str}: {str(e)}")
                 
             return True
             
         except Exception as e:
             print(f"Error reading sensor inputs: {str(e)}")
+            return False
+
+    def reconnect_plc(self):
+        """Attempt to reconnect to PLC"""
+        try:
+            if self.plc_client:
+                if self.plc_client.is_socket_open():
+                    self.plc_client.close()
+                
+                if self.plc_client.connect():
+                    # Test connection
+                    station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                    test_response = self.plc_client.read_coils(
+                        address=0,
+                        count=1,
+                        slave=station_id
+                    )
+                    
+                    if not test_response.isError():
+                        print("Successfully reconnected to PLC")
+                        return True
+            
+            # If reconnection failed or no client exists, try full connection
+            self.connect_to_devices()
+            return self.plc_client and self.plc_client.is_socket_open()
+            
+        except Exception as e:
+            print(f"Error reconnecting to PLC: {e}")
             return False
 
 def main():
