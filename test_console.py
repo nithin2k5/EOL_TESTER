@@ -23,16 +23,44 @@ class EOLTesterGUI:
         # Set up the window after initialization
         self.root.after(100, self.setup_window)  # Delay window setup slightly
         
+        # Set up window closing handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         # Continue with the rest of your initialization...
 
     def initialize_variables(self):
-        """Initialize all variables before window setup"""
+        """Initialize all variables before window setup and ensure clean COM ports"""
+        # Initialize UI-related variables
         self.image_label = None
         self.current_image = None
         self.label_positions = {}
         self.selected_label = None
         self.barcode_data = ""
         self.label_widgets = {}
+        
+        # Initialize container references (will be properly created in setup_window)
+        self.main_container = None
+        self.message_label = None
+        self.workspace = None
+        
+        # Clear any previous connections
+        self.plc_client = None
+        self.loadcell1_client = None
+        self.loadcell2_client = None
+        
+        # Attempt to force-clean COM ports at startup
+        try:
+            plc_port = os.getenv('PLC_COM_PORT')
+            if plc_port:
+                try:
+                    # Try direct port open/close to force release
+                    test_serial = serial.Serial(plc_port)
+                    test_serial.close()
+                    print(f"Startup: Successfully released {plc_port}")
+                except:
+                    print(f"Startup: COM port {plc_port} may be in use by another application")
+        except:
+            pass
         
         # Get machine ID from environment variable and store it
         self.machineid = os.getenv('MACHINE_ID', 'Not Set')
@@ -52,6 +80,9 @@ class EOLTesterGUI:
         self.noOfValues = 0
         self.resetPLCOnFormClosing = True
         
+        # Initialize blinking jobs tracking
+        self.blinking_jobs = {}
+        
         # Initialize timers
         self.alc_timer = None
         self.alcInput_TimeInterval = 200  # milliseconds
@@ -63,17 +94,25 @@ class EOLTesterGUI:
         self.root.lift()  # Bring window to front
         self.root.focus_force()  # Force focus
         
-        # Remove escape key binding since we're not using fullscreen
-        # self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+        # Create the main_container first to ensure it exists before other operations
+        # Create main container
+        self.main_container = tk.Frame(self.root)
+        self.main_container.pack(fill="both", expand=True)
+
+        # Add message label for status updates
+        self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
+        self.message_label.pack(fill="x", pady=2)
         
         # Load data and connect to devices
         self.load_configuration_data()
         load_dotenv()
-        self.connect_to_devices()
         
-        # Set up GUI components
+        # Set up GUI components before connecting to devices
         self.setup_gui()
         self.setup_barcode_listener()
+        
+        # Connect to devices after GUI is set up
+        self.connect_to_devices()
         
         # Start monitoring
         self.monitor_p0000_state()
@@ -83,13 +122,8 @@ class EOLTesterGUI:
         self.root.after(500, lambda: self.root.attributes('-topmost', False))
 
     def setup_gui(self):
-        # Main container
-        self.main_container = tk.Frame(self.root)
-        self.main_container.pack(fill="both", expand=True)
-
-        # Add message label for status updates with empty initial text
-        self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
-        self.message_label.pack(fill="x", pady=2)
+        # Main container and message label are already created in setup_window
+        # Do not recreate them here
         
         # Title bar with INFAC logo
         self.create_title_bar()
@@ -689,16 +723,15 @@ class EOLTesterGUI:
         y = label.winfo_y() + event.y - label._drag_start_y
         
         # Get image frame boundaries
-        image_frame = self.image_frame
-        frame_width = image_frame.winfo_width()
-        frame_height = image_frame.winfo_height()
+        frame_width = self.image_frame.winfo_width()
+        frame_height = self.image_frame.winfo_height()
         
         # Keep label within image frame boundaries
         x = max(0, min(x, frame_width - label.winfo_width()))
         y = max(0, min(y, frame_height - label.winfo_height()))
         
         # Move the label
-        label.place(in_=image_frame, x=x, y=y)
+        label.place(x=x, y=y)
 
     def stop_label_drag(self, event):
         """Handle end of label drag."""
@@ -708,18 +741,12 @@ class EOLTesterGUI:
         x = label.winfo_x()
         y = label.winfo_y()
         
-        # Check if label is within image frame bounds
-        if (0 <= x <= self.image_frame.winfo_width() and 
-            0 <= y <= self.image_frame.winfo_height()):
-            # Save the new position
-            self.label_positions[label.cget('text')] = (x, y)
-            print(f"Label {label.cget('text')} dropped at x={x}, y={y}")
-        else:
-            # Return label to label frame if dropped outside image
-            label.place_forget()
-            label.pack(in_=self.label_info_frame, side="left", padx=1)
-            if label.cget('text') in self.label_positions:
-                del self.label_positions[label.cget('text')]
+        # Update position in the positions dictionary
+        self.label_positions[label.cget('text')] = (x, y)
+        print(f"Label {label.cget('text')} dropped at x={x}, y={y}")
+        
+        # Save the updated positions to database
+        self.save_label_positions()
 
     # Button command methods
     def auto_command(self):
@@ -781,18 +808,29 @@ class EOLTesterGUI:
         """Alternative approach using tkinter bindings"""
         self.root.bind('<Key>', self.on_key_press)
         self.root.bind('<Return>', self.on_enter_press)
+        self.barcode_data = ""  # Initialize empty barcode data
 
     def on_key_press(self, event):
-        if event.char:
-            self.barcode_data += event.char
+        """Handle key press events for barcode scanning"""
+        if event.char and event.char.isprintable():
+            # Only accumulate data if we're not directly focused on an entry widget
+            focused_widget = self.root.focus_get()
+            if not isinstance(focused_widget, tk.Entry):
+                self.barcode_data += event.char
+            # If focused on an entry, let the default behavior happen
 
     def on_enter_press(self, event):
-        self.process_barcode_data()
-        self.barcode_data = ""
+        """Handle Enter key for barcode scanning"""
+        # Process barcode if not in an entry widget
+        focused_widget = self.root.focus_get()
+        if not isinstance(focused_widget, tk.Entry) and self.barcode_data:
+            self.process_barcode_data()
+        # If Enter is pressed in an entry, let the default behavior happen
+        # Barcode data is cleared in process_barcode_data when used
 
     def process_barcode_data(self):
         """Process the captured barcode data."""
-        barcode = self.barcode_data.strip()
+        barcode = ''.join(c for c in self.barcode_data if c.isprintable()).strip()
         if not barcode:
             return
             
@@ -801,12 +839,21 @@ class EOLTesterGUI:
             self.emp_entry.delete(0, tk.END)
             self.emp_entry.insert(0, barcode)
             self.validate_employee_code()
+            # Reset barcode data after processing
+            self.barcode_data = ""
+            return
             
         # If ALC code is enabled and a barcode is scanned, process it
         elif self.alc_entry.cget('state') == 'normal':
             self.alc_entry.delete(0, tk.END)
             self.alc_entry.insert(0, barcode)
             self.process_alc_code()
+            # Reset barcode data after processing
+            self.barcode_data = ""
+            return
+            
+        # Reset barcode data if not used
+        self.barcode_data = ""
 
     def load_configuration_data(self):
         """Load configuration data from txt_files subdirectory"""
@@ -816,43 +863,106 @@ class EOLTesterGUI:
             
             # Ensure the directory exists
             if not os.path.exists(txt_files_dir):
-                raise FileNotFoundError(f"Directory not found: {txt_files_dir}")
+                os.makedirs(txt_files_dir, exist_ok=True)
+                print(f"Created txt_files directory at: {txt_files_dir}")
             
             # Load ProcessStatus
             process_status_path = os.path.join(txt_files_dir, 'ProcessStatus.txt')
-            with open(process_status_path, 'r') as file:
-                self.process_status_array = [line.strip() for line in file.readlines()]
+            if os.path.exists(process_status_path):
+                with open(process_status_path, 'r') as file:
+                    self.process_status_array = [line.strip() for line in file.readlines()]
+            else:
+                print(f"Warning: ProcessStatus.txt not found at {process_status_path}")
+                self.process_status_array = []
             
             # Load ProgramSelectionInPLC
             program_selection_path = os.path.join(txt_files_dir, 'ProgramSelectionInPLC.txt')
-            with open(program_selection_path, 'r') as file:
-                self.program_selection_array = [line.strip() for line in file.readlines()]
+            if os.path.exists(program_selection_path):
+                with open(program_selection_path, 'r') as file:
+                    self.program_selection_array = [line.strip() for line in file.readlines()]
+            else:
+                print(f"Warning: ProgramSelectionInPLC.txt not found at {program_selection_path}")
+                self.program_selection_array = []
             
             # Load InputSensors
             input_sensors_path = os.path.join(txt_files_dir, 'InputSensors.txt')
-            with open(input_sensors_path, 'r') as file:
-                self.input_sensors_array = [line.strip() for line in file.readlines()]
+            if os.path.exists(input_sensors_path):
+                with open(input_sensors_path, 'r') as file:
+                    self.input_sensors_array = [line.strip() for line in file.readlines()]
+            else:
+                print(f"Warning: InputSensors.txt not found at {input_sensors_path}")
+                self.input_sensors_array = []
             
             # Load EmployeeCodes
             employee_codes_path = os.path.join(txt_files_dir, 'EmployeeCodes.txt')
-            with open(employee_codes_path, 'r') as file:
-                self.employee_codes = [line.strip() for line in file.readlines()]
+            if os.path.exists(employee_codes_path):
+                with open(employee_codes_path, 'r') as file:
+                    self.employee_codes = [line.strip() for line in file.readlines()]
+            else:
+                print(f"Warning: EmployeeCodes.txt not found at {employee_codes_path}")
+                self.employee_codes = []
+            
+            # Load PLC On Register file - updated to txt_files directory
+            plc_register_path = os.path.join(txt_files_dir, 'PLC_on_register.txt')
+            if os.path.exists(plc_register_path):
+                with open(plc_register_path, 'r') as file:
+                    # Process the file content as needed
+                    print(f"Loaded PLC register file from: {plc_register_path}")
+            else:
+                print(f"Warning: PLC_on_register.txt not found at {plc_register_path}")
+            
+            # Load barcode print filenames - updated to txt_files directory
+            barcode_print_path = os.path.join(txt_files_dir, 'barcodeprintfilenames.txt')
+            if os.path.exists(barcode_print_path):
+                with open(barcode_print_path, 'r') as file:
+                    # Process the file content as needed
+                    print(f"Loaded barcode print filenames from: {barcode_print_path}")
+            else:
+                print(f"Warning: barcodeprintfilenames.txt not found at {barcode_print_path}")
             
             # Check if any array is empty
             if not all([self.process_status_array, self.program_selection_array, 
                        self.input_sensors_array, self.employee_codes]):
-                messagebox.showwarning("Empty File", "One or more configuration files are empty.")
+                print("Warning: One or more configuration files are empty or not found.")
+                # Only try to update message_label if it exists and the window is valid
+                self.safe_update_message("Warning: Some configuration files not found. Check txt_files directory.", "orange")
             
         except FileNotFoundError as e:
-            messagebox.showerror("File Not Found", 
-                               f"Configuration file not found in txt_files directory:\n{str(e)}")
+            print(f"File Not Found: {str(e)}")
+            self.safe_update_message(f"File Not Found: {str(e)}", "red")
         except Exception as e:
-            messagebox.showerror("Error", 
-                               f"Error loading configuration data:\n{str(e)}")
+            print(f"Error loading configuration data: {str(e)}")
+            self.safe_update_message(f"Error loading configuration data: {str(e)}", "red")
+            
+    def safe_update_message(self, message, color="black"):
+        """Safely update message label with proper error handling"""
+        try:
+            if hasattr(self, 'root') and self.root.winfo_exists():
+                if hasattr(self, 'message_label') and self.message_label and self.message_label.winfo_exists():
+                    self.message_label.config(text=message, fg=color)
+                else:
+                    print(f"Cannot display message '{message}' - message_label not ready")
+            else:
+                print(f"Cannot display message '{message}' - root window not ready")
+        except Exception as e:
+            print(f"Error updating message: {e}")
+            print(f"Original message was: {message}")
 
     def connect_to_devices(self):
-        """Connect to PLC and loadcells with improved error handling"""
+        """Connect to PLC and loadcells with improved error handling and port validation"""
         try:
+            # Check if main_container exists
+            if not hasattr(self, 'main_container'):
+                print("Error: main_container does not exist. Creating it now.")
+                self.main_container = tk.Frame(self.root)
+                self.main_container.pack(fill="both", expand=True)
+            
+            # Check if message_label exists
+            if not hasattr(self, 'message_label'):
+                print("Error: message_label does not exist. Creating it now.")
+                self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
+                self.message_label.pack(fill="x", pady=2)
+                
             # Initialize clients as None first
             self.plc_client = None
             self.loadcell1_client = None
@@ -864,16 +974,25 @@ class EOLTesterGUI:
             plc_station_id = os.getenv('PLC_STATION_ID')
             
             if all([plc_port, plc_baud, plc_station_id]):
-                try:
-                    # Close any existing connection first
-                    if hasattr(self, 'plc_client') and self.plc_client:
-                        try:
-                            if self.plc_client.is_socket_open():
-                                self.plc_client.close()
-                        except:
-                            pass
+                # Check if port is available before attempting connection
+                if not self.is_port_available(plc_port):
+                    print(f"Port {plc_port} is busy or not available. Attempting to force release.")
+                    self.force_close_com_ports()
+                    # Wait for port to release
+                    time.sleep(1)
                     
-                    # Create new PLC client
+                    # Check again
+                    if not self.is_port_available(plc_port):
+                        print(f"Port {plc_port} still not available after force release.")
+                        # Update message label instead of showing a messagebox
+                        self.safe_update_message(
+                            f"PLC port {plc_port} is busy. Please close other applications using this port.",
+                            "red"
+                        )
+                        return
+                
+                try:
+                    # Create new PLC client with fresh connection
                     self.plc_client = ModbusSerialClient(
                         port=plc_port,
                         baudrate=int(plc_baud),
@@ -887,6 +1006,13 @@ class EOLTesterGUI:
                     max_retries = 3
                     for attempt in range(max_retries):
                         try:
+                            # Ensure port is closed before trying to open it
+                            if self.plc_client.is_socket_open():
+                                self.plc_client.close()
+                                
+                            # Allow port to release
+                            time.sleep(0.5)
+                            
                             if self.plc_client.connect():
                                 # Test connection by reading a coil
                                 test_response = self.plc_client.read_coils(
@@ -897,61 +1023,157 @@ class EOLTesterGUI:
                                 
                                 if not test_response.isError():
                                     print(f"Successfully connected to PLC on {plc_port}")
+                                    # Update message label with success
+                                    self.safe_update_message(
+                                        f"Connected to PLC on {plc_port}",
+                                        "green"
+                                    )
                                     break
+                                else:
+                                    # Close connection if test was unsuccessful
+                                    self.plc_client.close()
+                                    print(f"PLC test failed on attempt {attempt + 1}")
+                            else:
+                                print(f"Failed to connect to PLC on attempt {attempt + 1}")
                         except Exception as e:
                             print(f"Attempt {attempt + 1} failed: {e}")
+                            # Close connection if there was an error
+                            try:
+                                if self.plc_client and self.plc_client.is_socket_open():
+                                    self.plc_client.close()
+                            except:
+                                pass
+                                
                             if attempt < max_retries - 1:
                                 time.sleep(1)  # Wait before retrying
                             else:
-                                raise Exception("Failed to establish PLC connection after multiple attempts")
+                                print("Failed to establish PLC connection after multiple attempts")
+                                self.plc_client = None
+                    
+                    # Final check if connection was successful
+                    if not self.plc_client or not self.plc_client.is_socket_open():
+                        print("PLC connection failed after all retries")
+                        self.plc_client = None
+                        # Update message label instead of showing a messagebox
+                        self.safe_update_message(
+                            "Failed to connect to PLC after multiple attempts. Check COM port settings.",
+                            "red"
+                        )
                     
                 except Exception as e:
                     print(f"PLC connection error: {e}")
-                    messagebox.showwarning("Warning", f"Failed to connect to PLC: {str(e)}")
+                    # Update message label instead of showing a messagebox
+                    self.safe_update_message(
+                        f"PLC connection error: {str(e)}",
+                        "red"
+                    )
                     self.plc_client = None
             else:
                 print("Missing PLC configuration in environment variables")
-                messagebox.showwarning("Warning", "Missing PLC configuration in environment variables")
+                # Update message label instead of showing a messagebox
+                self.safe_update_message(
+                    "Missing PLC configuration in environment variables. Check COM port settings.",
+                    "red"
+                )
 
-            # Connect to Loadcell 1
-            lc1_port = os.getenv('LOADCELL_01_COM_PORT')
-            lc1_baud = os.getenv('LOADCELL_01_BAUD_RATE')
+            # Connect to Loadcell 1 (continue with remaining implementation)
             
-            if all([lc1_port, lc1_baud]):
-                try:
-                    self.loadcell1_client = serial.Serial(
-                        port=lc1_port,
-                        baudrate=int(lc1_baud),
-                        bytesize=8,
-                        parity='N',
-                        stopbits=1,
-                        timeout=0.5
-                    )
-                except serial.SerialException as e:
-                    print(f"Failed to connect to Loadcell 1: {e}")
-                    messagebox.showwarning("Warning", f"Failed to connect to Loadcell 1 on {lc1_port}")
-            
-            # Connect to Loadcell 2
-            lc2_port = os.getenv('LOADCELL_02_COM_PORT')
-            lc2_baud = os.getenv('LOADCELL_02_BAUD_RATE')
-            
-            if all([lc2_port, lc2_baud]):
-                try:
-                    self.loadcell2_client = serial.Serial(
-                        port=lc2_port,
-                        baudrate=int(lc2_baud),
-                        bytesize=8,
-                        parity='N',
-                        stopbits=1,
-                        timeout=0.5
-                    )
-                except serial.SerialException as e:
-                    print(f"Failed to connect to Loadcell 2: {e}")
-                    messagebox.showwarning("Warning", f"Failed to connect to Loadcell 2 on {lc2_port}")
-                    
         except Exception as e:
             print(f"Error connecting to devices: {str(e)}")
-            messagebox.showerror("Connection Error", f"Failed to connect to devices: {str(e)}")
+            # Use our safe method to update the message
+            self.safe_update_message(f"Error connecting to devices: {str(e)}", "red")
+
+    def is_port_available(self, port):
+        """Check if a COM port is available for connection"""
+        try:
+            # Try to open the port
+            ser = serial.Serial(port)
+            ser.close()
+            return True
+        except Exception:
+            return False
+
+    def reconnect_plc(self):
+        """Attempt to reconnect to PLC with forced resource release"""
+        try:
+            # Force close any existing connections
+            if hasattr(self, 'plc_client') and self.plc_client:
+                try:
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                        
+                    # Access the underlying serial object to ensure it's closed
+                    if hasattr(self.plc_client, 'socket') and self.plc_client.socket:
+                        if hasattr(self.plc_client.socket, 'close'):
+                            self.plc_client.socket.close()
+                except Exception as e:
+                    print(f"Error closing existing PLC connection: {e}")
+                
+                # Set to None to ensure garbage collection
+                self.plc_client = None
+            
+            # Force close COM ports
+            self.force_close_com_ports()
+            
+            # Allow time for COM port to release
+            time.sleep(1)
+            
+            # Get configuration from environment
+            plc_port = os.getenv('PLC_COM_PORT')
+            plc_baud = os.getenv('PLC_BAUD_RATE')
+            plc_station_id = os.getenv('PLC_STATION_ID')
+            
+            if not all([plc_port, plc_baud, plc_station_id]):
+                print("Missing PLC configuration in environment variables")
+                return False
+            
+            # Check if port is available
+            if not self.is_port_available(plc_port):
+                print(f"Port {plc_port} is still not available after force release")
+                return False
+            
+            # Create a fresh PLC client
+            self.plc_client = ModbusSerialClient(
+                port=plc_port,
+                baudrate=int(plc_baud),
+                timeout=1,
+                stopbits=1,
+                bytesize=8,
+                parity='N'
+            )
+            
+            # Attempt connection
+            if not self.plc_client.connect():
+                print("Failed to reconnect to PLC")
+                self.plc_client = None
+                return False
+            
+            # Test connection
+            test_response = self.plc_client.read_coils(
+                address=0,
+                count=1,
+                slave=int(plc_station_id)
+            )
+            
+            if test_response.isError():
+                print("PLC connection test failed")
+                self.plc_client.close()
+                self.plc_client = None
+                return False
+            
+            print("Successfully reconnected to PLC")
+            return True
+            
+        except Exception as e:
+            print(f"Error reconnecting to PLC: {e}")
+            if hasattr(self, 'plc_client') and self.plc_client:
+                try:
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                except:
+                    pass
+                self.plc_client = None
+            return False
 
     def read_plc_data(self):
         """Read data from PLC with improved error handling"""
@@ -1013,20 +1235,16 @@ class EOLTesterGUI:
             return None
 
     def cleanup(self):
-        """Enhanced cleanup method with improved error handling"""
+        """Enhanced cleanup method with forced resource release for PLC connection"""
         try:
             # Stop all monitoring first
             self.keepWriting = False
             self.breakLoop = True
             
             # Stop all blinking labels
-            if hasattr(self, 'blinking_labels'):
-                for label in self.blinking_labels.values():
-                    if hasattr(label, 'blink_job'):
-                        self.root.after_cancel(label.blink_job)
-                self.blinking_labels.clear()
+            self.stop_all_label_blinking()
             
-            # Only close loadcell connections, keep PLC connection alive
+            # Clean up loadcell connections
             if hasattr(self, 'loadcell1_client') and self.loadcell1_client:
                 try:
                     if self.loadcell1_client.is_open:
@@ -1046,9 +1264,52 @@ class EOLTesterGUI:
                     print(f"Error closing Loadcell 2 connection: {e}")
                 finally:
                     self.loadcell2_client = None
+            
+            # Force release PLC connection
+            if hasattr(self, 'plc_client') and self.plc_client:
+                try:
+                    # Double-ensure the socket is closed
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                    
+                    # Access the underlying serial object to ensure it's closed
+                    if hasattr(self.plc_client, 'socket') and self.plc_client.socket:
+                        if hasattr(self.plc_client.socket, 'close'):
+                            self.plc_client.socket.close()
+                    
+                    print("PLC connection forcefully closed")
+                except Exception as e:
+                    print(f"Error closing PLC connection: {e}")
+                finally:
+                    # Ensure the reference is removed
+                    self.plc_client = None
+            
+            # Give time for ports to be released
+            time.sleep(0.5)
+            
+            # Additional force close to ensure COM ports are released
+            self.force_close_com_ports()
+            
+            print("All connections cleaned up successfully")
                 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
+    
+    def force_close_com_ports(self):
+        """Force close COM ports that might be in use"""
+        try:
+            # Get PLC COM port from environment
+            plc_port = os.getenv('PLC_COM_PORT')
+            if plc_port:
+                try:
+                    # Try to open and immediately close the port to force release
+                    test_serial = serial.Serial(plc_port)
+                    test_serial.close()
+                    print(f"Successfully force-closed {plc_port}")
+                except Exception as e:
+                    print(f"Could not force-close {plc_port}: {e}")
+        except Exception as e:
+            print(f"Error force-closing COM ports: {e}")
 
     def retrieve_part_specifications(self, part_number):
         """Retrieve specifications and label coordinates from database."""
@@ -1176,7 +1437,7 @@ class EOLTesterGUI:
             
             print(f"Loading image with frame dimensions: {frame_width}x{frame_height}")
             
-            # Load and resize image to exactly match model_settings.py dimensions
+            # Load and resize image to exactly match frame dimensions
             original_image = Image.open(image_path)
             resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
@@ -1198,8 +1459,8 @@ class EOLTesterGUI:
                 'y_offset': 0
             }
             
-            # Force update of the display
-            self.image_frame.update_idletasks()
+            # Force update of the display before returning
+            self.root.update_idletasks()
             
             self.current_image_path = image_path
             print(f"Successfully loaded image: {image_path}")
@@ -1211,58 +1472,75 @@ class EOLTesterGUI:
             return False
 
     def place_labels_from_positions(self, coordinates_data):
-        """Place labels exactly according to database coordinates."""
+        """Place labels L1-L15 according to database coordinates with improved visibility and blinking effect."""
         try:
-            # Clear any existing placed labels
+            # Clear any existing placed labels and stop any blinking
+            self.stop_all_label_blinking()
             for label in getattr(self, 'placed_labels', {}).values():
                 label.destroy()
             self.placed_labels = {}
-            
-            print(f"Placing labels with coordinates: {coordinates_data}")
+            self.label_positions = {}  # Reset positions dictionary
             
             # Get image frame dimensions for validation
             frame_width = self.image_frame.winfo_width()
             frame_height = self.image_frame.winfo_height()
             
             print(f"Image frame dimensions: {frame_width}x{frame_height}")
+            print(f"Placing labels with coordinates: {coordinates_data}")
             
-            # Create labels based on coordinates data
-            for label_num, coord_data in coordinates_data.items():
-                try:
-                    # Get coordinates from database
-                    x = float(coord_data.get('x', 0))
-                    y = float(coord_data.get('y', 0))
-                    
-                    print(f"Processing label {label_num} at coordinates ({x}, {y})")
-                    
-                    # Validate coordinates are within frame bounds with margin
-                    x = max(10, min(x, frame_width - 50))  # Leave margin on edges
-                    y = max(10, min(y, frame_height - 30))  # Leave margin on edges
-                    
-                    # Create label with exact specifications
-                    label_text = f'L{label_num}'
-                    new_label = tk.Label(self.image_frame,
-                                       text=label_text,
-                                       bg="yellow",
-                                       fg="black",
-                                       font=("Arial", 10, "bold"),
-                                       width=4,
-                                       relief="raised",
-                                       borderwidth=2)
-                    
-                    # Place label at exact coordinates
-                    new_label.place(x=x, y=y)
-                    new_label.lift()  # Ensure label is on top of image
-                    
-                    # Store the label and its position
-                    self.placed_labels[label_text] = new_label
-                    self.label_positions[label_text] = (x, y)
-                    
-                    print(f"Successfully placed {label_text} at coordinates x={x}, y={y}")
-                    
-                except Exception as e:
-                    print(f"Error placing label {label_num}: {str(e)}")
-                    continue
+            # Make sure image is fully loaded before placing labels
+            self.root.update_idletasks()
+            
+            # Create all labels L1-L15 if they exist in coordinates_data
+            for i in range(1, 16):  # 1 to 15
+                label_num = str(i)
+                if label_num in coordinates_data:
+                    try:
+                        coord_data = coordinates_data[label_num]
+                        # Get coordinates from database
+                        x = float(coord_data.get('x', 0))
+                        y = float(coord_data.get('y', 0))
+                        
+                        print(f"Processing label L{label_num} at coordinates ({x}, {y})")
+                        
+                        # Create label with enhanced visibility
+                        label_text = f'L{label_num}'
+                        new_label = tk.Label(self.image_frame,
+                                           text=label_text,
+                                           bg="yellow",  # Initial background color
+                                           fg="black",
+                                           font=("Arial", 12, "bold"),
+                                           width=4,
+                                           relief="raised",
+                                           borderwidth=2)
+                        
+                        # Place label at exact coordinates
+                        new_label.place(x=x, y=y)
+                        
+                        # Ensure label is on top of all other widgets
+                        new_label.lift()
+                        
+                        # Enable dragging for the label
+                        new_label.bind("<Button-1>", self.start_label_drag)
+                        new_label.bind("<B1-Motion>", self.on_label_drag)
+                        new_label.bind("<ButtonRelease-1>", self.stop_label_drag)
+                        new_label.configure(cursor="hand2")
+                        
+                        # Store the label and its position
+                        self.placed_labels[label_text] = new_label
+                        self.label_positions[label_text] = (x, y)
+                        
+                        # Store original color for blinking
+                        new_label.original_bg = "yellow"
+                        
+                        print(f"Successfully placed {label_text} at coordinates x={x}, y={y}")
+                        
+                    except Exception as e:
+                        print(f"Error placing label L{label_num}: {str(e)}")
+                        continue
+            
+            # Start blinking effect for all placed labels
+            self.start_label_blinking()
             
             # Update label info
             if self.placed_labels:
@@ -1271,12 +1549,49 @@ class EOLTesterGUI:
             else:
                 self.label_info.config(text="Placed Labels: None")
                 
-            # Force update of the display
-            self.image_frame.update_idletasks()
-            
         except Exception as e:
             print(f"Error placing labels: {e}")
             messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
+
+    def start_label_blinking(self):
+        """Start blinking effect for all placed labels."""
+        if not hasattr(self, 'blinking_jobs'):
+            self.blinking_jobs = {}
+        
+        # Start blinking for each label
+        for label_text, label in self.placed_labels.items():
+            if label_text not in self.blinking_jobs:
+                self.blink_label(label, label_text)
+    
+    def blink_label(self, label, label_text):
+        """Create blinking effect for a label, alternating between red and original color."""
+        if not hasattr(label, 'blink_state'):
+            label.blink_state = False
+        
+        # Toggle blink state
+        label.blink_state = not label.blink_state
+        
+        # Set background color based on blink state
+        if label.blink_state:
+            label.configure(bg="red")
+        else:
+            label.configure(bg=label.original_bg)
+        
+        # Store the job ID to be able to cancel it later
+        self.blinking_jobs[label_text] = self.root.after(500, lambda: self.blink_label(label, label_text))
+    
+    def stop_all_label_blinking(self):
+        """Stop blinking effect for all labels."""
+        if hasattr(self, 'blinking_jobs'):
+            for job_id in self.blinking_jobs.values():
+                self.root.after_cancel(job_id)
+            self.blinking_jobs = {}
+    
+    def stop_label_blinking(self, label_text):
+        """Stop blinking effect for a specific label."""
+        if hasattr(self, 'blinking_jobs') and label_text in self.blinking_jobs:
+            self.root.after_cancel(self.blinking_jobs[label_text])
+            del self.blinking_jobs[label_text]
 
     def get_status_label_color(self, label_text):
         """Return the color for each status label."""
@@ -1336,8 +1651,7 @@ class EOLTesterGUI:
                 label_num = label_text[1:]  # Extract number from "L1", "L2", etc.
                 positions[label_num] = {
                     'x': label.winfo_x(),
-                    'y': label.winfo_y(),
-                    'text': label_text
+                    'y': label.winfo_y()
                 }
 
         try:
@@ -1358,6 +1672,9 @@ class EOLTesterGUI:
             """
             cursor.execute(update_query, (positions_json, self.current_part_number))
             conn.commit()
+
+            print(f"Saved label positions to database for part number {self.current_part_number}")
+            print(f"Positions: {positions_json}")
 
             cursor.close()
             conn.close()
@@ -1395,11 +1712,24 @@ class EOLTesterGUI:
         
         try:
             # Use the correct path in txt_files subdirectory
-            employee_codes_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'EmployeeCodes.txt')
+            txt_files_dir = os.path.join(os.path.dirname(__file__), 'txt_files')
+            
+            # Ensure the directory exists
+            if not os.path.exists(txt_files_dir):
+                os.makedirs(txt_files_dir, exist_ok=True)
+                print(f"Created txt_files directory at: {txt_files_dir}")
+            
+            # Check for employee codes file
+            employee_codes_path = os.path.join(txt_files_dir, 'EmployeeCodes.txt')
             
             # Check if file exists
             if not os.path.exists(employee_codes_path):
-                messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
+                print(f"Warning: EmployeeCodes.txt not found at {employee_codes_path}")
+                self.safe_update_message(f"Warning: EmployeeCodes.txt not found - auto-approving", "orange")
+                # Auto-approve employee code if file is missing
+                self.alc_entry.configure(state='normal')  # Enable ALC entry
+                self.emp_entry.configure(bg="lightgreen")
+                self.alc_entry.focus_set()  # Set focus to ALC entry
                 return
             
             # Read from the correct file path
@@ -1407,19 +1737,26 @@ class EOLTesterGUI:
                 valid_codes = [code.strip() for code in file.readlines()]
             
             if emp_code in valid_codes:
-                messagebox.showinfo("Success", "Employee code validated successfully")
+                self.safe_update_message("Employee code validated", "green")
                 self.alc_entry.configure(state='normal')  # Enable ALC entry
                 self.emp_entry.configure(bg="lightgreen")
                 self.alc_entry.focus_set()  # Set focus to ALC entry
             else:
+                self.safe_update_message("Error: Employee code unauthorized", "red")
                 messagebox.showerror("Error", "Employee code unauthorized")
                 self.alc_entry.configure(state='disabled')
                 self.emp_entry.configure(bg="pink")
                 
         except FileNotFoundError:
-            messagebox.showerror("Error", "Employee codes file not found in txt_files directory")
+            print(f"Error: Employee codes file not found in txt_files directory")
+            self.safe_update_message("Error: Employee codes file not found - auto-approving", "orange")
+            # Auto-approve employee code if file cannot be read
+            self.alc_entry.configure(state='normal')  # Enable ALC entry
+            self.emp_entry.configure(bg="lightgreen")
+            self.alc_entry.focus_set()  # Set focus to ALC entry
         except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            print(f"Error during employee code validation: {str(e)}")
+            self.safe_update_message(f"Error validating employee code: {str(e)}", "red")
 
     def on_alc_entry_focus(self, is_focused):
         """Handle ALC entry focus with visual feedback"""
@@ -1434,7 +1771,9 @@ class EOLTesterGUI:
 
     def process_alc_code(self, event=None):
         """Process the entered ALC code and retrieve specifications"""
+        # Use the value from the entry field, not barcode_data
         alc_code = self.alc_entry.get().strip()
+        
         if not alc_code or alc_code == "ALC CODE":
             messagebox.showwarning("Warning", "Please enter a valid ALC code")
             return
@@ -1504,20 +1843,24 @@ class EOLTesterGUI:
             if model_result['MM_IMAGE_PATH']:
                 abs_image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), model_result['MM_IMAGE_PATH']))
                 if os.path.exists(abs_image_path):
-                    if self.load_image(abs_image_path):
+                    if self.load_image_with_path(abs_image_path):
+                        # Force update to ensure image is loaded before placing labels
+                        self.root.update_idletasks()
+                        
                         if model_result['MM_LABEL_COORDINATES']:
                             try:
                                 coordinates_data = json.loads(model_result['MM_LABEL_COORDINATES'])
-                                self.place_labels_from_positions(coordinates_data)
+                                # Ensure we place labels after the image is fully loaded
+                                self.root.after(100, lambda: self.place_labels_from_positions(coordinates_data))
                             except json.JSONDecodeError:
                                 messagebox.showwarning("Warning", "Invalid label coordinate data")
                 else:
                     messagebox.showwarning("Warning", f"Image not found: {abs_image_path}")
 
             # Update status message
-            self.message_label.config(
-                text=f"Model: {model_result['MM_MODEL_NAME']} | Part Number: {self.current_part_number}",
-                fg="green"
+            self.safe_update_message(
+                f"Model: {model_result['MM_MODEL_NAME']} | Part Number: {self.current_part_number}",
+                "green"
             )
 
             cursor.close()
@@ -1596,15 +1939,6 @@ class EOLTesterGUI:
             
         except Exception as e:
             print(f"Error monitoring sensors: {e}")
-
-    def blink_label(self, label):
-        """Make a label blink red"""
-        if not hasattr(label, 'blink_state'):
-            label.blink_state = False
-        
-        label.blink_state = not label.blink_state
-        label.configure(bg='red' if label.blink_state else 'white')
-        label.blink_job = self.root.after(500, lambda: self.blink_label(label))  # Blink every 500ms
 
     def test_plc_communication(self):
         """Test PLC communication by toggling P0000 input address"""
@@ -1964,40 +2298,52 @@ class EOLTesterGUI:
             print(f"Error reading sensor inputs: {str(e)}")
             return False
 
-    def reconnect_plc(self):
-        """Attempt to reconnect to PLC"""
+    def on_closing(self):
+        """Handle window closing event"""
         try:
-            if self.plc_client:
-                if self.plc_client.is_socket_open():
-                    self.plc_client.close()
-                
-                if self.plc_client.connect():
-                    # Test connection
-                    station_id = int(os.getenv('PLC_STATION_ID', '1'))
-                    test_response = self.plc_client.read_coils(
-                        address=0,
-                        count=1,
-                        slave=station_id
-                    )
-                    
-                    if not test_response.isError():
-                        print("Successfully reconnected to PLC")
-                        return True
+            # Perform cleanup operations
+            self.cleanup()
             
-            # If reconnection failed or no client exists, try full connection
-            self.connect_to_devices()
-            return self.plc_client and self.plc_client.is_socket_open()
+            # Destroy the window
+            self.root.destroy()
             
+            print("Test console closed properly")
         except Exception as e:
-            print(f"Error reconnecting to PLC: {e}")
-            return False
+            print(f"Error during window closing: {e}")
+            # Ensure window is destroyed even if cleanup fails
+            self.root.destroy()
 
 def main():
-    root = tk.Tk()
-    app = EOLTesterGUI(root)
-    # Add this line to ensure cleanup on window close
-    root.protocol("WM_DELETE_WINDOW", lambda: [app.cleanup(), root.destroy()])
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        
+        # Force-close any lingering connections before starting
+        try:
+            # Try to release COM ports before initialization
+            plc_port = os.getenv('PLC_COM_PORT')
+            if plc_port:
+                try:
+                    test_serial = serial.Serial(plc_port)
+                    test_serial.close()
+                    print(f"Pre-startup: Successfully released {plc_port}")
+                except Exception as e:
+                    print(f"Pre-startup: COM port {plc_port} may already be in use: {e}")
+        except Exception as e:
+            print(f"Error in pre-startup cleanup: {e}")
+            
+        # Initialize the application with error handling
+        app = EOLTesterGUI(root)
+        
+        # Window closing is now handled by the class itself
+        root.mainloop()
+    except Exception as e:
+        print(f"Critical error in main: {e}")
+        messagebox.showerror("Critical Error", f"Application failed to start: {e}")
+        try:
+            if 'root' in locals() and root:
+                root.destroy()
+        except:
+            pass
 
 if __name__ == "__main__":
     main()

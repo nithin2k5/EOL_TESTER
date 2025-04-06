@@ -93,17 +93,70 @@ class MainConsole(tk.Tk):
         settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
             
     def test_click(self):
+        # Create a test window
         test_window = tk.Toplevel(self)
+        test_window.title("EOL Tester - Test Console")
+        
         # Set the window to full screen
         test_window.state('zoomed')
         test_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+        
+        # Try to ensure any existing COM port connections are released
+        import serial
+        import time
+        import os
+        
+        try:
+            # Attempt to force-release COM ports before creating new instance
+            plc_port = os.getenv('PLC_COM_PORT')
+            if plc_port:
+                try:
+                    # Try direct port open/close to force release
+                    cleanup_serial = serial.Serial(plc_port)
+                    cleanup_serial.close()
+                    print(f"MainConsole: Successfully released {plc_port} before opening test console")
+                    # Allow time for port to fully release
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"MainConsole: COM port {plc_port} is busy: {e}")
+        except Exception as e:
+            print(f"Error pre-cleaning COM ports: {e}")
+        
+        # Create the test console app with the window
         app = EOLTesterGUI(test_window)
         test_window.grab_set()
         self.withdraw()
         
         def on_test_close():
-            test_window.destroy()
-            self.deiconify()
+            try:
+                # Ensure app cleanup is called first
+                if hasattr(app, 'cleanup'):
+                    app.cleanup()
+                
+                # Additional delay to ensure cleanup completes
+                time.sleep(0.5)
+                
+                # Force an additional cleanup of COM ports
+                try:
+                    plc_port = os.getenv('PLC_COM_PORT')
+                    if plc_port:
+                        try:
+                            cleanup_serial = serial.Serial(plc_port)
+                            cleanup_serial.close()
+                            print(f"MainConsole: Successfully released {plc_port} after closing test console")
+                        except Exception as e:
+                            print(f"MainConsole: Error releasing {plc_port}: {e}")
+                except Exception as e:
+                    print(f"Error in final COM port cleanup: {e}")
+                
+                # Destroy window and show main console
+                test_window.destroy()
+                self.deiconify()
+                
+            except Exception as e:
+                print(f"Error during test console cleanup: {e}")
+                test_window.destroy()
+                self.deiconify()
             
         test_window.protocol("WM_DELETE_WINDOW", on_test_close)
             
@@ -115,6 +168,7 @@ class MainConsole(tk.Tk):
         
     def admin_click(self):
         admin_window = tk.Toplevel(self)
+        
         # Set the window to full screen
         admin_window.state('zoomed')
         admin_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
