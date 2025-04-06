@@ -175,11 +175,21 @@ class ComPortSettings:
         top_frame = tk.Frame(frame, bg=frame['bg'])
         top_frame.pack(fill='x', padx=5, pady=5)
         
+        # Buttons frame for TEST and READ buttons side by side
+        buttons_frame = tk.Frame(top_frame, bg=frame['bg'])
+        buttons_frame.pack(side='left', padx=2)
+        
         # Test Button
-        self.test_button = tk.Button(top_frame, text="TEST", bg='darkred', fg='white', 
+        self.test_button = tk.Button(buttons_frame, text="TEST", bg='darkred', fg='white', 
                               width=8, font=('Arial', 9, 'bold'),
                                     command=self.read_plc_data)
-        self.test_button.pack(side='left', padx=5)
+        self.test_button.pack(side='left', padx=2)
+        
+        # Read Button (new)
+        self.read_button = tk.Button(buttons_frame, text="READ", bg='navy', fg='white',
+                              width=8, font=('Arial', 9, 'bold'),
+                                    command=self.read_holding_registers)
+        self.read_button.pack(side='left', padx=2)
         
         # Station ID
         station_frame = tk.Frame(top_frame, bg=frame['bg'])
@@ -187,6 +197,21 @@ class ComPortSettings:
         self.station_id_entry = tk.Entry(station_frame, width=10)
         self.station_id_entry.pack(side='left', padx=2)
         tk.Label(station_frame, text="Station ID", bg=frame['bg']).pack(side='left')
+        
+        # Register Address (new)
+        reg_frame = tk.Frame(frame, bg=frame['bg'])
+        reg_frame.pack(anchor='w', padx=5, pady=5)
+        tk.Label(reg_frame, text="Register Address (e.g., D0001):", bg=frame['bg']).pack(side='left')
+        self.reg_address_entry = tk.Entry(reg_frame, width=15)
+        self.reg_address_entry.pack(side='left', padx=5)
+        
+        # Number of Points to Read (new)
+        points_frame = tk.Frame(frame, bg=frame['bg'])
+        points_frame.pack(anchor='w', padx=5, pady=5)
+        tk.Label(points_frame, text="Number of Points to Read:", bg=frame['bg']).pack(side='left')
+        self.points_entry = tk.Entry(points_frame, width=5)
+        self.points_entry.pack(side='left', padx=5)
+        self.points_entry.insert(0, "1")  # Default to 1 point
         
         # Style the labels and comboboxes
         label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
@@ -214,6 +239,8 @@ class ComPortSettings:
         self.plc_com_combo.config(state="readonly")
         self.plc_baud_combo.config(state="readonly")
         self.station_id_entry.config(state="normal")
+        self.reg_address_entry.config(state="normal")
+        self.points_entry.config(state="normal")
         
         # Connect Button
         self.connect_button = tk.Button(frame, text="Connect", bg='green', fg='white',
@@ -225,8 +252,9 @@ class ComPortSettings:
         self.rx_text = tk.Text(frame, height=10, width=30, font=('Consolas', 10))
         self.rx_text.pack(padx=5, pady=5)
         
-        # Initially disable test button
+        # Initially disable test and read buttons
         self.test_button.config(state="disabled")
+        self.read_button.config(state="disabled")
 
     def connect_to_plc(self):
         """Connect to PLC using Modbus RTU"""
@@ -254,6 +282,7 @@ class ComPortSettings:
                     if not test_response.isError():
                         messagebox.showinfo("Connection Status", "Already connected to PLC!")
                         self.test_button.config(state="normal")
+                        self.read_button.config(state="normal")
                         return True
                 except:
                     # If test fails, close the existing connection
@@ -287,6 +316,7 @@ class ComPortSettings:
                         if not test_response.isError():
                             messagebox.showinfo("Connection Status", "Connected to PLC!")
                             self.test_button.config(state="normal")
+                            self.read_button.config(state="normal")
                             return True
                     
                     if attempt < max_retries - 1:
@@ -739,6 +769,10 @@ class ComPortSettings:
             set_key(env_path, 'PLC_BAUD_RATE', self.plc_baud_combo.get())
             set_key(env_path, 'PLC_STATION_ID', self.station_id_entry.get())
             
+            # Save Register Address and Points settings
+            set_key(env_path, 'PLC_REG_ADDRESS', self.reg_address_entry.get())
+            set_key(env_path, 'PLC_POINTS_TO_READ', self.points_entry.get())
+            
             # Save Loadcell settings
             for frame in self.root.winfo_children():
                 if isinstance(frame, tk.Frame):
@@ -799,6 +833,8 @@ class ComPortSettings:
         self.plc_com_combo.config(state="disabled")
         self.plc_baud_combo.config(state="disabled")
         self.station_id_entry.config(state="disabled")
+        self.reg_address_entry.config(state="disabled") 
+        self.points_entry.config(state="disabled")
         
         # Disable all comboboxes
         for combo in self.all_comboboxes:
@@ -814,6 +850,8 @@ class ComPortSettings:
         self.plc_com_combo.config(state="readonly")
         self.plc_baud_combo.config(state="readonly")
         self.station_id_entry.config(state="normal")
+        self.reg_address_entry.config(state="normal")
+        self.points_entry.config(state="normal")
         
         # Enable all comboboxes
         for combo in self.all_comboboxes:
@@ -886,6 +924,8 @@ class ComPortSettings:
             set_key(env_path, 'PLC_RX_DATA', '')
             set_key(env_path, 'LOADCELL_01_RX_DATA', '')
             set_key(env_path, 'LOADCELL_02_RX_DATA', '')
+            set_key(env_path, 'PLC_REG_ADDRESS', '')
+            set_key(env_path, 'PLC_POINTS_TO_READ', '1')
 
             # Get available COM ports
             available_ports = [port.device for port in serial.tools.list_ports.comports()]
@@ -894,6 +934,9 @@ class ComPortSettings:
             self.plc_com_combo.set("")
             self.plc_baud_combo.set("")
             self.station_id_entry.delete(0, tk.END)
+            self.reg_address_entry.delete(0, tk.END)
+            self.points_entry.delete(0, tk.END)
+            self.points_entry.insert(0, "1")  # Reset to default of 1
             self.rx_text.delete("1.0", tk.END)
             
             # Reset all COM port combos and Rx strings for Loadcells
@@ -931,6 +974,16 @@ class ComPortSettings:
             self.plc_baud_combo.set(plc_baud)
             self.station_id_entry.delete(0, tk.END)
             self.station_id_entry.insert(0, plc_station_id)
+            
+            # Load Register Address and Points settings if they exist
+            reg_address = os.getenv('PLC_REG_ADDRESS', '')
+            points_to_read = os.getenv('PLC_POINTS_TO_READ', '1')
+            
+            self.reg_address_entry.delete(0, tk.END)
+            self.reg_address_entry.insert(0, reg_address)
+            
+            self.points_entry.delete(0, tk.END)
+            self.points_entry.insert(0, points_to_read)
             
             # Load Loadcell settings
             for frame in self.root.winfo_children():
@@ -1139,6 +1192,134 @@ class ComPortSettings:
         except Exception as e:
             print(f"Error reading barcode options: {str(e)}")
             return []
+
+    def read_holding_registers(self):
+        """Read holding registers from PLC and interpret as double datatype values"""
+        if self.modbus_client is None or not self.modbus_client.is_socket_open():
+            messagebox.showerror("Error", "Not connected to PLC.")
+            return
+
+        try:
+            slave_id = self.station_id_entry.get().strip()
+            register_address = self.reg_address_entry.get().strip()
+            points_to_read = self.points_entry.get().strip()
+            
+            # Validate inputs
+            if not slave_id:
+                messagebox.showerror("Error", "Station ID is mandatory!")
+                return
+            
+            if not register_address:
+                messagebox.showerror("Error", "Register address is mandatory!")
+                return
+            
+            if not points_to_read or not points_to_read.isdigit():
+                messagebox.showerror("Error", "Number of points must be a valid integer!")
+                return
+
+            slave_id = int(slave_id)
+            points_to_read = int(points_to_read)
+            
+            # Validate points_to_read range
+            if points_to_read < 1 or points_to_read > 125:  # Modbus limits for holding registers
+                messagebox.showerror("Error", "Number of points must be between 1 and 125!")
+                return
+            
+            # Clear the text box
+            self.rx_text.delete("1.0", tk.END)
+            
+            # Process the register address
+            try:
+                # Handle D-prefixed addresses (e.g., D0001) by extracting the numeric part
+                if register_address.startswith('D'):
+                    # Remove 'D' prefix and convert to integer
+                    addr = int(register_address[1:])
+                elif register_address.startswith('0x'):
+                    addr = int(register_address, 16)
+                else:
+                    # Try to parse as a direct integer
+                    addr = int(register_address)
+                
+                # Add section header
+                self.rx_text.insert(tk.END, f"Reading {points_to_read} Holding Register(s) starting at address {register_address}:\n\n")
+                
+                # Read holding registers
+                response = self.modbus_client.read_holding_registers(
+                    address=addr,
+                    count=points_to_read,
+                    slave=slave_id
+                )
+                
+                if response.isError():
+                    self.rx_text.insert(tk.END, f"Error reading registers at address {register_address}\n")
+                    return
+                
+                # Display raw register values
+                self.rx_text.insert(tk.END, "Raw Register Values:\n")
+                for i, reg_value in enumerate(response.registers):
+                    self.rx_text.insert(tk.END, f"Register {addr + i}: {reg_value} (0x{reg_value:04X})\n")
+                
+                self.rx_text.insert(tk.END, "\n")
+                
+                # Process registers as doubles if we have at least 2 registers
+                if len(response.registers) >= 2:
+                    import struct
+                    self.rx_text.insert(tk.END, "Interpreting as Double Values:\n")
+                    
+                    # Process each pair of registers as a double
+                    for i in range(0, len(response.registers) - 1, 2):
+                        reg1 = response.registers[i]
+                        reg2 = response.registers[i + 1]
+                        
+                        self.rx_text.insert(tk.END, f"\nRegisters {addr + i} & {addr + i + 1} [{reg1}, {reg2}]:\n")
+                        
+                        # Try different byte orders for maximum compatibility
+                        try:
+                            # Standard 32-bit IEEE float format (big endian)
+                            register_bytes = struct.pack('>HH', reg1, reg2)
+                            float_value = struct.unpack('>f', register_bytes)[0]
+                            self.rx_text.insert(tk.END, f"  Big-Endian (>f): {float_value:.6f}\n")
+                        except Exception as e:
+                            self.rx_text.insert(tk.END, f"  Big-Endian error: {str(e)}\n")
+                        
+                        try:
+                            # Little endian format
+                            register_bytes = struct.pack('<HH', reg1, reg2)
+                            float_value = struct.unpack('<f', register_bytes)[0]
+                            self.rx_text.insert(tk.END, f"  Little-Endian (<f): {float_value:.6f}\n")
+                        except Exception as e:
+                            self.rx_text.insert(tk.END, f"  Little-Endian error: {str(e)}\n")
+                        
+                        try:
+                            # Swapped bytes format
+                            register_bytes = struct.pack('>HH', reg2, reg1)
+                            float_value = struct.unpack('>f', register_bytes)[0]
+                            self.rx_text.insert(tk.END, f"  Swapped registers (>f): {float_value:.6f}\n")
+                        except Exception as e:
+                            self.rx_text.insert(tk.END, f"  Swapped registers error: {str(e)}\n")
+                        
+                        try:
+                            # Swapped bytes with little endian
+                            register_bytes = struct.pack('<HH', reg2, reg1)
+                            float_value = struct.unpack('<f', register_bytes)[0]
+                            self.rx_text.insert(tk.END, f"  Swapped registers (<f): {float_value:.6f}\n")
+                        except Exception as e:
+                            self.rx_text.insert(tk.END, f"  Swapped registers little-endian error: {str(e)}\n")
+                else:
+                    self.rx_text.insert(tk.END, "Need at least 2 registers to interpret as double value.\n")
+                
+            except ValueError as ve:
+                self.rx_text.insert(tk.END, f"Invalid address format: {str(ve)}\n")
+            except Exception as e:
+                self.rx_text.insert(tk.END, f"Error reading register: {str(e)}\n")
+            
+            # Save the display values
+            self.save_device_values()
+            
+        except ValueError as ve:
+            messagebox.showerror("Error", f"Invalid input: {str(ve)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to read holding registers: {str(e)}")
 
 def main():
     root = tk.Tk()

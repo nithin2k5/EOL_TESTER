@@ -360,11 +360,11 @@ class EOLTesterGUI:
                  background=[("selected", "#cce5ff")],  # Light blue for selected row
                  foreground=[("selected", "black")])  # Selected row text color
         
-        # Create Treeview with custom style
+        # Create Treeview with custom style - LIMIT TO 8 ROWS as requested
         self.spec_tree = ttk.Treeview(spec_frame, 
                                      columns=columns, 
                                      show="headings", 
-                                     height=15,
+                                     height=8,  # Limited to 8 rows as requested
                                      style="Custom.Treeview")
         
         # Configure columns with specific widths
@@ -424,7 +424,6 @@ class EOLTesterGUI:
         self.cam2_frame.grid_propagate(False)
 
         # Text box (moved to column 3 for equal spacing)
-
         textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT", bg='white', fg='black', font=("Arial", 10, "bold"))
         textbox_label.grid(row=0, column=3, pady=(0, 5))
         self.cam_textbox = tk.Text(camera_container, width=40, height=7)
