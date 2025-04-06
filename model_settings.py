@@ -104,7 +104,7 @@ class WorkspaceApp:
         # Image frame within first quadrant
         self.image_frame = tk.Frame(first_quadrant, bg='white')
         self.image_frame.place(relx=0.5, rely=0.5, anchor='center')
-        self.image_frame.config(width=750, height=550)  # These are the actual image frame dimensions
+        self.image_frame.config(width=750, height=450)  # Match test_console.py image dimensions
         
         # Create second quadrant
         self.second_quadrant = tk.Frame(self.workspace_frame,

@@ -199,7 +199,7 @@ class EOLTesterGUI:
         
         # Create header frame at the top
         header_frame = tk.Frame(q1, bg="#00BFFF", height=30)
-        header_frame.pack(fill="x", side="top")
+        header_frame.pack(fill="x", side="top", pady=(0, 5))
         
         # Add header label
         self.model_header = tk.Label(header_frame, 
@@ -210,11 +210,11 @@ class EOLTesterGUI:
         
         # Create a frame to hold the image with exact dimensions
         self.image_frame = tk.Frame(q1, bg='white')
-        self.image_frame.pack(expand=True, padx=2, pady=2)
+        self.image_frame.pack(fill="both", expand=True, padx=2, pady=2)
         self.image_frame.pack_propagate(False)
         
         # Set exact size to match model_settings.py image dimensions
-        self.image_frame.config(width=750, height=550)  # Match model_settings.py image frame size
+        self.image_frame.config(width=750, height=450)  # Further reduced height to ensure space for labels
         
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame, 
@@ -223,41 +223,49 @@ class EOLTesterGUI:
                                    font=('Arial', 12))
         self.image_label.place(relx=0.5, rely=0.5, anchor='center')
         
-        # Create bottom frame for status and label info
-        bottom_frame = tk.Frame(q1, height=60, bg='white')
-        bottom_frame.pack(fill="x", side="bottom")
-        bottom_frame.pack_propagate(False)
+        # Create status labels frame with fixed height
+        status_frame = tk.Frame(q1, bg='white', height=60)  # Increased height
+        status_frame.pack(fill="x", side="bottom", pady=10, before=self.image_frame)
+        status_frame.pack_propagate(False)  # Prevent frame from shrinking
         
-        # Create status frame with proper spacing and layout
-        status_frame = tk.Frame(bottom_frame, bg="white")
-        status_frame.pack(fill="x", pady=2)
-
-        # Define status labels with proper styling
+        # Configure grid for equal spacing
+        status_frame.grid_columnconfigure(0, weight=1)
+        status_frame.grid_columnconfigure(1, weight=1)
+        status_frame.grid_columnconfigure(2, weight=1)
+        status_frame.grid_columnconfigure(3, weight=1)
+        status_frame.grid_columnconfigure(4, weight=1)
+        
+        # Define status labels with their properties
         status_labels = [
-            {'text': 'HOME', 'bg': '#4169E1'},    # Royal Blue
-            {'text': 'AUTO', 'bg': '#228B22'},     # Forest Green
-            {'text': '1st PULL', 'bg': '#DAA520'}, # Goldenrod
-            {'text': '2nd PULL', 'bg': '#B8860B'}, # Dark Goldenrod
-            {'text': 'TEST', 'bg': '#DC143C'}      # Crimson
+            {'text': 'AUTO', 'bg': '#00BFFF'},
+            {'text': 'HOME', 'bg': '#00BFFF'},
+            {'text': '1st PULL\n(Load Test)', 'bg': '#00BFFF'},
+            {'text': '2nd PULL\n(Length Test)', 'bg': '#00BFFF'},
+            {'text': 'TEST\nRESULT', 'bg': '#00BFFF'}
         ]
-
-        # Create and pack status labels with consistent sizing and spacing
-        for label_info in status_labels:
+        
+        # Create and pack status labels using grid
+        for i, label_info in enumerate(status_labels):
             label = tk.Label(
                 status_frame,
                 text=label_info['text'],
                 bg=label_info['bg'],
-                fg="white",
+                fg="black",
                 font=("Arial", 10, "bold"),
-                width=10,  # Fixed width for consistency
-                height=1,  # Fixed height
                 relief="raised",
-                borderwidth=2
+                borderwidth=1,
+                width=15,  # Fixed width
+                height=5   # Fixed height
             )
-            label.pack(side="left", padx=5, pady=5, expand=True)
+            label.grid(row=0, column=i, padx=2, pady=2, sticky="nsew")
             
-            # Store reference to the label if needed
-            setattr(self, f"{label_info['text'].lower()}_label", label)
+            # Store reference to the label
+            setattr(self, f"{label_info['text'].split()[0].lower()}_label", label)
+        
+        # Create bottom frame for label info
+        bottom_frame = tk.Frame(q1, height=30, bg='white')
+        bottom_frame.pack(fill="x", side="bottom", pady=5)
+        bottom_frame.pack_propagate(False)
         
         # Add label info text
         self.label_info = tk.Label(bottom_frame,
@@ -748,54 +756,26 @@ class EOLTesterGUI:
     def alc_code_command(self):
         messagebox.showinfo("ALC Code", "Opening ALC Code dialog")
 
-    def load_image(self, file_path=None):
-        """Load and display an image in the first quadrant, filling the entire frame."""
-        if not file_path:
-            file_path = filedialog.askopenfilename(
-                filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.ico")]
-            )
-        
-        if file_path:
-            try:
-                # Get the first quadrant dimensions
-                frame_width = self.image_frame.winfo_width()
-                frame_height = self.image_frame.winfo_height()
-                
-                # Load the image
-                image = Image.open(file_path)
-                
-                # Resize image to fill the entire frame
-                resized_image = image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(resized_image)
-                
-                # Remove old image label if it exists
-                if hasattr(self, 'image_label'):
-                    self.image_label.destroy()
-                
-                # Create new image label that fills the entire frame
-                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
-                self.image_label.image = photo  # Keep a reference
-                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
-                
-                # Store image dimensions
-                self.image_dimensions = {
-                    'width': frame_width,
-                    'height': frame_height,
-                    'x_offset': 0,
-                    'y_offset': 0
-                }
-                
-                # Store the image path
-                self.current_image_path = file_path
-                
-                print(f"Image loaded and fitted to frame: {frame_width}x{frame_height}")
-                return True
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Error loading image: {str(e)}")
-                return False
-        
-        return False
+    def load_image(self, image_path):
+        try:
+            # Open and resize the image to match frame dimensions
+            image = Image.open(image_path)
+            image = image.resize((750, 450), Image.Resampling.LANCZOS)
+            self.photo = ImageTk.PhotoImage(image)
+            
+            # Create or update the image label
+            if hasattr(self, 'image_label'):
+                self.image_label.configure(image=self.photo)
+            else:
+                self.image_label = tk.Label(self.image_frame, image=self.photo, bg='white')
+                self.image_label.pack(expand=True, fill='both')
+            
+            # Update status
+            self.status_label.config(text=f"Image loaded: {os.path.basename(image_path)}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load image: {str(e)}")
+            self.status_label.config(text="Failed to load image")
 
     def setup_barcode_listener(self):
         """Alternative approach using tkinter bindings"""
@@ -1194,6 +1174,8 @@ class EOLTesterGUI:
             frame_width = self.image_frame.winfo_width()
             frame_height = self.image_frame.winfo_height()
             
+            print(f"Loading image with frame dimensions: {frame_width}x{frame_height}")
+            
             # Load and resize image to exactly match model_settings.py dimensions
             original_image = Image.open(image_path)
             resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
@@ -1216,7 +1198,11 @@ class EOLTesterGUI:
                 'y_offset': 0
             }
             
+            # Force update of the display
+            self.image_frame.update_idletasks()
+            
             self.current_image_path = image_path
+            print(f"Successfully loaded image: {image_path}")
             return True
             
         except Exception as e:
@@ -1238,13 +1224,21 @@ class EOLTesterGUI:
             frame_width = self.image_frame.winfo_width()
             frame_height = self.image_frame.winfo_height()
             
+            print(f"Image frame dimensions: {frame_width}x{frame_height}")
+            
             # Create labels based on coordinates data
             for label_num, coord_data in coordinates_data.items():
-                # Get coordinates from database
-                x = coord_data.get('x')
-                y = coord_data.get('y')
-                
-                if x is not None and y is not None:
+                try:
+                    # Get coordinates from database
+                    x = float(coord_data.get('x', 0))
+                    y = float(coord_data.get('y', 0))
+                    
+                    print(f"Processing label {label_num} at coordinates ({x}, {y})")
+                    
+                    # Validate coordinates are within frame bounds with margin
+                    x = max(10, min(x, frame_width - 50))  # Leave margin on edges
+                    y = max(10, min(y, frame_height - 30))  # Leave margin on edges
+                    
                     # Create label with exact specifications
                     label_text = f'L{label_num}'
                     new_label = tk.Label(self.image_frame,
@@ -1258,12 +1252,17 @@ class EOLTesterGUI:
                     
                     # Place label at exact coordinates
                     new_label.place(x=x, y=y)
+                    new_label.lift()  # Ensure label is on top of image
                     
                     # Store the label and its position
                     self.placed_labels[label_text] = new_label
                     self.label_positions[label_text] = (x, y)
                     
-                    print(f"Placed {label_text} at coordinates x={x}, y={y}")
+                    print(f"Successfully placed {label_text} at coordinates x={x}, y={y}")
+                    
+                except Exception as e:
+                    print(f"Error placing label {label_num}: {str(e)}")
+                    continue
             
             # Update label info
             if self.placed_labels:
@@ -1271,7 +1270,10 @@ class EOLTesterGUI:
                 self.label_info.config(text=f"Placed Labels: {', '.join(sorted_labels)}")
             else:
                 self.label_info.config(text="Placed Labels: None")
-
+                
+            # Force update of the display
+            self.image_frame.update_idletasks()
+            
         except Exception as e:
             print(f"Error placing labels: {e}")
             messagebox.showerror("Error", f"Failed to place labels: {str(e)}")
