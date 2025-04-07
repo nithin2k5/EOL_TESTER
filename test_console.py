@@ -326,7 +326,7 @@ class EOLTesterGUI:
         
         # Create specifications table frame (70% of height)
         spec_frame = tk.Frame(q2, relief="solid", borderwidth=1)  # Add border to spec frame
-        spec_frame.pack(fill="x", expand=True, padx=2, pady=2)  # Add padding
+        spec_frame.pack(fill="both", expand=True, padx=2, pady=2)  # Add padding
         
         # Create specifications table with numbered ID
         columns = (
@@ -346,7 +346,8 @@ class EOLTesterGUI:
                        relief="solid",  # Border style
                        fieldbackground="white",  # Background color
                        background="white",  # Row background color
-                       foreground="black")  # Text color
+                       foreground="black",  # Text color
+                       rowheight=30)  # Increase row height to fill space better
         
         style.configure("Custom.Treeview.Heading",
                        borderwidth=1,
@@ -358,13 +359,13 @@ class EOLTesterGUI:
         # Configure selection colors
         style.map("Custom.Treeview",
                  background=[("selected", "#cce5ff")],  # Light blue for selected row
-                 foreground=[("selected", "black")])  # Selected row text color
+                 foreground=[("selected", "black")])
         
         # Create Treeview with custom style - LIMIT TO 8 ROWS as requested
         self.spec_tree = ttk.Treeview(spec_frame, 
                                      columns=columns, 
                                      show="headings", 
-                                     height=8,  # Limited to 8 rows as requested
+                                     height=8,  # Fixed at 8 rows as requested
                                      style="Custom.Treeview")
         
         # Configure columns with specific widths
@@ -383,17 +384,8 @@ class EOLTesterGUI:
             self.spec_tree.heading(col, text=col)
             self.spec_tree.column(col, width=column_widths.get(col, 100), anchor='center')
         
-        # Add scrollbars
-        scrollbar = ttk.Scrollbar(spec_frame, orient="vertical", command=self.spec_tree.yview)
-        self.spec_tree.configure(yscrollcommand=scrollbar.set)
-        
-        h_scrollbar = ttk.Scrollbar(spec_frame, orient="horizontal", command=self.spec_tree.xview)
-        self.spec_tree.configure(xscrollcommand=h_scrollbar.set)
-        
-        # Pack the treeview and scrollbars
-        self.spec_tree.pack(side="top", fill="both", expand=True, padx=0, pady=0)
-        scrollbar.pack(side="right", fill="y")
-        h_scrollbar.pack(side="bottom", fill="x")
+        # Pack the treeview to fill the available space without scrollbars
+        self.spec_tree.pack(fill="both", expand=True)
         
         # Create camera frame container (30% of height)
         camera_container = tk.Frame(q2, bg='#f0f0f0')
@@ -426,7 +418,7 @@ class EOLTesterGUI:
         # Text box (moved to column 3 for equal spacing)
         textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT", bg='white', fg='black', font=("Arial", 10, "bold"))
         textbox_label.grid(row=0, column=3, pady=(0, 5))
-        self.cam_textbox = tk.Text(camera_container, width=40, height=7)
+        self.cam_textbox = tk.Text(camera_container, width=40, height=5.5)
         self.cam_textbox.grid(row=1, column=3, padx=10, pady=1)
         return q2
 
@@ -455,16 +447,55 @@ class EOLTesterGUI:
                            font=("Arial", 9, "bold"))
             label.pack(side="left", expand=True, fill="x", padx=2, pady=3)
         
-        # Grid view area
+        # Create lot number tree view with frame
         grid_frame = tk.Frame(q4, bg="#f5f5f5")
         grid_frame.pack(fill="both", expand=True, padx=4, pady=4)
         
-        grid_label = tk.Label(grid_frame, 
-                            text="Grid view", 
-                            font=("Arial", 20),
-                            bg="#f5f5f5",
-                            fg="#757575")
-        grid_label.place(relx=0.5, rely=0.5, anchor="center")
+        # Configure style for the lot number tree view
+        style = ttk.Style()
+        style.configure("LotTree.Treeview",
+                       borderwidth=1,
+                       relief="solid",
+                       fieldbackground="#ffffff", 
+                       background="#ffffff",
+                       rowheight=25,  # Increase row height
+                       font=("Arial", 10))
+                       
+        style.configure("LotTree.Treeview.Heading",
+                       borderwidth=1,
+                       relief="solid",
+                       background="#f0f0f0",
+                       foreground="#000000",
+                       font=("Arial", 9, "bold"))
+                       
+        # Configure selection colors
+        style.map("LotTree.Treeview",
+                 background=[("selected", "#e6f2ff")],
+                 foreground=[("selected", "#000000")])
+        
+        # Create Treeview for lot numbers
+        self.lot_tree = ttk.Treeview(grid_frame, 
+                                    columns=columns,
+                                    show="headings",
+                                    height=12,  # Increased height for more visible rows
+                                    style="LotTree.Treeview")
+        
+        # Configure column widths
+        column_widths = {
+            "LOT NUMBER": 150,
+            "L1": 70,
+            "P1": 70,
+            "P2": 70,
+            "RESULT": 100
+        }
+        
+        # Set up columns
+        for col in columns:
+            self.lot_tree.heading(col, text=col)
+            self.lot_tree.column(col, width=column_widths.get(col, 100), anchor="center")
+        
+        # Pack tree (without scrollbars)
+        self.lot_tree.pack(side="left", fill="both", expand=True)
         
         # Bottom frame with equal spacing
         bottom_frame = tk.Frame(q4, bg="#f5f5f5", height=40)
