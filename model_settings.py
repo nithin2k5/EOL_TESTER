@@ -1405,13 +1405,19 @@ class WorkspaceApp:
         for key, entry in self.textboxes.items():
             entry.config(state='normal')
             entry.delete(0, 'end')
-            placeholder = "Enter " + key.lower()
-            if key == "Image File Path":
-                placeholder = "No image selected"
-            entry.insert(0, placeholder)
-            entry.config(fg='gray')
-            if key == "Image File Path":
+            
+            # Set appropriate placeholder based on field
+            if key == "Part Number":
+                entry.insert(0, "Enter part number")
+            elif key == "Model & Part Name":
+                entry.insert(0, "Enter model name")
+            elif key == "Image File Path":
+                entry.insert(0, "No image selected")
                 entry.config(state='readonly')
+            else:
+                entry.insert(0, f"Enter {key.lower()}")
+            
+            entry.config(fg='gray')
         
         # Clear image
         if self.image_label:
@@ -1511,98 +1517,43 @@ class WorkspaceApp:
 
     def on_plc_address_select(self, event):
         """Handle PLC Address combobox selection"""
-        try:
-            # Read PLC register data from file
-            with open('/Users/nithink/Developer/python/EOL_TESTER/plc_register.txt', 'r') as file:
-                plc_data = file.read()
-            
-            # Create popup window to display data
-            popup = tk.Toplevel(self.root)
-            popup.title("PLC Register Data")
-            popup.geometry("400x300")
-            
-            # Add text widget to display data
-            text_widget = tk.Text(popup, wrap=tk.WORD)
-            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            # Insert the data
-            text_widget.insert('1.0', plc_data)
-            text_widget.config(state='disabled')  # Make read-only
-            
-            # Add scrollbar
-            scrollbar = ttk.Scrollbar(popup, orient='vertical', command=text_widget.yview)
-            scrollbar.pack(side='right', fill='y')
-            text_widget.config(yscrollcommand=scrollbar.set)
-            
-        except FileNotFoundError:
-            messagebox.showerror("Error", "plc_register.txt file not found!")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error reading PLC register data: {str(e)}")
+        # No popup needed, options are already loaded in combobox
+        pass
 
     def on_barcode_type_select(self, event):
         """Handle Barcode Type combobox selection"""
-        try:
-            # Read barcode filename data from file
-            with open('/Users/nithink/Developer/python/EOL_TESTER/barcodeprintfilename.txt', 'r') as file:
-                barcode_data = file.read().strip()
-            
-            # Split data by commas
-            barcode_options = [opt.strip() for opt in barcode_data.split(',')]
-            
-            # Create popup window to display data
-            popup = tk.Toplevel(self.root)
-            popup.title("Barcode Print Filenames")
-            popup.geometry("400x300")
-            
-            # Add listbox to display data
-            listbox = tk.Listbox(popup)
-            listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            # Insert the options
-            for option in barcode_options:
-                listbox.insert(tk.END, option)
-            
-            # Add scrollbar
-            scrollbar = ttk.Scrollbar(popup, orient='vertical', command=listbox.yview)
-            scrollbar.pack(side='right', fill='y')
-            listbox.config(yscrollcommand=scrollbar.set)
-            
-        except FileNotFoundError:
-            messagebox.showerror("Error", "barcodeprintfilename.txt file not found!")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error reading barcode filename data: {str(e)}")
+        # No popup needed, options are already loaded in combobox
+        pass
 
     def load_plc_options(self):
-        """Load PLC address options from plc_register.txt"""
+        """Load PLC address options from txt_files/ProgramSelectionInPLC.txt"""
         try:
-            # Use absolute path to the file
-            file_path = "/Users/nithink/Developer/python/EOL_TESTER/PLC_on_register.txt"
+            # Use file in txt_files directory
+            file_path = "txt_files/ProgramSelectionInPLC.txt"
             with open(file_path, 'r') as file:
-                # Read content and split by commas
                 content = file.read().strip()
                 options = [opt.strip() for opt in content.split(',') if opt.strip()]
-                print(f"Loaded PLC options: {options}")  # Debug print
+                print(f"Loaded PLC options: {options}")
                 return options
         except FileNotFoundError:
-            print(f"Warning: plc_register.txt not found at {file_path}")
+            print(f"Warning: ProgramSelectionInPLC.txt not found at {file_path}")
             return []
         except Exception as e:
             print(f"Error reading PLC options: {str(e)}")
             return []
 
     def load_barcode_options(self):
-        """Load barcode options from barcodeprintfilename.txt"""
+        """Load barcode options from txt_files/barcodeprintfilenames.txt"""
         try:
-            # Use absolute path to the file
-            file_path = "/Users/nithink/Developer/python/EOL_TESTER/barcodeprintfilenames.txt"
+            # Use file in txt_files directory
+            file_path = "txt_files/barcodeprintfilenames.txt"
             with open(file_path, 'r') as file:
-                # Read content and split by commas
                 content = file.read().strip()
                 options = [opt.strip() for opt in content.split(',') if opt.strip()]
-                print(f"Loaded barcode options: {options}")  # Debug print
+                print(f"Loaded barcode options: {options}")
                 return options
         except FileNotFoundError:
-            print(f"Warning: barcodeprintfilename.txt not found at {file_path}")
+            print(f"Warning: barcodeprintfilenames.txt not found at {file_path}")
             return []
         except Exception as e:
             print(f"Error reading barcode options: {str(e)}")
