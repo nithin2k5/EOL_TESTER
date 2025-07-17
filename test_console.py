@@ -1,6 +1,6 @@
 import tkinter as tk
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import os
 import mysql.connector
@@ -11,6 +11,10 @@ from pymodbus.client import ModbusSerialClient
 import serial
 from dotenv import load_dotenv
 import time
+import traceback
+from datetime import datetime
+import random
+import sys
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -438,18 +442,35 @@ class EOLTesterGUI:
         header_frame.pack(fill="x")
         header_frame.pack_propagate(False)
         
-        columns = ["LOT NUMBER", "L1", "P1", "P2", "RESULT"]
-        for col in columns:
+        # Default columns: LOT NUMBER, L1, L2, P1, P2, RESULT, SCAN RESULT
+        self.default_columns = ["LOT NUMBER", "L1", "L2", "P1", "P2", "RESULT", "SR"]
+        self.current_columns = self.default_columns.copy()
+        
+        # Store references to header labels so we can update them later
+        self.header_labels = {}
+        for col in self.current_columns:
             label = tk.Label(header_frame, 
                            text=col, 
                            bg="#1e88e5",     
                            fg="white",        
                            font=("Arial", 9, "bold"))
             label.pack(side="left", expand=True, fill="x", padx=2, pady=3)
+            self.header_labels[col] = label
         
-        # Create lot number tree view with frame
-        grid_frame = tk.Frame(q4, bg="#f5f5f5")
-        grid_frame.pack(fill="both", expand=True, padx=4, pady=4)
+        # Main content frame to hold grid and entry fields
+        content_frame = tk.Frame(q4, bg="#f5f5f5")
+        content_frame.pack(fill="both", expand=True, padx=4, pady=4)
+        
+        # Configure grid for main content
+        content_frame.grid_rowconfigure(0, weight=1)  # Treeview gets most space
+        content_frame.grid_rowconfigure(1, weight=0)  # Entry frame gets fixed space
+        content_frame.grid_columnconfigure(0, weight=1)  # Single column takes full width
+        
+        # Create lot number tree view with frame - in the first row
+        # Set a fixed width for the grid frame to prevent expansion
+        self.grid_frame = tk.Frame(content_frame, bg="#f5f5f5", width=800)
+        self.grid_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 5))
+        self.grid_frame.grid_propagate(False)  # Prevent the frame from resizing
         
         # Configure style for the lot number tree view
         style = ttk.Style()
@@ -473,48 +494,34 @@ class EOLTesterGUI:
                  background=[("selected", "#e6f2ff")],
                  foreground=[("selected", "#000000")])
         
-        # Create Treeview for lot numbers
-        self.lot_tree = ttk.Treeview(grid_frame, 
-                                    columns=columns,
-                                    show="headings",
-                                    height=12,  # Increased height for more visible rows
-                                    style="LotTree.Treeview")
+        # Store the fixed width we want for our tree
+        self.tree_fixed_width = 780  # Slightly less than frame width to account for padding
         
-        # Configure column widths
-        column_widths = {
-            "LOT NUMBER": 150,
-            "L1": 70,
-            "P1": 70,
-            "P2": 70,
-            "RESULT": 100
-        }
+        # Create Treeview with default columns
+        self.create_lot_tree(self.grid_frame, self.current_columns)
         
-        # Set up columns
-        for col in columns:
-            self.lot_tree.heading(col, text=col)
-            self.lot_tree.column(col, width=column_widths.get(col, 100), anchor="center")
+        # Bottom frame for entry fields - in the second row
+        entry_frame = tk.Frame(content_frame, bg="#f5f5f5", height=50)  # Reduced height
+        entry_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
+        entry_frame.grid_propagate(False)  # Prevent shrinking
         
-        # Pack tree (without scrollbars)
-        self.lot_tree.pack(side="left", fill="both", expand=True)
-        
-        # Bottom frame with equal spacing
-        bottom_frame = tk.Frame(q4, bg="#f5f5f5", height=40)
-        bottom_frame.pack(fill="x", side="bottom", pady=2)
-        bottom_frame.pack_propagate(False)
+        # Simplified layout with just the entry fields
+        input_frame = tk.Frame(entry_frame, bg="#f5f5f5") 
+        input_frame.pack(fill="both", expand=True, pady=5)
         
         # Configure equal column weights
-        bottom_frame.columnconfigure(0, weight=1)  # EMP CODE
-        bottom_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
-        bottom_frame.columnconfigure(2, weight=1)  # ALC CODE
+        input_frame.columnconfigure(0, weight=1)  # EMP CODE
+        input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
+        input_frame.columnconfigure(2, weight=1)  # ALC CODE
         
         # Employee Code Entry
-        self.emp_entry = tk.Entry(bottom_frame,
+        self.emp_entry = tk.Entry(input_frame,
                                  bg="white",
                                  fg="#424242",
                                  font=("Arial", 9, "bold"),
                                  justify="center",
                                  relief="flat",
-                                 width=12)
+                                 width=15)
         self.emp_entry.grid(row=0, column=0, padx=5, sticky="ew")
         self.emp_entry.insert(0, "EMP CODE")
         self.emp_entry.configure(highlightthickness=1,
@@ -522,13 +529,14 @@ class EOLTesterGUI:
                                highlightcolor="#1e88e5")
         
         # Next Label Button (centered)
-        next_btn = tk.Button(bottom_frame,
+        next_btn = tk.Button(input_frame,
                             text="NEXT LABEL ➜",
                             bg="#ffd700",
                             fg="#000000",
                             relief="flat",
                             font=("Arial", 9, "bold"),
                             cursor="hand2",
+                            command=self.next_label_command,
                             pady=2)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
         
@@ -537,13 +545,13 @@ class EOLTesterGUI:
         next_btn.bind('<Leave>', lambda e: next_btn.configure(bg="#ffd700"))
         
         # ALC Code Entry (initially disabled)
-        self.alc_entry = tk.Entry(bottom_frame,
+        self.alc_entry = tk.Entry(input_frame,
                                  bg="white",
                                  fg="black",
                                  font=("Arial", 9, "bold"),
                                  justify="center",
                                  relief="flat",
-                                 width=12,
+                                 width=15,
                                  state='disabled')  # Initially disabled
         self.alc_entry.grid(row=0, column=2, padx=5, sticky="ew")
         self.alc_entry.insert(0, "ALC CODE")
@@ -561,6 +569,218 @@ class EOLTesterGUI:
         self.alc_entry.bind("<Return>", self.process_alc_code)
         
         return q4
+        
+    def create_lot_tree(self, parent_frame, columns):
+        """Create the lot tree with specified columns"""
+        # Configure base column widths
+        self.base_column_widths = {
+            "LOT NUMBER": 150,
+            "L1": 60,
+            "L2": 60,
+            "L3": 60,
+            "L4": 60,
+            "P1": 60,
+            "P2": 60,
+            "P3": 60,
+            "P4": 60,
+            "RESULT": 80,
+            "SCAN RESULT": 100
+        }
+        
+        # Get the fixed width we established
+        tree_width = self.tree_fixed_width
+        
+        # Calculate how to distribute widths
+        column_widths = self.adjust_column_widths(columns, tree_width)
+        
+        # Create Treeview with the specified columns
+        self.tree = ttk.Treeview(parent_frame, 
+                                columns=columns,
+                                show="headings",
+                                height=10,
+                                style="LotTree.Treeview")
+        
+        # Set up columns with strict widths
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=column_widths.get(col, 60), anchor="center", stretch=False)
+        
+        # Pack tree without scrollbar
+        self.tree.pack(side="left", fill="both", expand=True)
+        
+        # Configure scrolling using only the mouse wheel
+        def on_mousewheel(event):
+            # For Windows
+            self.tree.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def on_mousewheel_linux(event):
+            # For Linux
+            if event.num == 4:
+                self.tree.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.tree.yview_scroll(1, "units")
+        
+        # Add keyboard-based scrolling
+        def on_up_arrow(event):
+            self.tree.yview_scroll(-1, "units")
+            return "break"  # Prevent default behavior
+            
+        def on_down_arrow(event):
+            self.tree.yview_scroll(1, "units")
+            return "break"  # Prevent default behavior
+            
+        def on_page_up(event):
+            self.tree.yview_scroll(-10, "units")
+            return "break"
+            
+        def on_page_down(event):
+            self.tree.yview_scroll(10, "units")
+            return "break"
+        
+        # Bind wheel events based on platform
+        if sys.platform == "win32":
+            self.tree.bind("<MouseWheel>", on_mousewheel)
+        else:
+            self.tree.bind("<Button-4>", on_mousewheel_linux)
+            self.tree.bind("<Button-5>", on_mousewheel_linux)
+            
+        # Add keyboard navigation
+        self.tree.bind("<Up>", on_up_arrow)
+        self.tree.bind("<Down>", on_down_arrow)
+        self.tree.bind("<Prior>", on_page_up)  # Page Up
+        self.tree.bind("<Next>", on_page_down)  # Page Down
+        
+        # Bind double-click event to view details
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
+
+    def adjust_column_widths(self, columns, available_width=800):
+        """Adjust column widths proportionally to fit within available space"""
+        # We're not accounting for scrollbar width since it's invisible now
+        adjusted_available_width = available_width
+        
+        # Calculate total width of all columns using base widths
+        total_base_width = sum(self.base_column_widths.get(col, 60) for col in columns)
+        
+        # Always adjust columns to fit the available width exactly
+        scale_factor = adjusted_available_width / total_base_width
+        adjusted_widths = {
+            col: max(40, int(self.base_column_widths.get(col, 60) * scale_factor)) 
+            for col in columns
+        }
+        
+        # Ensure the total width is exactly equal to the available width
+        total_adjusted = sum(adjusted_widths.values())
+        diff = adjusted_available_width - total_adjusted
+        
+        # Distribute any remaining pixels to priority columns
+        if diff != 0:
+            # Priority order for adjustment
+            priority_cols = ["LOT NUMBER", "RESULT", "SCAN RESULT", "L1", "P1", "L2", "P2", "L3", "L4", "P3", "P4"]
+            # Filter to only include columns that exist in our current set
+            priority_cols = [col for col in priority_cols if col in columns]
+            
+            # Add or subtract pixels one by one following priority
+            idx = 0
+            while diff != 0 and priority_cols:
+                col = priority_cols[idx % len(priority_cols)]
+                if diff > 0:
+                    adjusted_widths[col] += 1
+                    diff -= 1
+                else:
+                    if adjusted_widths[col] > 40:  # Don't go below minimum width
+                        adjusted_widths[col] -= 1
+                        diff += 1
+                idx += 1
+        
+        return adjusted_widths
+
+    def update_tree_columns(self, devices):
+        """Update tree columns based on available devices"""
+        # Determine which columns to show based on available devices
+        new_columns = ["LOT NUMBER"]
+        
+        # Always include L1, L2, P1, P2
+        for device in ["L1", "L2", "P1", "P2"]:
+            new_columns.append(device)
+        
+        # Add L3, L4, P3, P4 if they exist in devices
+        for device in ["L3", "L4", "P3", "P4"]:
+            if device in devices:
+                new_columns.append(device)
+        
+        # Always include RESULT and SCAN RESULT
+        new_columns.extend(["RESULT", "SCAN RESULT"])
+        
+        # Check if columns are different from current ones
+        if set(new_columns) != set(self.current_columns):
+            print(f"Updating columns from {self.current_columns} to {new_columns}")
+            
+            # Save current data
+            current_data = []
+            for item in self.tree.get_children():
+                values = self.tree.item(item, "values")
+                current_data.append((item, values))
+            
+            # Destroy and recreate tree with new columns
+            self.tree.destroy()
+            self.create_lot_tree(self.grid_frame, new_columns)
+            
+            # Update header frame labels
+            # First hide all labels
+            for label in self.header_labels.values():
+                label.pack_forget()
+            
+            # Then show only the labels for current columns
+            for col in new_columns:
+                if col in self.header_labels:
+                    self.header_labels[col].pack(side="left", expand=True, fill="x")
+            
+            # Store new columns
+            self.current_columns = new_columns
+            
+            # Try to restore data with mapping to new columns
+            self.load_history_to_treeview()
+            
+            print(f"Tree columns updated to: {new_columns}")
+            
+            # Force the frame to maintain its fixed size
+            self.grid_frame.config(width=800)
+            self.grid_frame.grid_propagate(False)
+            
+            # Make sure the tree uses the whole fixed width
+            total_width = sum(int(self.tree.column(col, "width")) for col in new_columns)
+            if total_width != self.tree_fixed_width:  # No need to adjust for scrollbar width
+                # Recalculate column widths to match exactly
+                new_widths = self.adjust_column_widths(new_columns, self.tree_fixed_width)
+                # Apply the exact widths to prevent width creep
+                for col, width in new_widths.items():
+                    self.tree.column(col, width=width, stretch=False)
+            
+            # Force layout update
+            self.grid_frame.update_idletasks()
+
+    def on_tree_double_click(self, event):
+        """Handle double-click on treeview item"""
+        try:
+            item = self.tree.selection()[0]
+            values = self.tree.item(item, "values")
+            lot_number = values[0]
+            
+            # Build message based on current columns
+            message = f"Lot: {lot_number}"
+            
+            # Add values for each column except LOT NUMBER
+            for i, col in enumerate(self.current_columns[1:], 1):
+                if i < len(values):
+                    message += f", {col}: {values[i]}"
+            
+            self.safe_update_message(message, "blue")
+        except IndexError:
+            # No item selected
+            pass
+        except Exception as e:
+            print(f"Error on tree double-click: {str(e)}")
+            self.safe_update_message(f"Error displaying details: {str(e)}", "red")
 
     def create_graph_area(self, parent):
         # Create main graph container with black background
@@ -964,6 +1184,250 @@ class EOLTesterGUI:
             print(f"Error loading configuration data: {str(e)}")
             self.safe_update_message(f"Error loading configuration data: {str(e)}", "red")
             
+    def update_status_labels(self, status_values=None):
+        """
+        Update the status labels based on the PLC input states
+        
+        Args:
+            status_values: Dictionary of register addresses and their HIGH/LOW states
+                          If None, the method will read the values from the PLC
+        """
+        try:
+            # If status_values not provided, read from PLC
+            if status_values is None:
+                status_values = self.read_process_status_values()
+                
+            if not status_values:
+                print("No status values available to update labels")
+                return
+                
+            # Define address indices from ProcessStatus.txt
+            # Make sure we have the addresses loaded
+            if not hasattr(self, 'process_addresses'):
+                # First time initialization - read from ProcessStatus.txt
+                process_status_line = self.process_status_array[0] if self.process_status_array else ""
+                self.process_addresses = [addr.strip() for addr in process_status_line.split(',')]
+            
+            # Get the addresses by index (or use defaults if not found)
+            # Index assignments from your specification
+            auto_index = 0       # AUTO - first address in the file
+            home_index = 1       # HOME - second address in the file
+            first_pull_index = 2  # 1st PULL PASS - third address
+            first_pull_ng_index = 3  # 1st PULL NG - fourth address
+            second_pull_index = 4  # 2nd PULL PASS - fifth address
+            second_pull_ng_index = 5  # 2nd PULL NG - sixth address
+            test_result_index = 6  # TEST RESULT PASS - seventh address
+            test_result_ng_index = 7  # TEST RESULT NG - eighth address
+            
+            # Get addresses safely with bounds checking
+            def get_address_safe(index):
+                if 0 <= index < len(self.process_addresses):
+                    return self.process_addresses[index]
+                print(f"Warning: Address index {index} out of range")
+                return None
+                
+            # Map the indices to actual addresses
+            auto_addr = get_address_safe(auto_index)
+            home_addr = get_address_safe(home_index)
+            first_pull_addr = get_address_safe(first_pull_index)
+            first_pull_ng_addr = get_address_safe(first_pull_ng_index)
+            second_pull_addr = get_address_safe(second_pull_index)
+            second_pull_ng_addr = get_address_safe(second_pull_ng_index)
+            test_result_addr = get_address_safe(test_result_index)
+            test_result_ng_addr = get_address_safe(test_result_ng_index)
+            
+            # Now define the status mapping using the dynamic addresses
+            status_mapping = {
+                'auto': {'address': auto_addr, 
+                         'color': 'GREEN' if status_values.get(auto_addr, False) else 'BLUE'},
+                'home': {'address': home_addr, 
+                         'color': 'GREEN' if status_values.get(home_addr, False) else 'BLUE'},
+                '1st': {
+                    'address': first_pull_addr,  # 1st PULL input
+                    'ok_address': first_pull_addr,  # 1st PULL PASS
+                    'ng_address': first_pull_ng_addr,  # 1st PULL NG
+                    'color': self.determine_pull_color(first_pull_addr, first_pull_addr, first_pull_ng_addr, status_values)
+                },
+                '2nd': {
+                    'address': second_pull_addr,  # 2nd PULL input
+                    'ok_address': second_pull_addr,  # 2nd PULL PASS
+                    'ng_address': second_pull_ng_addr,  # 2nd PULL NG
+                    'color': self.determine_pull_color(second_pull_addr, second_pull_addr, second_pull_ng_addr, status_values)
+                },
+                'test': {
+                    'address': test_result_addr,  # TEST RESULT input
+                    'ok_address': test_result_addr,  # TEST RESULT PASS
+                    'ng_address': test_result_ng_addr,  # TEST RESULT NG
+                    'color': self.determine_pull_color(test_result_addr, test_result_addr, test_result_ng_addr, status_values)
+                }
+            }
+            
+            # Update label colors and stop blinking if HIGH
+            for label_name, status_info in status_mapping.items():
+                if not status_info['address']:  # Skip if address is None
+                    continue
+                    
+                label_obj = getattr(self, f"{label_name}_label", None)
+                if label_obj:
+                    color = status_info['color']
+                    if color == 'GREEN':
+                        label_obj.config(bg="#00FF00")  # Bright green
+                    elif color == 'RED':
+                        label_obj.config(bg="#FF0000")  # Bright red
+                    else:
+                        label_obj.config(bg="#00BFFF")  # Default blue
+                        
+                    print(f"Updated {label_name} label to {color}")
+                else:
+                    print(f"Label {label_name}_label not found")
+            
+            # Update the specification table with values from loadcells if needed
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                if first_pull_addr and status_values.get(first_pull_addr, False):  # 1st PULL PASS
+                    print("1st Pull PASS detected - Reading load test registers")
+                    
+                    # Read first 4 hold registers when 1st pull passes
+                    register_values = self.read_hold_registers(0, 4)
+                    if register_values:
+                        print(f"Successfully read 1st Pull register values: {register_values}")
+                        self.safe_update_message(f"1st Pull Passed - Load Test Values Read", "green")
+                        
+                        # Update specification tree with L1-L4 values from registers
+                        self.update_spec_tree_with_register_values(register_values, "L")
+                    else:
+                        print("Failed to read register values for 1st Pull - Using default PASS")
+                        # If no register values, use the basic update method
+                        self.update_specification_values('L1', 'L2', 'L3', 'L4', result_color='GREEN')
+                        self.safe_update_message("1st Pull Passed - No Register Values Available", "orange")
+                elif first_pull_ng_addr and status_values.get(first_pull_ng_addr, False):  # 1st PULL NG
+                    print("1st Pull FAIL detected")
+                    self.update_specification_values('L1', 'L2', 'L3', 'L4', result_color='RED')
+                    self.safe_update_message("1st Pull Failed", "red")
+                    
+                if second_pull_addr and status_values.get(second_pull_addr, False):  # 2nd PULL PASS
+                    print("2nd Pull PASS detected - Reading length test registers")
+                    
+                    # Read next 4 hold registers when 2nd pull passes
+                    register_values = self.read_hold_registers(4, 4)
+                    if register_values:
+                        print(f"Successfully read 2nd Pull register values: {register_values}")
+                        self.safe_update_message(f"2nd Pull Passed - Length Test Values Read", "green")
+                        
+                        # Update specification tree with P1-P4 values from registers
+                        self.update_spec_tree_with_register_values(register_values, "P")
+                    else:
+                        print("Failed to read register values for 2nd Pull - Using default PASS")
+                        # If no register values, use the basic update method
+                        self.update_specification_values('P1', 'P2', 'P3', 'P4', result_color='GREEN')
+                        self.safe_update_message("2nd Pull Passed - No Register Values Available", "orange")
+                elif second_pull_ng_addr and status_values.get(second_pull_ng_addr, False):  # 2nd PULL NG
+                    print("2nd Pull FAIL detected")
+                    self.update_specification_values('P1', 'P2', 'P3', 'P4', result_color='RED')
+                    self.safe_update_message("2nd Pull Failed", "red")
+        
+        except Exception as e:
+            print(f"Error updating status labels: {e}")
+            traceback.print_exc()
+            
+    def determine_pull_color(self, input_address, ok_address, ng_address, status_values):
+        """Determine the color for a pull status label based on input, OK and NG states"""
+        # Handle None addresses
+        if not input_address or not ok_address or not ng_address:
+            return 'BLUE'  # Default color
+            
+        if status_values.get(input_address, False):  # If input is HIGH
+            if status_values.get(ok_address, False):  # If OK is HIGH
+                return 'GREEN'
+            elif status_values.get(ng_address, False):  # If NG is HIGH
+                return 'RED'
+        return 'BLUE'  # Default color
+        
+    def read_process_status_values(self):
+        """Read all process status registers and return a dictionary of their states"""
+        status_values = {}
+        
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                print("PLC not connected")
+                return status_values
+                
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Process the content of ProcessStatus.txt
+            if not self.process_status_array:
+                print("Process status array is empty")
+                return status_values
+                
+            # First element contains all comma-separated addresses
+            process_status_line = self.process_status_array[0] if self.process_status_array else ""
+            addresses = [addr.strip() for addr in process_status_line.split(',')]
+            
+            # Store addresses for index-based access
+            self.process_addresses = addresses
+            
+            # Read state for each address
+            for i, address in enumerate(addresses):
+                if not address:
+                    continue
+                    
+                # Extract hex part based on prefix
+                if address.startswith('M'):
+                    hex_part = address[1:]  # Remove 'M'
+                else:
+                    print(f"Invalid address format: {address}")
+                    continue
+                
+                try:
+                    coil_address = int(hex_part, 16)
+                except ValueError:
+                    print(f"Invalid hex value: {hex_part}")
+                    continue
+                
+                response = self.plc_client.read_coils(
+                    address=coil_address,
+                    count=1,
+                    slave=station_id
+                )
+                
+                if not response.isError():
+                    status = response.bits[0]
+                    status_values[address] = status
+                    # Also store by index for easier access
+                    status_values[f"index_{i}"] = status
+                    print(f"Address {address} (index {i}): {'HIGH' if status else 'LOW'}")
+                else:
+                    print(f"Error reading coil {address}")
+                    
+            return status_values
+                
+        except Exception as e:
+            print(f"Error reading process status values: {e}")
+            return status_values
+            
+    def update_specification_values(self, *devices, result_color):
+        """Update specification table with result values and colors"""
+        try:
+            if not hasattr(self, 'spec_tree') or not self.spec_tree:
+                return
+                
+            # Iterate through all rows in the tree
+            for item in self.spec_tree.get_children():
+                values = list(self.spec_tree.item(item, "values"))
+                device = values[1] if len(values) > 1 else ""
+                
+                # If this device should be updated
+                if device in devices:
+                    # Set result column color/value
+                    if result_color == 'GREEN':
+                        values[-1] = "PASS"  # Last column is Result
+                    elif result_color == 'RED':
+                        values[-1] = "NG"
+                        
+                    # Update the row
+                    self.spec_tree.item(item, values=values)
+        except Exception as e:
+            print(f"Error updating specification values: {e}")
+            
     def safe_update_message(self, message, color="black"):
         """Safely update message label with proper error handling"""
         try:
@@ -1055,9 +1519,14 @@ class EOLTesterGUI:
                                     print(f"Successfully connected to PLC on {plc_port}")
                                     # Update message label with success
                                     self.safe_update_message(
-                                        f"Connected to PLC on {plc_port}",
+                                        f"Connected to PLC on {plc_port}. Enter ALC code to start monitoring.",
                                         "green"
                                     )
+                                    
+                                    # REMOVED: Do not start monitoring process status values immediately
+                                    # We will start it after ALC code is entered
+                                    # self.start_status_monitoring()
+                                    
                                     break
                                 else:
                                     # Close connection if test was unsuccessful
@@ -1112,6 +1581,63 @@ class EOLTesterGUI:
             print(f"Error connecting to devices: {str(e)}")
             # Use our safe method to update the message
             self.safe_update_message(f"Error connecting to devices: {str(e)}", "red")
+            
+    def start_status_monitoring(self):
+        """Start periodic monitoring of PLC status registers and update the UI"""
+        # Check if PLC client exists and is connected
+        if not hasattr(self, 'plc_client') or not self.plc_client or not self.plc_client.is_socket_open():
+            print("Cannot start status monitoring - PLC not connected")
+            self.safe_update_message("Cannot start monitoring - PLC not connected", "red")
+            return False
+        
+        # Initialize status_monitoring_active if not already set
+        if not hasattr(self, 'status_monitoring_active'):
+            self.status_monitoring_active = False
+            
+        # If monitoring is already active, don't start again
+        if self.status_monitoring_active:
+            print("Status monitoring already active")
+            return True
+            
+        # Set monitoring as active
+        self.status_monitoring_active = True
+        print("Starting status monitoring")
+        
+        # Try to read status values immediately to update UI on start
+        try:
+            status_values = self.read_process_status_values()
+            if status_values:
+                self.update_status_labels(status_values)
+                print(f"Initial status values read: {len(status_values)} values")
+            else:
+                print("Warning: No initial status values read from PLC")
+        except Exception as e:
+            print(f"Warning: Error reading initial status values: {e}")
+        
+        # Start the monitoring loop
+        self.update_status_from_plc()
+        return True
+
+    def update_status_from_plc(self):
+        """Periodic update of status from PLC"""
+        try:
+            # Only update if client is still connected
+            if self.plc_client and self.plc_client.is_socket_open() and self.status_monitoring_active:
+                # Read all process status values
+                status_values = self.read_process_status_values()
+                
+                # Update the labels with the values
+                if status_values:
+                    self.update_status_labels(status_values)
+                
+                # Schedule next update (every 500ms)
+                self.root.after(500, self.update_status_from_plc)
+            else:
+                print("PLC client not connected or monitoring stopped - stopping status updates")
+                self.status_monitoring_active = False
+        except Exception as e:
+            print(f"Error in status update loop: {e}")
+            self.status_monitoring_active = False
 
     def is_port_available(self, port):
         """Check if a COM port is available for connection"""
@@ -1270,6 +1796,11 @@ class EOLTesterGUI:
             # Stop all monitoring first
             self.keepWriting = False
             self.breakLoop = True
+            
+            # Stop PLC status monitoring
+            if hasattr(self, 'status_monitoring_active'):
+                self.status_monitoring_active = False
+                print("Status monitoring stopped")
             
             # Stop all blinking labels
             self.stop_all_label_blinking()
@@ -1794,6 +2325,9 @@ class EOLTesterGUI:
             if self.alc_entry.get() == "ALC CODE":
                 self.alc_entry.delete(0, tk.END)
             self.alc_entry.configure(bg="white")
+            
+            # Remove the selection dialog trigger
+            # When the entry gets focus, don't show selection dialog anymore
         else:
             if not self.alc_entry.get():
                 self.alc_entry.insert(0, "ALC CODE")
@@ -1801,7 +2335,7 @@ class EOLTesterGUI:
 
     def process_alc_code(self, event=None):
         """Process the entered ALC code and retrieve specifications"""
-        # Use the value from the entry field, not barcode_data
+        # Use the value from the entry field
         alc_code = self.alc_entry.get().strip()
         
         if not alc_code or alc_code == "ALC CODE":
@@ -1857,6 +2391,10 @@ class EOLTesterGUI:
 
             # Clear and update specifications tree
             self.spec_tree.delete(*self.spec_tree.get_children())
+            
+            # Collect all device names to update tree columns
+            available_devices = set()
+            
             for spec in specs:
                 values = (
                     spec['Description'],
@@ -1868,6 +2406,13 @@ class EOLTesterGUI:
                     ""   # Empty Result column
                 )
                 self.spec_tree.insert('', 'end', values=values)
+                
+                # Add device to the set of available devices
+                if spec['Device']:
+                    available_devices.add(spec['Device'])
+
+            # Update tree columns based on available devices
+            self.update_tree_columns(available_devices)
 
             # Handle image loading and label placement
             if model_result['MM_IMAGE_PATH']:
@@ -1895,6 +2440,21 @@ class EOLTesterGUI:
 
             cursor.close()
             conn.close()
+            
+            # Load lot history for this part number
+            self.load_history_to_treeview()
+            
+            # Start monitoring PLC status now that we have the ALC code and specifications
+            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+                print("Starting process status monitoring after ALC code entry")
+                self.start_status_monitoring()
+                self.safe_update_message(
+                    f"Process monitoring started for Part: {self.current_part_number}",
+                    "green"
+                )
+            else:
+                print("Cannot start monitoring - PLC not connected")
+                self.safe_update_message("Cannot start monitoring - PLC not connected", "red")
 
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
@@ -2342,6 +2902,825 @@ class EOLTesterGUI:
             print(f"Error during window closing: {e}")
             # Ensure window is destroyed even if cleanup fails
             self.root.destroy()
+
+    def next_label_command(self):
+        """Process test results, save to database, and prepare for next test"""
+        try:
+            # Validate LOT number
+            lot_number = None
+            if hasattr(self, 'barcode_entry') and self.barcode_entry.winfo_exists():
+                lot_number = self.barcode_entry.get().strip()
+            
+            if not lot_number:
+                messagebox.showwarning("Warning", "Please scan or enter a valid LOT number")
+                return
+                
+            # Get test results from spec tree
+            values_dict = {}
+            values_dict["LOT NUMBER"] = lot_number
+            
+            has_result = False
+            all_devices_pass = True
+            
+            # If we have specifications available, collect them
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                available_devices = set()
+                
+                # First, collect all device values and check if any are NG
+                for item in self.spec_tree.get_children():
+                    values = self.spec_tree.item(item, "values")
+                    if len(values) > 1 and values[1]:  # If device column has a value
+                        device = values[1]
+                        result_value = values[-1] if len(values) > 5 else None
+                        actual_value = values[-2] if len(values) > 5 else None
+                        
+                        # Store device in available devices set
+                        available_devices.add(device)
+                        
+                        # Store both the result and actual value
+                        if result_value:
+                            has_result = True
+                            # Store the actual value (not the result) for L1-L4 and P1-P4
+                            if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual_value:
+                                values_dict[device] = actual_value
+                            else:
+                                values_dict[device] = result_value
+                            
+                            # Check if this result is NG
+                            if result_value == "NG":
+                                all_devices_pass = False
+                
+                # If there are any device results, set an overall RESULT value
+                if has_result:
+                    values_dict["RESULT"] = "PASS" if all_devices_pass else "NG"
+                
+                # Check if all existing devices have values and all are passing
+                all_existing_devices_pass = True
+                if has_result:
+                    # Loop through specifications to see if any with values are NG
+                    for item in self.spec_tree.get_children():
+                        values = self.spec_tree.item(item, "values")
+                        if len(values) > 5:
+                            device = values[1] if len(values) > 1 else ""
+                            result = values[-1]
+                            actual = values[-2]
+                            
+                            # Only check devices that have actual values
+                            if actual and actual != "N/A":
+                                if result == "NG":
+                                    all_existing_devices_pass = False
+                                    break
+            
+            # Add to tree view only if all devices pass
+            if has_result and all_existing_devices_pass:
+                # Get currently selected items in the tree
+                selected_items = self.tree.selection()
+                
+                # Create values list with PASS/NG for display in treeview
+                display_values = []
+                for col in self.current_columns:
+                    if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                        # For device columns, display PASS/NG in the tree view
+                        if col in values_dict and values_dict[col]:
+                            # If we have a numeric value, determine if it's PASS or NG
+                            device_item = None
+                            for tree_item in self.spec_tree.get_children():
+                                tree_values = self.spec_tree.item(tree_item, "values")
+                                if len(tree_values) > 1 and tree_values[1] == col:
+                                    device_item = tree_item
+                                    break
+                            
+                            if device_item:
+                                result = self.spec_tree.item(device_item, "values")[-1]
+                                display_values.append(result)
+                            else:
+                                display_values.append("N/A")
+                        else:
+                            display_values.append("N/A")
+                    else:
+                        # For non-device columns, use the value directly
+                        display_values.append(values_dict.get(col, "N/A"))
+                
+                # If a row is selected and it's the same lot number, update it
+                if selected_items and self.tree.item(selected_items[0], "values")[0] == lot_number:
+                    current_item = selected_items[0]
+                    # Update the tree
+                    self.tree.item(current_item, values=tuple(display_values))
+                else:
+                    # Insert new row
+                    self.tree.insert('', 'end', values=tuple(display_values))
+                    
+                self.safe_update_message("PASS result added to tree view", "green")
+            else:
+                # Don't display in tree view, but notify user
+                if not has_result:
+                    self.safe_update_message("No device results found - saved to database only", "orange")
+                else:
+                    self.safe_update_message("Results saved to database but not displayed (some device specs failed)", "orange")
+            
+            # Clear both entries for next record
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.insert(0, "ALC CODE")
+            self.alc_entry.configure(state='disabled')
+            
+            self.emp_entry.delete(0, tk.END)
+            self.emp_entry.insert(0, "EMP CODE")
+            self.emp_entry.configure(bg="white")
+            self.emp_entry.focus_set()
+            
+            # Clear barcode entry if it exists
+            if hasattr(self, 'barcode_entry'):
+                self.barcode_entry.delete(0, tk.END)
+            
+            # Save lot data to database (always save, even if not displaying in tree)
+            print("Saving test result to database")
+            self.save_lot_data_to_database(values_dict)
+            
+            if not all_existing_devices_pass and has_result:
+                self.safe_update_message("NG result saved to database", "red")
+            else:
+                self.safe_update_message("Record saved to database", "green")
+            
+            # Check if we need to update the tree columns based on available devices
+            if available_devices:
+                self.update_tree_columns(available_devices)
+            
+        except Exception as e:
+            print(f"Error in next_label_command: {e}")
+            traceback.print_exc()
+            self.safe_update_message(f"Error: {e}", "red")
+
+    def get_spec_result(self, device_name):
+        """Get the result value for a specific device from the spec tree"""
+        if not hasattr(self, 'spec_tree') or not self.spec_tree:
+            return None
+            
+        # Loop through all rows in the spec tree
+        for item in self.spec_tree.get_children():
+            values = self.spec_tree.item(item, "values")
+            # Check if the device column matches the requested device
+            if len(values) > 1 and values[1] == device_name:
+                # Return the result column value (last column)
+                return values[-1] if values[-1] else None
+                
+        return None
+
+    def save_lot_data_to_database(self, values_dict):
+        """Save lot number data to database"""
+        try:
+            # Validate values
+            if not values_dict or "LOT NUMBER" not in values_dict:
+                print("Invalid values provided for database save")
+                return False
+                
+            # Connect to database
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="12345",
+                database="EOL"
+            )
+            
+            cursor = conn.cursor()
+            
+            # Check if table exists, create if not
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_TEST_RESULTS (
+                    ID INT AUTO_INCREMENT PRIMARY KEY,
+                    LOT_NUMBER VARCHAR(255),
+                    PART_NUMBER VARCHAR(255),
+                    L1 VARCHAR(50),
+                    L2 VARCHAR(50),
+                    L3 VARCHAR(50),
+                    L4 VARCHAR(50),
+                    P1 VARCHAR(50),
+                    P2 VARCHAR(50),
+                    P3 VARCHAR(50),
+                    P4 VARCHAR(50),
+                    RESULT VARCHAR(50),
+                    SCAN_RESULT VARCHAR(255),
+                    CREATED_BY VARCHAR(255),
+                    CREATED_DATE DATETIME
+                )
+            """)
+            
+            # Get values for insertion
+            lot_number = values_dict.get("LOT NUMBER", "")
+            part_number = getattr(self, 'current_part_number', '')
+            
+            # Default empty string for all values not provided
+            l1_result = values_dict.get("L1", "")
+            l2_result = values_dict.get("L2", "")
+            l3_result = values_dict.get("L3", "")
+            l4_result = values_dict.get("L4", "")
+            p1_result = values_dict.get("P1", "")
+            p2_result = values_dict.get("P2", "")
+            p3_result = values_dict.get("P3", "")
+            p4_result = values_dict.get("P4", "")
+            result = values_dict.get("RESULT", "")
+            scan_result = values_dict.get("SCAN RESULT", "")
+            
+            # Print debug info about what's being saved
+            print(f"Saving lot: {lot_number}, part: {part_number}")
+            print(f"Actual values being saved to database:")
+            print(f"L1: {l1_result}")
+            print(f"L2: {l2_result}")
+            print(f"L3: {l3_result}")
+            print(f"L4: {l4_result}")
+            print(f"P1: {p1_result}")
+            print(f"P2: {p2_result}")
+            print(f"P3: {p3_result}")
+            print(f"P4: {p4_result}")
+            print(f"Overall result: {result}")
+            
+            # Check if record already exists
+            cursor.execute(
+                "SELECT ID FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s",
+                (lot_number, part_number)
+            )
+            existing_record = cursor.fetchone()
+            
+            if existing_record:
+                # Update existing record
+                query = """
+                UPDATE TBL_TEST_RESULTS 
+                SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, 
+                    P1 = %s, P2 = %s, P3 = %s, P4 = %s,
+                    RESULT = %s, SCAN_RESULT = %s,
+                    CREATED_BY = %s, 
+                    CREATED_DATE = %s 
+                WHERE LOT_NUMBER = %s AND PART_NUMBER = %s
+                """
+                cursor.execute(query, (
+                    l1_result, l2_result, l3_result, l4_result,
+                    p1_result, p2_result, p3_result, p4_result,
+                    result, scan_result,
+                    "User", 
+                    datetime.now(), 
+                    lot_number, 
+                    part_number
+                ))
+                print(f"Updated existing record for lot {lot_number}")
+            else:
+                # Insert new record
+                query = """
+                INSERT INTO TBL_TEST_RESULTS 
+                (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(query, (
+                    lot_number, 
+                    part_number, 
+                    l1_result, l2_result, l3_result, l4_result,
+                    p1_result, p2_result, p3_result, p4_result,
+                    result, scan_result,
+                    "User", 
+                    datetime.now()
+                ))
+                print(f"Inserted new record for lot {lot_number}")
+            
+            # Commit and close
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print(f"Successfully saved actual values to database for lot {lot_number}")
+            return True
+            
+        except mysql.connector.Error as e:
+            print(f"Database error: {str(e)}")
+            self.safe_update_message(f"Database error: {str(e)}", "red")
+            return False
+        except Exception as e:
+            print(f"Error saving to database: {str(e)}")
+            self.safe_update_message(f"Error saving to database: {str(e)}", "red")
+            return False
+            
+    def add_to_tree(self, lotnum, pass_tests, total_tests):
+        """Add entry to the treeview"""
+        # Create default values for all columns
+        test_results = ["N/A"] * 8  # L1, L2, L3, L4, P1, P2, P3, P4
+        
+        # Map test indices to column positions
+        # The tests are: L1, L2, L3, L4, P1, P2, P3, P4
+        for test_idx in range(8):
+            if test_idx in pass_tests:
+                test_results[test_idx] = "PASS"
+            else:
+                test_results[test_idx] = "FAIL"
+        
+        # Overall pass only if all tests passed
+        overall_result = "PASS" if len(pass_tests) == total_tests else "FAIL"
+        
+        # Create full values tuple
+        values = [lotnum] + test_results + [overall_result]
+        
+        # Insert into treeview
+        self.tree.insert("", "end", text=lotnum, values=values)
+        
+        return values
+
+    def get_available_alc_codes(self):
+        """Fetch all available ALC codes from the database"""
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="12345",
+                database="EOL"
+            )
+            
+            cursor = conn.cursor()
+            
+            # Query to get all unique ALC codes
+            query = """
+            SELECT DISTINCT MM_ALC_CODE, MM_MODEL_NAME, MM_PART_NUMBER 
+            FROM TBL_MODEL_MASTER 
+            WHERE MM_ALC_CODE IS NOT NULL AND MM_ALC_CODE != ''
+            ORDER BY MM_MODEL_NAME
+            """
+            
+            cursor.execute(query)
+            
+            # Format results as a list of dictionaries
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    'alc_code': row[0],
+                    'model_name': row[1],
+                    'part_number': row[2]
+                })
+                
+            cursor.close()
+            conn.close()
+            
+            return results
+            
+        except mysql.connector.Error as e:
+            print(f"Database error while fetching ALC codes: {str(e)}")
+            self.safe_update_message(f"Database error: {str(e)}", "red")
+            return []
+        except Exception as e:
+            print(f"Error fetching ALC codes: {str(e)}")
+            self.safe_update_message(f"Error: {str(e)}", "red")
+            return []
+    
+    def show_alc_code_selection(self):
+        """Show dialog to select an ALC code from the database"""
+        try:
+            # Get available ALC codes
+            alc_codes = self.get_available_alc_codes()
+            
+            if not alc_codes:
+                messagebox.showinfo("No Data", "No ALC codes found in database")
+                return
+                
+            # Create selection dialog
+            selection_window = tk.Toplevel(self.root)
+            selection_window.title("Select ALC Code")
+            selection_window.geometry("500x300")
+            selection_window.transient(self.root)  # Set as transient to main window
+            selection_window.grab_set()  # Modal behavior
+            
+            # Create listbox with scrollbar
+            frame = tk.Frame(selection_window)
+            frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Listbox header
+            header_frame = tk.Frame(frame)
+            header_frame.pack(fill="x")
+            
+            tk.Label(header_frame, text="ALC Code", width=15, font=("Arial", 10, "bold")).pack(side="left")
+            tk.Label(header_frame, text="Model", width=20, font=("Arial", 10, "bold")).pack(side="left")
+            tk.Label(header_frame, text="Part Number", width=15, font=("Arial", 10, "bold")).pack(side="left")
+            
+            # Listbox with scrollbar
+            list_frame = tk.Frame(frame)
+            list_frame.pack(fill="both", expand=True)
+            
+            scrollbar = tk.Scrollbar(list_frame)
+            scrollbar.pack(side="right", fill="y")
+            
+            listbox = tk.Listbox(list_frame, width=50, height=10, yscrollcommand=scrollbar.set)
+            listbox.pack(side="left", fill="both", expand=True)
+            
+            scrollbar.config(command=listbox.yview)
+            
+            # Populate the listbox
+            for i, item in enumerate(alc_codes):
+                display_text = f"{item['alc_code']} - {item['model_name']} - {item['part_number']}"
+                listbox.insert("end", display_text)
+                # Store the original data with the listbox item
+                listbox.itemconfig(i, {"bg": "#f0f0f0" if i % 2 == 0 else "#ffffff"})
+            
+            # Button frame
+            button_frame = tk.Frame(selection_window)
+            button_frame.pack(fill="x", padx=10, pady=10)
+            
+            # Cancel button
+            cancel_btn = tk.Button(
+                button_frame, 
+                text="Cancel", 
+                command=selection_window.destroy,
+                width=10
+            )
+            cancel_btn.pack(side="right", padx=5)
+            
+            # Select button
+            def on_select():
+                selection = listbox.curselection()
+                if selection:
+                    index = selection[0]
+                    selected_item = alc_codes[index]
+                    
+                    # Set the ALC code in the entry field
+                    self.alc_entry.delete(0, tk.END)
+                    self.alc_entry.insert(0, selected_item['alc_code'])
+                    
+                    # Process the ALC code
+                    self.process_alc_code()
+                    
+                    selection_window.destroy()
+            
+            select_btn = tk.Button(
+                button_frame, 
+                text="Select", 
+                command=on_select,
+                bg="#4CAF50",
+                fg="white",
+                width=10
+            )
+            select_btn.pack(side="right", padx=5)
+            
+            # Double-click to select
+            listbox.bind("<Double-1>", lambda e: on_select())
+            
+            # Set focus
+            listbox.focus_set()
+            
+            # Center the window
+            selection_window.update_idletasks()
+            width = selection_window.winfo_width()
+            height = selection_window.winfo_height()
+            x = (self.root.winfo_width() // 2) - (width // 2)
+            y = (self.root.winfo_height() // 2) - (height // 2)
+            selection_window.geometry(f"+{x}+{y}")
+            
+        except Exception as e:
+            print(f"Error showing ALC code selection: {str(e)}")
+            messagebox.showerror("Error", f"Could not show ALC code selection: {str(e)}")
+            
+    def get_lot_history(self, limit=50):
+        """Get lot test result history from database"""
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="12345",
+                database="EOL"
+            )
+            
+            cursor = conn.cursor()
+            
+            # Get current part number if available
+            part_number = getattr(self, 'current_part_number', '')
+            
+            if part_number:
+                # If part number is available, filter by it
+                query = """
+                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_DATE
+                FROM TBL_TEST_RESULTS
+                WHERE PART_NUMBER = %s
+                ORDER BY CREATED_DATE DESC
+                LIMIT %s
+                """
+                cursor.execute(query, (part_number, limit))
+            else:
+                # Otherwise get the most recent results
+                query = """
+                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_DATE
+                FROM TBL_TEST_RESULTS
+                ORDER BY CREATED_DATE DESC
+                LIMIT %s
+                """
+                cursor.execute(query, (limit,))
+            
+            # Get results
+            results = cursor.fetchall()
+            
+            # Close connection
+            cursor.close()
+            conn.close()
+            
+            return results
+            
+        except mysql.connector.Error as e:
+            print(f"Database error in get_lot_history: {str(e)}")
+            return []
+        except Exception as e:
+            print(f"Error in get_lot_history: {str(e)}")
+            return []
+
+    def load_history_to_treeview(self):
+        """Load lot history from database to treeview"""
+        try:
+            # Get lot history
+            history = self.get_lot_history()
+            
+            if not history:
+                self.safe_update_message("No history found", "blue")
+                return
+                
+            # Clear treeview
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            
+            # Count records for reporting
+            total_records = len(history)
+            displayed_records = 0
+                
+            # Add history items to treeview
+            for item in history:
+                # Create a dictionary to map column names to values
+                values_dict = {}
+                values_dict["LOT NUMBER"] = item[0] if len(item) > 0 else ""
+                
+                # Track if this record has any device values with results
+                has_device_values = False
+                all_devices_pass = True
+                
+                # Map database columns to treeview columns
+                db_columns = ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4", "RESULT", "SCAN RESULT"]
+                for i, col in enumerate(db_columns, 1):
+                    if i < len(item):
+                        db_value = item[i]
+                        if db_value and db_value != "N/A":
+                            has_device_values = True
+                            
+                            # For device columns (L1-P4), determine PASS/NG based on values
+                            if i <= 8:  # Only the device columns (L1-P4)
+                                try:
+                                    # Try to convert the value to float for comparison
+                                    # This is a simplified check - in a real implementation,
+                                    # you'd need to load the min/max specs for this part number
+                                    # Here we're just checking if the value exists
+                                    float(db_value)
+                                    # If we can parse it as a float, consider it PASS
+                                    values_dict[col] = "PASS"
+                                except (ValueError, TypeError):
+                                    # If it's not a numeric value, check if it's a result value
+                                    if db_value == "PASS":
+                                        values_dict[col] = "PASS"
+                                    elif db_value == "NG" or db_value == "FAIL":
+                                        values_dict[col] = "NG"
+                                        all_devices_pass = False
+                                    else:
+                                        # For any other value, just use it directly
+                                        values_dict[col] = db_value
+                            else:
+                                # For non-device columns, use the value directly
+                                values_dict[col] = db_value or "N/A"
+                        else:
+                            values_dict[col] = "N/A"
+                
+                # Only display records that have overall PASS or all existing device columns show PASS
+                if has_device_values and (item[9] == "PASS" or all_devices_pass):
+                    # Create values list in the same order as self.current_columns
+                    values = []
+                    for col in self.current_columns:
+                        values.append(values_dict.get(col, "N/A"))
+                    
+                    # Insert the record into the tree
+                    self.tree.insert("", "end", text=values[0], values=tuple(values))
+                    displayed_records += 1
+                
+            # Display message about records
+            if displayed_records > 0:
+                self.safe_update_message(f"Loaded {displayed_records} PASS records (filtered from {total_records} total records)", "green")
+            else:
+                self.safe_update_message(f"No PASS records found (filtered from {total_records} total records)", "blue")
+            
+        except Exception as e:
+            print(f"Error loading history: {str(e)}")
+            traceback.print_exc()
+            self.safe_update_message(f"Error loading history: {str(e)}", "red")
+
+    def read_hold_registers(self, start_index, num_registers=4):
+        """Read a range of hold registers from the PLC and return values in order"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                print("PLC not connected")
+                return None
+                
+            # Read hold register addresses from file
+            txt_files_dir = os.path.join(os.path.dirname(__file__), 'txt_files')
+            hold_registers_file = os.path.join(txt_files_dir, 'HoldRegistersRead.txt')
+            
+            if not os.path.exists(hold_registers_file):
+                print(f"Hold registers file not found: {hold_registers_file}")
+                return None
+                
+            with open(hold_registers_file, 'r') as f:
+                register_line = f.readline().strip()
+                register_addresses = [addr.strip() for addr in register_line.split(',')]
+                
+            if not register_addresses:
+                print("No register addresses found in HoldRegistersRead.txt")
+                return None
+                
+            # Check if we have enough addresses
+            if start_index >= len(register_addresses):
+                print(f"Start index {start_index} is out of range. Only have {len(register_addresses)} addresses.")
+                return None
+                
+            # Adjust num_registers if needed
+            if start_index + num_registers > len(register_addresses):
+                print(f"Not enough register addresses. Requested indices {start_index} to {start_index+num_registers-1}, but only have {len(register_addresses)} addresses.")
+                num_registers = len(register_addresses) - start_index
+                
+            if num_registers <= 0:
+                return None
+                
+            # Get the requested addresses
+            requested_addresses = register_addresses[start_index:start_index+num_registers]
+            print(f"Reading hold registers: {requested_addresses}")
+            
+            # Read each register
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            results = {}
+            
+            for addr_str in requested_addresses:
+                try:
+                    # Extract register number from address string
+                    if addr_str.startswith('D'):
+                        reg_num = int(addr_str[1:])
+                    else:
+                        reg_num = int(addr_str)
+                        
+                    print(f"Reading register {addr_str} (number {reg_num})")
+                        
+                    # Read register value
+                    response = self.plc_client.read_holding_registers(
+                        address=reg_num,
+                        count=1,
+                        slave=station_id
+                    )
+                    
+                    if not response.isError():
+                        value = response.registers[0]
+                        results[addr_str] = value
+                        print(f"Register {addr_str} = {value}")
+                    else:
+                        print(f"Error reading register {addr_str}: {response}")
+                        results[addr_str] = None
+                except Exception as e:
+                    print(f"Error reading register {addr_str}: {str(e)}")
+                    results[addr_str] = None
+                    
+            return results
+                
+        except Exception as e:
+            print(f"Error reading hold registers: {e}")
+            traceback.print_exc()
+            return None
+
+    def update_spec_tree_with_register_values(self, register_values, device_prefix):
+        """Update specification tree with values from registers"""
+        if not register_values or not hasattr(self, 'spec_tree'):
+            return
+            
+        # Get a list of register keys in order
+        reg_keys = list(register_values.keys())
+        if len(reg_keys) == 0:
+            return
+            
+        # Create device names to look for in the spec tree (L1, L2, L3, L4 or P1, P2, P3, P4)
+        devices = []
+        for i in range(1, min(len(reg_keys) + 1, 5)):
+            devices.append(f"{device_prefix}{i}")
+            
+        print(f"Updating spec tree for devices: {devices}")
+        
+        # Configure color tags if not already done
+        if not hasattr(self, 'spec_color_tags_configured'):
+            style = ttk.Style()
+            self.spec_tree.tag_configure('pass', background='#90EE90')  # Light green for PASS
+            self.spec_tree.tag_configure('ng', background='#FFCCCB')    # Light red for NG
+            self.spec_tree.tag_configure('neutral', background='#FFFFFF')  # White for neutral
+            self.spec_tree.tag_configure('value', background='#ADD8E6')  # Light blue for values
+            
+            # Store that we've configured the tags
+            self.spec_color_tags_configured = True
+        
+        # Keep track of which devices were updated
+        updated_devices = set()
+        
+        # Update each device in the specification tree
+        for item in self.spec_tree.get_children():
+            values = list(self.spec_tree.item(item, "values"))
+            
+            # Check the Device column (index 1)
+            if len(values) > 1:
+                device = values[1]
+                
+                # If this is one of our target devices (L1-L4 or P1-P4)
+                if device in devices:
+                    # Get device index (0-3)
+                    device_index = int(device[1:]) - 1
+                    
+                    # If we have a register value for this index
+                    if device_index < len(reg_keys):
+                        reg_key = reg_keys[device_index]
+                        reg_value = register_values[reg_key]
+                        
+                        if reg_value is not None:
+                            # Store original values to compare for changes
+                            old_values = values.copy()
+                            
+                            # Update the Actual column (second to last column)
+                            values[-2] = f"{reg_value}"
+                            
+                            # Get min/max from columns 3 and 4
+                            min_val = values[3] if len(values) > 3 and values[3] != "N/A" else None
+                            max_val = values[4] if len(values) > 4 and values[4] != "N/A" else None
+                            
+                            # Default to no specific tag
+                            result_tag = 'neutral'
+                            
+                            try:
+                                # Convert to float for comparison
+                                reg_float = float(reg_value)
+                                min_float = float(min_val) if min_val else None
+                                max_float = float(max_val) if max_val else None
+                                
+                                # Determine PASS/NG based on min/max comparison
+                                if (min_float is None or reg_float >= min_float) and \
+                                   (max_float is None or reg_float <= max_float):
+                                    values[-1] = "PASS"
+                                    result_tag = 'pass'
+                                else:
+                                    values[-1] = "NG"
+                                    result_tag = 'ng'
+                            except (ValueError, TypeError):
+                                # If conversion fails, leave result unchanged
+                                print(f"Error converting values for comparison: {reg_value}, {min_val}, {max_val}")
+                            
+                            # Update the tree item with new values
+                            self.spec_tree.item(item, values=values)
+                            
+                            # Apply tag to color the row according to result
+                            self.spec_tree.item(item, tags=(result_tag,))
+                            
+                            # If values changed, apply a visual highlight
+                            if values != old_values:
+                                # Flash the row briefly to highlight the change
+                                self.flash_spec_row(item, result_tag)
+                            
+                            updated_devices.add(device)
+                            print(f"Updated {device} with value {reg_value} from register {reg_key}, result={values[-1]}")
+                            
+        # Report any devices that weren't found
+        for device in devices:
+            if device not in updated_devices:
+                print(f"Warning: Device {device} not found in specification tree")
+                
+    def flash_spec_row(self, item, final_tag):
+        """Briefly flash a row to highlight it was updated"""
+        # Store original tag
+        original_tag = final_tag
+        
+        # Flash sequence: highlight → original → highlight → original
+        def flash_sequence(count=0):
+            if count >= 4:  # End after 4 changes
+                self.spec_tree.item(item, tags=(original_tag,))
+                return
+                
+            # Toggle between highlight and original
+            if count % 2 == 0:
+                self.spec_tree.item(item, tags=('value',))  # Highlight with blue
+            else:
+                self.spec_tree.item(item, tags=(original_tag,))  # Back to original
+                
+            # Schedule next flash
+            self.root.after(250, lambda: flash_sequence(count + 1))
+            
+        # Start the flash sequence
+        flash_sequence()
+
+    def get_actual_value(self, device_name):
+        """Get the actual value for a specific device from the spec tree"""
+        if not hasattr(self, 'spec_tree') or not self.spec_tree:
+            return None
+            
+        # Loop through all rows in the spec tree
+        for item in self.spec_tree.get_children():
+            values = self.spec_tree.item(item, "values")
+            # Check if the device column matches the requested device
+            if len(values) > 1 and values[1] == device_name:
+                # Return the actual column value (second to last column)
+                return values[-2] if len(values) > 2 else None
+                
+        return None
 
 def main():
     try:
