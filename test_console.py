@@ -32,6 +32,69 @@ class EOLTesterGUI:
         
         # Continue with the rest of your initialization...
 
+    def check_serial_module(self):
+        """Check if PySerial is properly installed and functioning"""
+        try:
+            import serial
+            import serial.tools.list_ports
+            print(f"PySerial version: {serial.VERSION}")
+            return True
+        except ImportError as e:
+            print(f"PySerial not properly installed: {e}")
+            print("Please install PySerial with: pip install pyserial")
+            messagebox.showerror("Error", "PySerial module not properly installed. Please install it with: pip install pyserial")
+            return False
+        except Exception as e:
+            print(f"Error checking PySerial: {e}")
+            return False
+            
+    def get_available_ports(self):
+        """Get a list of available serial ports on the current platform"""
+        if not self.check_serial_module():
+            return []
+            
+        try:
+            available_ports = []
+            # Use serial.tools.list_ports to get available ports
+            import serial.tools.list_ports
+            ports = list(serial.tools.list_ports.comports())
+            for port in ports:
+                available_ports.append(port.device)
+            
+            if not available_ports:
+                print("No serial ports found")
+                return []
+                
+            print(f"Available ports: {available_ports}")
+            return available_ports
+        except Exception as e:
+            print(f"Error getting available ports: {e}")
+            return []
+
+    def ensure_env_file_exists(self):
+        """Ensure that the .env file exists and create it if it doesn't"""
+        env_file = '.env'
+        if not os.path.exists(env_file):
+            print(f"Creating new {env_file} file")
+            
+            # Get available ports
+            available_ports = self.get_available_ports()
+            default_port = available_ports[0] if available_ports else ""
+            
+            with open(env_file, 'w') as f:
+                f.write('# PLC Connection Settings\n')
+                f.write(f'PLC_COM_PORT={default_port}\n')
+                f.write('PLC_BAUD_RATE=38400\n')
+                f.write('PLC_STATION_ID=1\n')
+                f.write('# Loadcell Settings\n')
+                f.write('LOADCELL_01_COM_PORT=\n')
+                f.write('LOADCELL_01_BAUD_RATE=\n')
+                f.write('LOADCELL_02_COM_PORT=\n')
+                f.write('LOADCELL_02_BAUD_RATE=\n')
+                f.write('# Machine Settings\n')
+                f.write('MACHINE_ID=\n')
+        return env_file
+
     def initialize_variables(self):
         """Initialize all variables before window setup and ensure clean COM ports"""
         # Initialize UI-related variables
@@ -51,6 +114,10 @@ class EOLTesterGUI:
         self.plc_client = None
         self.loadcell1_client = None
         self.loadcell2_client = None
+        
+        # Ensure .env file exists and load environment variables
+        env_file = self.ensure_env_file_exists()
+        load_dotenv(dotenv_path=env_file, override=True)
         
         # Attempt to force-clean COM ports at startup
         try:
@@ -107,9 +174,12 @@ class EOLTesterGUI:
         self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
         self.message_label.pack(fill="x", pady=2)
         
-        # Load data and connect to devices
+        # Ensure .env file exists and load environment variables
+        env_file = self.ensure_env_file_exists()
+        load_dotenv(dotenv_path=env_file, override=True)
+        
+        # Load data after environment variables are loaded
         self.load_configuration_data()
-        load_dotenv()
         
         # Set up GUI components before connecting to devices
         self.setup_gui()
@@ -1457,15 +1527,26 @@ class EOLTesterGUI:
                 self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
                 self.message_label.pack(fill="x", pady=2)
                 
+            # Check if PySerial is properly installed
+            if not self.check_serial_module():
+                self.safe_update_message("PySerial module not properly installed. Please install it with: pip install pyserial", "red")
+                return
+                
             # Initialize clients as None first
             self.plc_client = None
             self.loadcell1_client = None
             self.loadcell2_client = None
             
+            # Ensure .env file exists and load environment variables
+            env_file = self.ensure_env_file_exists()
+            load_dotenv(dotenv_path=env_file, override=True)
+            
             # Connect to PLC
             plc_port = os.getenv('PLC_COM_PORT')
             plc_baud = os.getenv('PLC_BAUD_RATE')
             plc_station_id = os.getenv('PLC_STATION_ID')
+            
+            print(f"PLC connection settings from env: Port={plc_port}, Baud={plc_baud}, ID={plc_station_id}")
             
             if all([plc_port, plc_baud, plc_station_id]):
                 # Check if port is available before attempting connection
@@ -1641,12 +1722,18 @@ class EOLTesterGUI:
 
     def is_port_available(self, port):
         """Check if a COM port is available for connection"""
+        if not port:
+            print("No port specified")
+            return False
+            
         try:
             # Try to open the port
             ser = serial.Serial(port)
             ser.close()
+            print(f"Port {port} is available")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Port {port} is not available: {e}")
             return False
 
     def reconnect_plc(self):
@@ -1674,10 +1761,16 @@ class EOLTesterGUI:
             # Allow time for COM port to release
             time.sleep(1)
             
+            # Ensure .env file exists and load environment variables
+            env_file = self.ensure_env_file_exists()
+            load_dotenv(dotenv_path=env_file, override=True)
+            
             # Get configuration from environment
             plc_port = os.getenv('PLC_COM_PORT')
             plc_baud = os.getenv('PLC_BAUD_RATE')
             plc_station_id = os.getenv('PLC_STATION_ID')
+            
+            print(f"PLC reconnection settings from env: Port={plc_port}, Baud={plc_baud}, ID={plc_station_id}")
             
             if not all([plc_port, plc_baud, plc_station_id]):
                 print("Missing PLC configuration in environment variables")
@@ -1861,14 +1954,38 @@ class EOLTesterGUI:
         try:
             # Get PLC COM port from environment
             plc_port = os.getenv('PLC_COM_PORT')
-            if plc_port:
+            if not plc_port:
+                print("No PLC port configured in environment variables")
+                return
+                
+            try:
+                # Try to open and immediately close the port to force release
+                test_serial = serial.Serial(plc_port)
+                test_serial.close()
+                print(f"Successfully force-closed {plc_port}")
+            except AttributeError:
+                print(f"Serial module issue: Make sure pyserial is installed properly")
+            except Exception as e:
+                print(f"Could not force-close {plc_port}: {e}")
+                
+            # Also check if any loadcell ports need to be closed
+            loadcell1_port = os.getenv('LOADCELL_01_COM_PORT')
+            if loadcell1_port:
                 try:
-                    # Try to open and immediately close the port to force release
-                    test_serial = serial.Serial(plc_port)
+                    test_serial = serial.Serial(loadcell1_port)
                     test_serial.close()
-                    print(f"Successfully force-closed {plc_port}")
+                    print(f"Successfully force-closed {loadcell1_port}")
                 except Exception as e:
-                    print(f"Could not force-close {plc_port}: {e}")
+                    print(f"Could not force-close {loadcell1_port}: {e}")
+                    
+            loadcell2_port = os.getenv('LOADCELL_02_COM_PORT')
+            if loadcell2_port:
+                try:
+                    test_serial = serial.Serial(loadcell2_port)
+                    test_serial.close()
+                    print(f"Successfully force-closed {loadcell2_port}")
+                except Exception as e:
+                    print(f"Could not force-close {loadcell2_port}: {e}")
         except Exception as e:
             print(f"Error force-closing COM ports: {e}")
 
@@ -2533,9 +2650,24 @@ class EOLTesterGUI:
     def test_plc_communication(self):
         """Test PLC communication by toggling P0000 input address"""
         try:
+            # Reload environment variables to ensure we have the latest settings
+            env_file = self.ensure_env_file_exists()
+            load_dotenv(dotenv_path=env_file, override=True)
+            
+            # Display current PLC settings
+            plc_port = os.getenv('PLC_COM_PORT')
+            plc_baud = os.getenv('PLC_BAUD_RATE')
+            plc_station_id = os.getenv('PLC_STATION_ID')
+            
+            print(f"Current PLC settings: Port={plc_port}, Baud={plc_baud}, ID={plc_station_id}")
+            
             if not self.plc_client or not self.plc_client.is_socket_open():
-                messagebox.showerror("Error", "PLC not connected. Please check COM port settings.")
-                return
+                # Try to reconnect before showing error
+                if self.reconnect_plc():
+                    print("Successfully reconnected to PLC")
+                else:
+                    messagebox.showerror("Error", "PLC not connected. Please check COM port settings.")
+                    return
 
             # Get the station ID from environment variable
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
