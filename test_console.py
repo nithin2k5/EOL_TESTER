@@ -95,6 +95,34 @@ class EOLTesterGUI:
                 f.write('MACHINE_ID=\n')
         return env_file
 
+    def reload_env_settings(self):
+        """Force reload environment settings from .env file"""
+        try:
+            env_file = '.env'
+            if os.path.exists(env_file):
+                # Clear existing environment variables
+                for key in ['PLC_COM_PORT', 'PLC_BAUD_RATE', 'PLC_STATION_ID']:
+                    if key in os.environ:
+                        del os.environ[key]
+                
+                # Force reload from file
+                load_dotenv(dotenv_path=env_file, override=True)
+                print("Environment variables reloaded from .env file")
+                
+                # Print current settings for debugging
+                plc_port = os.getenv('PLC_COM_PORT', '')
+                plc_baud = os.getenv('PLC_BAUD_RATE', '')
+                plc_station_id = os.getenv('PLC_STATION_ID', '')
+                print(f"Reloaded settings: Port={plc_port}, Baud={plc_baud}, Station ID={plc_station_id}")
+                
+                return True
+            else:
+                print("No .env file found to reload")
+                return False
+        except Exception as e:
+            print(f"Error reloading environment settings: {str(e)}")
+            return False
+
     def initialize_variables(self):
         """Initialize all variables before window setup and ensure clean COM ports"""
         # Initialize UI-related variables
@@ -171,7 +199,7 @@ class EOLTesterGUI:
         self.main_container.pack(fill="both", expand=True)
 
         # Add message label for status updates
-        self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
+        self.message_label = tk.Label(self.main_container, text="Initializing...", font=("Arial", 10))
         self.message_label.pack(fill="x", pady=2)
         
         # Ensure .env file exists and load environment variables
@@ -188,9 +216,15 @@ class EOLTesterGUI:
         # Connect to devices after GUI is set up
         self.connect_to_devices()
         
-        # Start monitoring
-        self.monitor_p0000_state()
-        self.start_check_async()
+        # Start monitoring only if PLC is connected
+        if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+            self.monitor_p0000_state()
+            self.start_check_async()
+            print("Started monitoring - PLC is connected")
+        else:
+            print("Monitoring not started - PLC is not connected")
+            # Start monitoring anyway to show disconnected state
+            self.monitor_p0000_state()
         
         # Ensure window stays on top during initialization
         self.root.after(500, lambda: self.root.attributes('-topmost', False))
@@ -228,19 +262,33 @@ class EOLTesterGUI:
         )
         logo_label.pack(side="left", padx=10)
         
-        # Add Test PLC Button (left side, after logo)
-        self.test_plc_button = tk.Button(
+        # Add PLC Control Button (left side, after logo)
+        self.plc_control_button = tk.Button(
             title_frame,
-            text="P0000: LOW",  # Initial state
+            text="SET HIGH",  # Initial state
             bg="#4CAF50",  # Green background
             fg="white",
             font=("Arial", 10, "bold"),
             relief="raised",
-            command=self.test_plc_communication,
+            command=self.toggle_plc_state,
             width=12,
             height=1
         )
-        self.test_plc_button.pack(side="left", padx=10)
+        self.plc_control_button.pack(side="left", padx=5)
+        
+        # Add Reconnect PLC Button
+        self.reconnect_button = tk.Button(
+            title_frame,
+            text="RECONNECT",
+            bg="#FF9800",  # Orange background
+            fg="white",
+            font=("Arial", 9, "bold"),
+            relief="raised",
+            command=self.manual_reconnect_plc,
+            width=10,
+            height=1
+        )
+        self.reconnect_button.pack(side="left", padx=5)
         
         # Add status indicator
         self.status_label = tk.Label(
@@ -271,9 +319,65 @@ class EOLTesterGUI:
         )
         machine_label.pack(side="right", padx=20)
 
-        # Add hover effect for the test button
-        self.test_plc_button.bind('<Enter>', lambda e: self.test_plc_button.config(bg="#45a049"))
-        self.test_plc_button.bind('<Leave>', lambda e: self.test_plc_button.config(bg="#4CAF50"))
+        # Add hover effects for buttons
+        def plc_button_enter(e):
+            current_bg = self.plc_control_button.cget('bg')
+            if current_bg == "#4CAF50":  # Green (LOW state)
+                self.plc_control_button.config(bg="#45a049")
+            elif current_bg == "#FF5722":  # Red (HIGH state)
+                self.plc_control_button.config(bg="#E64A19")
+            
+        def plc_button_leave(e):
+            # Only reset if PLC is connected, otherwise let monitor update it
+            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+                try:
+                    # Don't change color on leave, let the monitor handle it
+                    pass
+                except:
+                    pass
+        
+        self.plc_control_button.bind('<Enter>', plc_button_enter)
+        self.plc_control_button.bind('<Leave>', plc_button_leave)
+        
+        self.reconnect_button.bind('<Enter>', lambda e: self.reconnect_button.config(bg="#F57C00"))
+        self.reconnect_button.bind('<Leave>', lambda e: self.reconnect_button.config(bg="#FF9800"))
+
+    def manual_reconnect_plc(self):
+        """Manual PLC reconnection triggered by user"""
+        try:
+            self.safe_update_message("Reloading settings and reconnecting to PLC...", "blue")
+            self.reconnect_button.config(bg="#FFC107", text="CONNECTING...")
+            self.root.update()  # Force UI update
+            
+            # Force reload environment settings first
+            reload_success = self.reload_env_settings()
+            if not reload_success:
+                self.safe_update_message("Failed to reload settings", "red")
+                self.reconnect_button.config(bg="#F44336", text="FAILED")
+                self.root.after(2000, lambda: self.reconnect_button.config(bg="#FF9800", text="RECONNECT"))
+                messagebox.showerror("Error", "Failed to reload settings from .env file")
+                return
+            
+            # Attempt reconnection with fresh settings
+            success = self.auto_connect_plc()
+            
+            if success:
+                self.safe_update_message("PLC reconnected successfully with saved settings", "green")
+                self.reconnect_button.config(bg="#4CAF50", text="CONNECTED")
+                self.root.after(2000, lambda: self.reconnect_button.config(bg="#FF9800", text="RECONNECT"))
+                messagebox.showinfo("Success", "PLC reconnected successfully with saved settings!")
+            else:
+                self.safe_update_message("PLC reconnection failed", "red") 
+                self.reconnect_button.config(bg="#F44336", text="FAILED")
+                self.root.after(2000, lambda: self.reconnect_button.config(bg="#FF9800", text="RECONNECT"))
+                messagebox.showerror("Error", "Failed to reconnect to PLC. Please check COM port settings.")
+                
+        except Exception as e:
+            print(f"Error in manual reconnect: {str(e)}")
+            self.safe_update_message(f"Reconnection error: {str(e)}", "red")
+            self.reconnect_button.config(bg="#F44336", text="ERROR")
+            self.root.after(2000, lambda: self.reconnect_button.config(bg="#FF9800", text="RECONNECT"))
+            messagebox.showerror("Error", f"Reconnection failed: {str(e)}")
 
     def create_quadrants(self):
         """Update the create_quadrants method to remove borders"""
@@ -1172,6 +1276,24 @@ class EOLTesterGUI:
             self.barcode_data = ""
             return
             
+        # If we have ALC code and employee code, treat this as a LOT number
+        elif (hasattr(self, 'current_part_number') and self.current_part_number and 
+              self.emp_entry.get() and self.emp_entry.get() != "EMP CODE" and
+              self.alc_entry.get() and self.alc_entry.get() != "ALC CODE"):
+            # Store as current lot number
+            self.current_lot_number = barcode
+            # Display in camera textbox
+            if hasattr(self, 'cam_textbox'):
+                self.cam_textbox.delete("1.0", tk.END)
+                self.cam_textbox.insert("1.0", f"LOT NUMBER: {barcode}\nReady for testing...")
+            
+            self.safe_update_message(f"LOT {barcode} scanned - Ready for testing", "green")
+            print(f"LOT number {barcode} stored")
+            
+            # Reset barcode data after processing
+            self.barcode_data = ""
+            return
+            
         # Reset barcode data if not used
         self.barcode_data = ""
 
@@ -1541,128 +1663,162 @@ class EOLTesterGUI:
             env_file = self.ensure_env_file_exists()
             load_dotenv(dotenv_path=env_file, override=True)
             
-            # Connect to PLC
-            plc_port = os.getenv('PLC_COM_PORT')
-            plc_baud = os.getenv('PLC_BAUD_RATE')
-            plc_station_id = os.getenv('PLC_STATION_ID')
+            self.safe_update_message("Connecting to devices...", "blue")
             
-            print(f"PLC connection settings from env: Port={plc_port}, Baud={plc_baud}, ID={plc_station_id}")
+            # Connect to PLC automatically
+            success = self.auto_connect_plc()
             
-            if all([plc_port, plc_baud, plc_station_id]):
-                # Check if port is available before attempting connection
-                if not self.is_port_available(plc_port):
-                    print(f"Port {plc_port} is busy or not available. Attempting to force release.")
-                    self.force_close_com_ports()
-                    # Wait for port to release
-                    time.sleep(1)
-                    
-                    # Check again
-                    if not self.is_port_available(plc_port):
-                        print(f"Port {plc_port} still not available after force release.")
-                        # Update message label instead of showing a messagebox
-                        self.safe_update_message(
-                            f"PLC port {plc_port} is busy. Please close other applications using this port.",
-                            "red"
-                        )
-                        return
-                
-                try:
-                    # Create new PLC client with fresh connection
-                    self.plc_client = ModbusSerialClient(
-                        port=plc_port,
-                        baudrate=int(plc_baud),
-                        timeout=1,
-                        stopbits=1,
-                        bytesize=8,
-                        parity='N'
-                    )
-                    
-                    # Attempt to connect with retries
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            # Ensure port is closed before trying to open it
-                            if self.plc_client.is_socket_open():
-                                self.plc_client.close()
-                                
-                            # Allow port to release
-                            time.sleep(0.5)
-                            
-                            if self.plc_client.connect():
-                                # Test connection by reading a coil
-                                test_response = self.plc_client.read_coils(
-                                    address=0,
-                                    count=1,
-                                    slave=int(plc_station_id)
-                                )
-                                
-                                if not test_response.isError():
-                                    print(f"Successfully connected to PLC on {plc_port}")
-                                    # Update message label with success
-                                    self.safe_update_message(
-                                        f"Connected to PLC on {plc_port}. Enter ALC code to start monitoring.",
-                                        "green"
-                                    )
-                                    
-                                    # REMOVED: Do not start monitoring process status values immediately
-                                    # We will start it after ALC code is entered
-                                    # self.start_status_monitoring()
-                                    
-                                    break
-                                else:
-                                    # Close connection if test was unsuccessful
-                                    self.plc_client.close()
-                                    print(f"PLC test failed on attempt {attempt + 1}")
-                            else:
-                                print(f"Failed to connect to PLC on attempt {attempt + 1}")
-                        except Exception as e:
-                            print(f"Attempt {attempt + 1} failed: {e}")
-                            # Close connection if there was an error
-                            try:
-                                if self.plc_client and self.plc_client.is_socket_open():
-                                    self.plc_client.close()
-                            except:
-                                pass
-                                
-                            if attempt < max_retries - 1:
-                                time.sleep(1)  # Wait before retrying
-                            else:
-                                print("Failed to establish PLC connection after multiple attempts")
-                                self.plc_client = None
-                    
-                    # Final check if connection was successful
-                    if not self.plc_client or not self.plc_client.is_socket_open():
-                        print("PLC connection failed after all retries")
-                        self.plc_client = None
-                        # Update message label instead of showing a messagebox
-                        self.safe_update_message(
-                            "Failed to connect to PLC after multiple attempts. Check COM port settings.",
-                            "red"
-                        )
-                    
-                except Exception as e:
-                    print(f"PLC connection error: {e}")
-                    # Update message label instead of showing a messagebox
-                    self.safe_update_message(
-                        f"PLC connection error: {str(e)}",
-                        "red"
-                    )
-                    self.plc_client = None
+            if success:
+                self.safe_update_message("PLC connected successfully. Ready for operation.", "green")
+                # Update status indicator
+                if hasattr(self, 'status_label'):
+                    self.status_label.config(fg="green")
             else:
-                print("Missing PLC configuration in environment variables")
-                # Update message label instead of showing a messagebox
-                self.safe_update_message(
-                    "Missing PLC configuration in environment variables. Check COM port settings.",
-                    "red"
-                )
-
-            # Connect to Loadcell 1 (continue with remaining implementation)
+                self.safe_update_message("PLC connection failed. Check COM port settings.", "red")
+                if hasattr(self, 'status_label'):
+                    self.status_label.config(fg="red")
             
         except Exception as e:
             print(f"Error connecting to devices: {str(e)}")
-            # Use our safe method to update the message
             self.safe_update_message(f"Error connecting to devices: {str(e)}", "red")
+
+    def auto_connect_plc(self):
+        """Automatically connect to PLC using saved settings from .env file"""
+        try:
+            # Get PLC settings from environment variables
+            plc_port = os.getenv('PLC_COM_PORT', '').strip()
+            plc_baud = os.getenv('PLC_BAUD_RATE', '').strip()
+            plc_station_id = os.getenv('PLC_STATION_ID', '').strip()
             
+            print(f"Auto-connecting to PLC with settings: Port={plc_port}, Baud={plc_baud}, Station ID={plc_station_id}")
+            
+            # Validate that we have all required settings
+            if not all([plc_port, plc_baud, plc_station_id]):
+                print("Missing PLC configuration in .env file")
+                missing_items = []
+                if not plc_port: missing_items.append("PLC_COM_PORT")
+                if not plc_baud: missing_items.append("PLC_BAUD_RATE")
+                if not plc_station_id: missing_items.append("PLC_STATION_ID")
+                
+                self.safe_update_message(f"Missing PLC config: {', '.join(missing_items)}. Please configure in COM Port Settings.", "orange")
+                return False
+            
+            # Validate station ID is numeric
+            try:
+                station_id = int(plc_station_id)
+                baud_rate = int(plc_baud)
+            except ValueError:
+                print(f"Invalid PLC configuration: Station ID or Baud Rate not numeric")
+                self.safe_update_message("Invalid PLC configuration: Station ID or Baud Rate must be numeric", "red")
+                return False
+            
+            # Check if port is available
+            available_ports = self.get_available_ports()
+            if plc_port not in available_ports:
+                print(f"PLC port {plc_port} not available. Available ports: {available_ports}")
+                self.safe_update_message(f"PLC port {plc_port} not available. Check COM port settings.", "red")
+                return False
+            
+            # Close any existing connection
+            if self.plc_client:
+                try:
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                        print("Closed existing PLC connection")
+                except:
+                    pass
+                self.plc_client = None
+            
+            # Create new PLC client
+            print(f"Creating ModbusSerialClient for port {plc_port} at {baud_rate} baud")
+            self.plc_client = ModbusSerialClient(
+                port=plc_port,
+                baudrate=baud_rate,
+                timeout=2,  # Increased timeout for reliability
+                stopbits=1,
+                bytesize=8,
+                parity='N'
+            )
+            
+            # Attempt connection with retries
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    print(f"PLC connection attempt {attempt + 1}/{max_retries}")
+                    
+                    # Ensure any previous connection is closed
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                        time.sleep(0.5)
+                    
+                    # Attempt to connect
+                    if self.plc_client.connect():
+                        print("PLC client connected, testing communication...")
+                        
+                        # Test communication by reading a coil
+                        test_response = self.plc_client.read_coils(
+                            address=0,
+                            count=1,
+                            slave=station_id
+                        )
+                        
+                        if not test_response.isError():
+                            print("PLC communication test successful")
+                            self.safe_update_message(f"Connected to PLC on {plc_port}", "green")
+                            
+                            # Update control button to show current P0000 state
+                            if hasattr(self, 'plc_control_button'):
+                                state = test_response.bits[0]
+                                if state:  # PLC is HIGH
+                                    self.plc_control_button.config(
+                                        text="SET LOW",
+                                        bg="#FF5722"  # Red for HIGH state
+                                    )
+                                else:  # PLC is LOW
+                                    self.plc_control_button.config(
+                                        text="SET HIGH",
+                                        bg="#4CAF50"  # Green for LOW state
+                                    )
+                            
+                            return True
+                        else:
+                            print(f"PLC communication test failed: {test_response}")
+                            if self.plc_client.is_socket_open():
+                                self.plc_client.close()
+                    else:
+                        print("Failed to establish PLC connection")
+                        
+                except Exception as e:
+                    print(f"Connection attempt {attempt + 1} failed: {str(e)}")
+                    try:
+                        if self.plc_client and self.plc_client.is_socket_open():
+                            self.plc_client.close()
+                    except:
+                        pass
+                
+                # Wait before retry (except on last attempt)
+                if attempt < max_retries - 1:
+                    print("Waiting before retry...")
+                    time.sleep(1)
+            
+            # All attempts failed
+            print("Failed to connect to PLC after all attempts")
+            self.plc_client = None
+            self.safe_update_message(f"Failed to connect to PLC on {plc_port} after {max_retries} attempts", "red")
+            return False
+            
+        except Exception as e:
+            print(f"Error in auto_connect_plc: {str(e)}")
+            self.safe_update_message(f"PLC connection error: {str(e)}", "red")
+            if self.plc_client:
+                try:
+                    if self.plc_client.is_socket_open():
+                        self.plc_client.close()
+                except:
+                    pass
+                self.plc_client = None
+            return False
+
     def start_status_monitoring(self):
         """Start periodic monitoring of PLC status registers and update the UI"""
         # Check if PLC client exists and is connected
@@ -1700,16 +1856,22 @@ class EOLTesterGUI:
         return True
 
     def update_status_from_plc(self):
-        """Periodic update of status from PLC"""
+        """Periodic update of status from PLC with process halting control"""
         try:
             # Only update if client is still connected
             if self.plc_client and self.plc_client.is_socket_open() and self.status_monitoring_active:
-                # Read all process status values
-                status_values = self.read_process_status_values()
+                # Check PLC control state first
+                plc_control_state = self.check_plc_control_state()
                 
-                # Update the labels with the values
-                if status_values:
-                    self.update_status_labels(status_values)
+                if plc_control_state is False:  # PLC is LOW - halt process
+                    self.halt_process()
+                elif plc_control_state is True:  # PLC is HIGH - allow process
+                    # Read all process status values
+                    status_values = self.read_process_status_values()
+                    
+                    # Update the labels with the values
+                    if status_values:
+                        self.update_status_labels(status_values)
                 
                 # Schedule next update (every 500ms)
                 self.root.after(500, self.update_status_from_plc)
@@ -1719,6 +1881,61 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error in status update loop: {e}")
             self.status_monitoring_active = False
+
+    def check_plc_control_state(self):
+        """Check the PLC control state (P0000) to determine if process should run"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                return None
+                
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            response = self.plc_client.read_coils(
+                address=0x0000,  # P0000 address
+                count=1,
+                slave=station_id
+            )
+            
+            if not response.isError():
+                return response.bits[0]  # True for HIGH, False for LOW
+            else:
+                print(f"Error reading PLC control state: {response}")
+                return None
+                
+        except Exception as e:
+            print(f"Error checking PLC control state: {e}")
+            return None
+
+    def halt_process(self):
+        """Halt the process when PLC control is LOW"""
+        try:
+            # Reset process status labels to default
+            self.reset_process_status_labels()
+            
+            # Clear specification tree results but keep the structure
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = list(self.spec_tree.item(item, "values"))
+                    if len(values) >= 7:
+                        values[-2] = ""  # Clear Actual column
+                        values[-1] = ""  # Clear Result column
+                        self.spec_tree.item(item, values=values, tags=('neutral',))
+            
+            # Reset any placed labels to default state
+            if hasattr(self, 'placed_labels'):
+                for label in self.placed_labels.values():
+                    label.configure(bg="yellow")  # Reset to default color
+            
+            # Stop all label blinking
+            self.stop_all_label_blinking()
+            
+            # Update status message
+            self.safe_update_message("Process halted - PLC control is LOW", "red")
+            
+            print("Process halted - waiting for PLC control to go HIGH")
+            
+        except Exception as e:
+            print(f"Error halting process: {e}")
 
     def is_port_available(self, port):
         """Check if a COM port is available for connection"""
@@ -1925,13 +2142,15 @@ class EOLTesterGUI:
                     # Double-ensure the socket is closed
                     if self.plc_client.is_socket_open():
                         self.plc_client.close()
+                        print("PLC connection closed")
                     
                     # Access the underlying serial object to ensure it's closed
                     if hasattr(self.plc_client, 'socket') and self.plc_client.socket:
                         if hasattr(self.plc_client.socket, 'close'):
                             self.plc_client.socket.close()
+                            print("PLC socket forcefully closed")
                     
-                    print("PLC connection forcefully closed")
+                    print("PLC connection cleanup completed")
                 except Exception as e:
                     print(f"Error closing PLC connection: {e}")
                 finally:
@@ -2566,12 +2785,23 @@ class EOLTesterGUI:
                 print("Starting process status monitoring after ALC code entry")
                 self.start_status_monitoring()
                 self.safe_update_message(
-                    f"Process monitoring started for Part: {self.current_part_number}",
+                    f"Process monitoring started for Part: {self.current_part_number} - Scan LOT number to begin",
                     "green"
                 )
             else:
-                print("Cannot start monitoring - PLC not connected")
-                self.safe_update_message("Cannot start monitoring - PLC not connected", "red")
+                print("PLC not connected - attempting to reconnect for monitoring")
+                # Try to reconnect before starting monitoring
+                success = self.auto_connect_plc()
+                if success:
+                    print("Successfully reconnected PLC - starting monitoring")
+                    self.start_status_monitoring()
+                    self.safe_update_message(
+                        f"PLC reconnected and monitoring started for Part: {self.current_part_number} - Scan LOT number to begin",
+                        "green"
+                    )
+                else:
+                    print("Cannot start monitoring - PLC connection failed")
+                    self.safe_update_message("Cannot start monitoring - PLC connection failed. Check COM port settings.", "red")
 
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
@@ -2647,26 +2877,15 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error monitoring sensors: {e}")
 
-    def test_plc_communication(self):
-        """Test PLC communication by toggling P0000 input address"""
+    def toggle_plc_state(self):
+        """Toggle PLC P0000 between HIGH and LOW"""
         try:
-            # Reload environment variables to ensure we have the latest settings
-            env_file = self.ensure_env_file_exists()
-            load_dotenv(dotenv_path=env_file, override=True)
-            
-            # Display current PLC settings
-            plc_port = os.getenv('PLC_COM_PORT')
-            plc_baud = os.getenv('PLC_BAUD_RATE')
-            plc_station_id = os.getenv('PLC_STATION_ID')
-            
-            print(f"Current PLC settings: Port={plc_port}, Baud={plc_baud}, ID={plc_station_id}")
-            
+            # Check if PLC is connected, if not try to reconnect
             if not self.plc_client or not self.plc_client.is_socket_open():
-                # Try to reconnect before showing error
-                if self.reconnect_plc():
-                    print("Successfully reconnected to PLC")
-                else:
-                    messagebox.showerror("Error", "PLC not connected. Please check COM port settings.")
+                print("PLC not connected, attempting to reconnect...")
+                success = self.auto_connect_plc()
+                if not success:
+                    messagebox.showerror("Error", "PLC not connected. Please check COM port settings and ensure configuration is saved.")
                     return
 
             # Get the station ID from environment variable
@@ -2674,7 +2893,7 @@ class EOLTesterGUI:
 
             # First read the current state of P0000
             read_response = self.plc_client.read_coils(
-                address=0x0000,  # Change to your desired address
+                address=0x0000,  # P0000 address
                 count=1,
                 slave=station_id
             )
@@ -2687,7 +2906,7 @@ class EOLTesterGUI:
 
             # Write the new state to P0000
             write_response = self.plc_client.write_coil(
-                address=0x0000,  # Change to your desired address
+                address=0x0000,  # P0000 address
                 value=new_state,
                 slave=station_id
             )
@@ -2695,59 +2914,58 @@ class EOLTesterGUI:
             if write_response.isError():
                 raise Exception(f"Failed to write to P0000: {write_response}")
 
-            # Read back to confirm the change
-            verify_response = self.plc_client.read_coils(
-                address=0x0000,
-                count=1,
-                slave=station_id
-            )
-
-            if verify_response.isError():
-                raise Exception(f"Failed to verify P0000 state: {verify_response}")
-
-            verified_state = verify_response.bits[0]
-
-            # Show success message with state change
-            messagebox.showinfo("Success", 
-                f"P0000 state changed successfully!\n"
-                f"Previous state: {'HIGH' if current_state else 'LOW'}\n"
-                f"Current state: {'HIGH' if verified_state else 'LOW'}"
-            )
-
-            # Update button text to show current state
-            self.test_plc_button.config(
-                text=f"P0000: {'HIGH' if verified_state else 'LOW'}"
-            )
+            # Update button text and color based on new state
+            if new_state:
+                self.plc_control_button.config(
+                    text="SET LOW",
+                    bg="#FF5722"  # Red for HIGH state (button shows opposite action)
+                )
+                status_msg = "PLC P0000 set to HIGH"
+            else:
+                self.plc_control_button.config(
+                    text="SET HIGH", 
+                    bg="#4CAF50"  # Green for LOW state (button shows opposite action)
+                )
+                status_msg = "PLC P0000 set to LOW"
 
             # Flash the button to indicate success
-            self.flash_button_success()
+            self.flash_plc_button_success()
+            
+            # Update status message
+            self.safe_update_message(status_msg, "green")
 
         except Exception as e:
-            messagebox.showerror("Communication Error", f"Failed to communicate with PLC:\n{str(e)}")
-            self.flash_button_failure()
+            print(f"PLC toggle failed: {str(e)}")
+            messagebox.showerror("PLC Error", f"Failed to toggle PLC state:\n{str(e)}")
+            self.flash_plc_button_failure()
+            self.safe_update_message(f"PLC toggle failed: {str(e)}", "red")
 
-    def flash_button_success(self):
-        """Visual feedback for successful communication"""
+    def flash_plc_button_success(self):
+        """Visual feedback for successful PLC operation"""
         def reset_colors():
-            self.test_plc_button.config(bg="#4CAF50")  # Reset button color
+            # Don't reset the button color as it should stay based on the PLC state
             self.status_label.config(fg="green")  # Keep status indicator green
         
-        self.test_plc_button.config(bg="#00FF00")  # Bright green for success
+        # Brief flash to indicate success
+        original_bg = self.plc_control_button.cget('bg')
+        self.plc_control_button.config(bg="#00FF00")  # Bright green flash for success
         self.status_label.config(fg="#00FF00")  # Bright green for status
+        self.root.after(200, lambda: self.plc_control_button.config(bg=original_bg))
         self.root.after(200, reset_colors)
 
-    def flash_button_failure(self):
-        """Visual feedback for failed communication"""
+    def flash_plc_button_failure(self):
+        """Visual feedback for failed PLC operation"""
         def reset_colors():
-            self.test_plc_button.config(bg="#4CAF50")  # Reset button color
+            # Reset to default green for failed operations
+            self.plc_control_button.config(bg="#4CAF50", text="SET HIGH")
             self.status_label.config(fg="red")  # Keep status indicator red
         
-        self.test_plc_button.config(bg="#FF0000")  # Red for failure
+        self.plc_control_button.config(bg="#FF0000")  # Red for failure
         self.status_label.config(fg="#FF0000")  # Red for status
         self.root.after(200, reset_colors)
 
     def monitor_p0000_state(self):
-        """Continuously monitor P0000 state"""
+        """Continuously monitor P0000 state and update button/status accordingly"""
         try:
             if self.plc_client and self.plc_client.is_socket_open():
                 station_id = int(os.getenv('PLC_STATION_ID', '1'))
@@ -2760,15 +2978,44 @@ class EOLTesterGUI:
                 
                 if not response.isError():
                     state = response.bits[0]
-                    self.test_plc_button.config(
-                        text=f"P0000: {'HIGH' if state else 'LOW'}"
-                    )
+                    
+                    # Update control button based on current PLC state
+                    if state:  # PLC is HIGH
+                        self.plc_control_button.config(
+                            text="SET LOW",
+                            bg="#FF5722"  # Red background for HIGH state
+                        )
+                    else:  # PLC is LOW
+                        self.plc_control_button.config(
+                            text="SET HIGH",
+                            bg="#4CAF50"  # Green background for LOW state
+                        )
+                    
+                    # Update status indicator
                     self.status_label.config(
                         fg="green" if state else "gray"
                     )
+                else:
+                    print(f"P0000 read error: {response}")
+                    self.plc_control_button.config(
+                        text="ERROR",
+                        bg="#9E9E9E"  # Gray for error
+                    )
+                    self.status_label.config(fg="red")
+            else:
+                # PLC not connected
+                self.plc_control_button.config(
+                    text="DISCONNECTED",
+                    bg="#9E9E9E"  # Gray for disconnected
+                )
+                self.status_label.config(fg="red")
             
         except Exception as e:
-            print(f"Monitoring error: {e}")
+            print(f"P0000 monitoring error: {e}")
+            self.plc_control_button.config(
+                text="ERROR",
+                bg="#9E9E9E"  # Gray for error
+            )
             self.status_label.config(fg="red")
         
         # Schedule next update
@@ -3036,15 +3283,13 @@ class EOLTesterGUI:
             self.root.destroy()
 
     def next_label_command(self):
-        """Process test results, save to database, and prepare for next test"""
+        """Process test results, save to database, reset page, and prepare for next test"""
         try:
-            # Validate LOT number
-            lot_number = None
-            if hasattr(self, 'barcode_entry') and self.barcode_entry.winfo_exists():
-                lot_number = self.barcode_entry.get().strip()
+            # Check if we have a valid lot number (from barcode scanning)
+            lot_number = getattr(self, 'current_lot_number', None)
             
             if not lot_number:
-                messagebox.showwarning("Warning", "Please scan or enter a valid LOT number")
+                messagebox.showwarning("Warning", "Please scan a barcode first to get LOT number")
                 return
                 
             # Get test results from spec tree
@@ -3103,11 +3348,8 @@ class EOLTesterGUI:
                                     all_existing_devices_pass = False
                                     break
             
-            # Add to tree view only if all devices pass
-            if has_result and all_existing_devices_pass:
-                # Get currently selected items in the tree
-                selected_items = self.tree.selection()
-                
+            # Always add to tree view and database if we have results
+            if has_result:
                 # Create values list with PASS/NG for display in treeview
                 display_values = []
                 for col in self.current_columns:
@@ -3133,24 +3375,41 @@ class EOLTesterGUI:
                         # For non-device columns, use the value directly
                         display_values.append(values_dict.get(col, "N/A"))
                 
-                # If a row is selected and it's the same lot number, update it
-                if selected_items and self.tree.item(selected_items[0], "values")[0] == lot_number:
-                    current_item = selected_items[0]
-                    # Update the tree
-                    self.tree.item(current_item, values=tuple(display_values))
-                else:
-                    # Insert new row
-                    self.tree.insert('', 'end', values=tuple(display_values))
+                # Insert new row at the top
+                self.tree.insert('', 0, values=tuple(display_values))
+                
+                # Save lot data to database (always save)
+                print("Saving test result to database")
+                success = self.save_lot_data_to_database(values_dict)
+                
+                if success:
+                    if all_existing_devices_pass:
+                        self.safe_update_message(f"LOT {lot_number} - PASS result saved successfully", "green")
+                    else:
+                        self.safe_update_message(f"LOT {lot_number} - NG result saved successfully", "orange")
                     
-                self.safe_update_message("PASS result added to tree view", "green")
-            else:
-                # Don't display in tree view, but notify user
-                if not has_result:
-                    self.safe_update_message("No device results found - saved to database only", "orange")
+                    # Reset page for next test but keep PLC running
+                    self.reset_page_for_next_test()
                 else:
-                    self.safe_update_message("Results saved to database but not displayed (some device specs failed)", "orange")
+                    self.safe_update_message("Failed to save to database", "red")
+            else:
+                self.safe_update_message("No test results found - nothing to save", "orange")
             
-            # Clear both entries for next record
+        except Exception as e:
+            print(f"Error in next_label_command: {e}")
+            traceback.print_exc()
+            self.safe_update_message(f"Error: {e}", "red")
+
+    def reset_page_for_next_test(self):
+        """Reset the page for next test while keeping PLC connection active"""
+        try:
+            print("Resetting page for next test...")
+            
+            # Clear current lot number
+            if hasattr(self, 'current_lot_number'):
+                delattr(self, 'current_lot_number')
+            
+            # Clear and reset entries
             self.alc_entry.delete(0, tk.END)
             self.alc_entry.insert(0, "ALC CODE")
             self.alc_entry.configure(state='disabled')
@@ -3160,27 +3419,77 @@ class EOLTesterGUI:
             self.emp_entry.configure(bg="white")
             self.emp_entry.focus_set()
             
-            # Clear barcode entry if it exists
-            if hasattr(self, 'barcode_entry'):
-                self.barcode_entry.delete(0, tk.END)
+            # Clear barcode data
+            self.barcode_data = ""
             
-            # Save lot data to database (always save, even if not displaying in tree)
-            print("Saving test result to database")
-            self.save_lot_data_to_database(values_dict)
+            # Clear camera textbox
+            if hasattr(self, 'cam_textbox'):
+                self.cam_textbox.delete("1.0", tk.END)
             
-            if not all_existing_devices_pass and has_result:
-                self.safe_update_message("NG result saved to database", "red")
-            else:
-                self.safe_update_message("Record saved to database", "green")
+            # Reset specification tree - clear actual values and results
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = list(self.spec_tree.item(item, "values"))
+                    if len(values) >= 7:
+                        values[-2] = ""  # Clear Actual column
+                        values[-1] = ""  # Clear Result column
+                        self.spec_tree.item(item, values=values, tags=('neutral',))
             
-            # Check if we need to update the tree columns based on available devices
-            if available_devices:
-                self.update_tree_columns(available_devices)
+            # Reset process status labels to default
+            self.reset_process_status_labels()
+            
+            # Clear any placed labels (keep the image but remove test indicators)
+            if hasattr(self, 'placed_labels'):
+                for label in self.placed_labels.values():
+                    label.configure(bg="yellow")  # Reset to default color
+            
+            # Stop all label blinking
+            self.stop_all_label_blinking()
+            
+            # Reset model header
+            if hasattr(self, 'model_header'):
+                self.model_header.config(text="MODEL - PART NUMBER")
+            
+            # Restart monitoring after a brief delay to ensure clean state
+            self.root.after(1000, self.restart_monitoring_after_reset)
+            
+            # Keep PLC connection active - DO NOT disconnect
+            print("Page reset complete - PLC connection maintained")
+            self.safe_update_message("Ready for next test - Scan employee code", "blue")
             
         except Exception as e:
-            print(f"Error in next_label_command: {e}")
-            traceback.print_exc()
-            self.safe_update_message(f"Error: {e}", "red")
+            print(f"Error resetting page: {e}")
+            self.safe_update_message(f"Error resetting page: {e}", "red")
+
+    def restart_monitoring_after_reset(self):
+        """Restart monitoring after page reset to ensure clean operation"""
+        try:
+            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+                if hasattr(self, 'current_part_number') and self.current_part_number:
+                    print("Restarting monitoring after page reset")
+                    self.start_status_monitoring()
+                    self.safe_update_message("Monitoring restarted - Ready for next LOT number", "green")
+                else:
+                    print("No part number selected - monitoring not restarted")
+            else:
+                print("PLC not connected - cannot restart monitoring")
+        except Exception as e:
+            print(f"Error restarting monitoring: {e}")
+
+    def reset_process_status_labels(self):
+        """Reset all process status labels to default blue state"""
+        try:
+            # List of status labels to reset
+            status_labels = ['auto', 'home', '1st', '2nd', 'test']
+            
+            for label_name in status_labels:
+                label_obj = getattr(self, f"{label_name}_label", None)
+                if label_obj:
+                    label_obj.config(bg="#00BFFF")  # Default blue color
+                    print(f"Reset {label_name} label to default")
+            
+        except Exception as e:
+            print(f"Error resetting process status labels: {e}")
 
     def get_spec_result(self, device_name):
         """Get the result value for a specific device from the spec tree"""
@@ -3198,7 +3507,9 @@ class EOLTesterGUI:
         return None
 
     def save_lot_data_to_database(self, values_dict):
-        """Save lot number data to database"""
+        """Save lot number data to database and return success status"""
+        conn = None
+        cursor = None
         try:
             # Validate values
             if not values_dict or "LOT NUMBER" not in values_dict:
@@ -3240,6 +3551,9 @@ class EOLTesterGUI:
             lot_number = values_dict.get("LOT NUMBER", "")
             part_number = getattr(self, 'current_part_number', '')
             
+            # Get employee code
+            emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else "Unknown"
+            
             # Default empty string for all values not provided
             l1_result = values_dict.get("L1", "")
             l2_result = values_dict.get("L2", "")
@@ -3250,20 +3564,13 @@ class EOLTesterGUI:
             p3_result = values_dict.get("P3", "")
             p4_result = values_dict.get("P4", "")
             result = values_dict.get("RESULT", "")
-            scan_result = values_dict.get("SCAN RESULT", "")
+            scan_result = f"LOT: {lot_number}"
             
             # Print debug info about what's being saved
-            print(f"Saving lot: {lot_number}, part: {part_number}")
-            print(f"Actual values being saved to database:")
-            print(f"L1: {l1_result}")
-            print(f"L2: {l2_result}")
-            print(f"L3: {l3_result}")
-            print(f"L4: {l4_result}")
-            print(f"P1: {p1_result}")
-            print(f"P2: {p2_result}")
-            print(f"P3: {p3_result}")
-            print(f"P4: {p4_result}")
-            print(f"Overall result: {result}")
+            print(f"Database Save - LOT: {lot_number}, Part: {part_number}, Employee: {emp_code}")
+            print(f"Results - L1:{l1_result}, L2:{l2_result}, L3:{l3_result}, L4:{l4_result}")
+            print(f"Results - P1:{p1_result}, P2:{p2_result}, P3:{p3_result}, P4:{p4_result}")
+            print(f"Overall Result: {result}")
             
             # Check if record already exists
             cursor.execute(
@@ -3287,12 +3594,12 @@ class EOLTesterGUI:
                     l1_result, l2_result, l3_result, l4_result,
                     p1_result, p2_result, p3_result, p4_result,
                     result, scan_result,
-                    "User", 
+                    emp_code, 
                     datetime.now(), 
                     lot_number, 
                     part_number
                 ))
-                print(f"Updated existing record for lot {lot_number}")
+                print(f"Updated existing database record for LOT {lot_number}")
             else:
                 # Insert new record
                 query = """
@@ -3306,27 +3613,28 @@ class EOLTesterGUI:
                     l1_result, l2_result, l3_result, l4_result,
                     p1_result, p2_result, p3_result, p4_result,
                     result, scan_result,
-                    "User", 
+                    emp_code, 
                     datetime.now()
                 ))
-                print(f"Inserted new record for lot {lot_number}")
+                print(f"Inserted new database record for LOT {lot_number}")
             
-            # Commit and close
+            # Commit changes
             conn.commit()
-            cursor.close()
-            conn.close()
-            
-            print(f"Successfully saved actual values to database for lot {lot_number}")
+            print(f"Database save successful for LOT {lot_number}")
             return True
             
         except mysql.connector.Error as e:
             print(f"Database error: {str(e)}")
-            self.safe_update_message(f"Database error: {str(e)}", "red")
             return False
         except Exception as e:
             print(f"Error saving to database: {str(e)}")
-            self.safe_update_message(f"Error saving to database: {str(e)}", "red")
             return False
+        finally:
+            # Ensure cleanup
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
             
     def add_to_tree(self, lotnum, pass_tests, total_tests):
         """Add entry to the treeview"""
