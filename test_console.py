@@ -3375,21 +3375,25 @@ class EOLTesterGUI:
                         # For non-device columns, use the value directly
                         display_values.append(values_dict.get(col, "N/A"))
                 
-                # Insert new row at the top
-                self.tree.insert('', 0, values=tuple(display_values))
+                # Only add PASS results to tree view (but save all to database)
+                should_display_in_tree = all_existing_devices_pass
+                if should_display_in_tree:
+                    # Insert new row at the top for PASS results only
+                    self.tree.insert('', 0, values=tuple(display_values))
                 
-                # Save lot data to database (always save)
+                # Save lot data to database (always save both PASS and FAIL)
                 print("Saving test result to database")
                 success = self.save_lot_data_to_database(values_dict)
                 
                 if success:
                     if all_existing_devices_pass:
-                        self.safe_update_message(f"LOT {lot_number} - PASS result saved successfully", "green")
+                        self.safe_update_message(f"LOT {lot_number} - PASS result saved and displayed", "green")
                     else:
-                        self.safe_update_message(f"LOT {lot_number} - NG result saved successfully", "orange")
+                        self.safe_update_message(f"LOT {lot_number} - FAIL result saved (not displayed in tree)", "orange")
                     
-                    # Reset page for next test but keep PLC running
-                    self.reset_page_for_next_test()
+                    # Start 3-second timer for automatic reset
+                    self.safe_update_message("Resetting in 3 seconds...", "blue")
+                    self.root.after(3000, self.reset_page_for_next_test)
                 else:
                     self.safe_update_message("Failed to save to database", "red")
             else:
@@ -3401,7 +3405,7 @@ class EOLTesterGUI:
             self.safe_update_message(f"Error: {e}", "red")
 
     def reset_page_for_next_test(self):
-        """Reset the page for next test while keeping PLC connection active"""
+        """Reset the page for next test while keeping PLC connection active and maintaining PLC high state"""
         try:
             print("Resetting page for next test...")
             
@@ -3435,8 +3439,8 @@ class EOLTesterGUI:
                         values[-1] = ""  # Clear Result column
                         self.spec_tree.item(item, values=values, tags=('neutral',))
             
-            # Reset process status labels to default
-            self.reset_process_status_labels()
+            # Reset process status labels to default but keep PLC in high state
+            self.reset_process_status_labels_keep_plc_high()
             
             # Clear any placed labels (keep the image but remove test indicators)
             if hasattr(self, 'placed_labels'):
@@ -3450,12 +3454,13 @@ class EOLTesterGUI:
             if hasattr(self, 'model_header'):
                 self.model_header.config(text="MODEL - PART NUMBER")
             
+            # Keep PLC connection active and maintain high state - DO NOT reset PLC
+            # Continue monitoring without interruption
+            print("Page reset complete - PLC connection and high state maintained")
+            self.safe_update_message("Ready for next test - Scan employee code", "blue")
+            
             # Restart monitoring after a brief delay to ensure clean state
             self.root.after(1000, self.restart_monitoring_after_reset)
-            
-            # Keep PLC connection active - DO NOT disconnect
-            print("Page reset complete - PLC connection maintained")
-            self.safe_update_message("Ready for next test - Scan employee code", "blue")
             
         except Exception as e:
             print(f"Error resetting page: {e}")
@@ -3490,6 +3495,65 @@ class EOLTesterGUI:
             
         except Exception as e:
             print(f"Error resetting process status labels: {e}")
+    
+    def reset_process_status_labels_keep_plc_high(self):
+        """Reset process status labels to default but maintain PLC high state visual indicators"""
+        try:
+            # List of status labels to reset - but keep their current state if PLC is high
+            status_labels = ['auto', 'home', '1st', '2nd', 'test']
+            
+            # Read current PLC state to maintain visual consistency
+            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+                status_values = self.read_process_status_values()
+                
+                for label_name in status_labels:
+                    label_obj = getattr(self, f"{label_name}_label", None)
+                    if label_obj:
+                        # Check if this label corresponds to a high PLC state
+                        plc_state_active = False
+                        
+                        # Map label names to their PLC status check
+                        if label_name == 'auto' and hasattr(self, 'process_status_array') and len(self.process_status_array) > 0:
+                            auto_address = self.process_status_array[0] if self.process_status_array[0] else None
+                            plc_state_active = status_values.get(auto_address, False) if auto_address else False
+                        elif label_name == 'home' and hasattr(self, 'process_status_array') and len(self.process_status_array) > 1:
+                            home_address = self.process_status_array[1] if self.process_status_array[1] else None
+                            plc_state_active = status_values.get(home_address, False) if home_address else False
+                        elif label_name == 'test' and hasattr(self, 'process_status_array') and len(self.process_status_array) > 4:
+                            test_address = self.process_status_array[4] if self.process_status_array[4] else None
+                            plc_state_active = status_values.get(test_address, False) if test_address else False
+                        
+                        # Set color based on PLC state
+                        if plc_state_active:
+                            label_obj.config(bg="green")  # Keep green for active PLC states
+                            print(f"Maintained {label_name} label as active (green)")
+                        else:
+                            label_obj.config(bg="#00BFFF")  # Default blue color
+                            print(f"Reset {label_name} label to default")
+            else:
+                # PLC not connected, reset all to default
+                for label_name in status_labels:
+                    label_obj = getattr(self, f"{label_name}_label", None)
+                    if label_obj:
+                        label_obj.config(bg="#00BFFF")  # Default blue color
+                        print(f"Reset {label_name} label to default (PLC not connected)")
+            
+        except Exception as e:
+            print(f"Error resetting process status labels while keeping PLC high: {e}")
+            # Fallback to regular reset if there's an error
+            self.reset_process_status_labels()
+
+    def get_device_result_from_spec_tree(self, device_name):
+        """Get the PASS/NG result for a specific device from the spec tree"""
+        if not hasattr(self, 'spec_tree') or not self.spec_tree:
+            return None
+            
+        for item in self.spec_tree.get_children():
+            values = self.spec_tree.item(item, "values")
+            if len(values) > 1 and values[1] == device_name:
+                # Return the result column (last column)
+                return values[-1] if len(values) > 5 else None
+        return None
 
     def get_spec_result(self, device_name):
         """Get the result value for a specific device from the spec tree"""
@@ -3540,6 +3604,14 @@ class EOLTesterGUI:
                     P2 VARCHAR(50),
                     P3 VARCHAR(50),
                     P4 VARCHAR(50),
+                    L1_ACTUAL DECIMAL(10,3),
+                    L2_ACTUAL DECIMAL(10,3),
+                    L3_ACTUAL DECIMAL(10,3),
+                    L4_ACTUAL DECIMAL(10,3),
+                    P1_ACTUAL DECIMAL(10,3),
+                    P2_ACTUAL DECIMAL(10,3),
+                    P3_ACTUAL DECIMAL(10,3),
+                    P4_ACTUAL DECIMAL(10,3),
                     RESULT VARCHAR(50),
                     SCAN_RESULT VARCHAR(255),
                     CREATED_BY VARCHAR(255),
@@ -3554,15 +3626,48 @@ class EOLTesterGUI:
             # Get employee code
             emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else "Unknown"
             
-            # Default empty string for all values not provided
-            l1_result = values_dict.get("L1", "")
-            l2_result = values_dict.get("L2", "")
-            l3_result = values_dict.get("L3", "")
-            l4_result = values_dict.get("L4", "")
-            p1_result = values_dict.get("P1", "")
-            p2_result = values_dict.get("P2", "")
-            p3_result = values_dict.get("P3", "")
-            p4_result = values_dict.get("P4", "")
+            # Get result values and actual measurement values
+            # For devices L1-L4 and P1-P4, we need both the result (PASS/NG) and actual value
+            device_results = {}
+            device_actuals = {}
+            
+            for device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                if device in values_dict:
+                    raw_value = values_dict[device]
+                    
+                    # Check if this is an actual measurement value (numeric) or result string
+                    try:
+                        # Try to parse as float - if successful, it's an actual value
+                        actual_value = float(raw_value)
+                        device_actuals[device] = actual_value
+                        
+                        # Get the corresponding PASS/NG result from spec tree
+                        result_from_spec = self.get_device_result_from_spec_tree(device)
+                        device_results[device] = result_from_spec if result_from_spec else ""
+                        
+                    except (ValueError, TypeError):
+                        # It's a result string (PASS/NG)
+                        device_results[device] = raw_value
+                        device_actuals[device] = None
+            
+            l1_result = device_results.get("L1", "")
+            l2_result = device_results.get("L2", "")
+            l3_result = device_results.get("L3", "")
+            l4_result = device_results.get("L4", "")
+            p1_result = device_results.get("P1", "")
+            p2_result = device_results.get("P2", "")
+            p3_result = device_results.get("P3", "")
+            p4_result = device_results.get("P4", "")
+            
+            l1_actual = device_actuals.get("L1", None)
+            l2_actual = device_actuals.get("L2", None)
+            l3_actual = device_actuals.get("L3", None)
+            l4_actual = device_actuals.get("L4", None)
+            p1_actual = device_actuals.get("P1", None)
+            p2_actual = device_actuals.get("P2", None)
+            p3_actual = device_actuals.get("P3", None)
+            p4_actual = device_actuals.get("P4", None)
+            
             result = values_dict.get("RESULT", "")
             scan_result = f"LOT: {lot_number}"
             
@@ -3570,6 +3675,8 @@ class EOLTesterGUI:
             print(f"Database Save - LOT: {lot_number}, Part: {part_number}, Employee: {emp_code}")
             print(f"Results - L1:{l1_result}, L2:{l2_result}, L3:{l3_result}, L4:{l4_result}")
             print(f"Results - P1:{p1_result}, P2:{p2_result}, P3:{p3_result}, P4:{p4_result}")
+            print(f"Actuals - L1:{l1_actual}, L2:{l2_actual}, L3:{l3_actual}, L4:{l4_actual}")
+            print(f"Actuals - P1:{p1_actual}, P2:{p2_actual}, P3:{p3_actual}, P4:{p4_actual}")
             print(f"Overall Result: {result}")
             
             # Check if record already exists
@@ -3585,6 +3692,8 @@ class EOLTesterGUI:
                 UPDATE TBL_TEST_RESULTS 
                 SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, 
                     P1 = %s, P2 = %s, P3 = %s, P4 = %s,
+                    L1_ACTUAL = %s, L2_ACTUAL = %s, L3_ACTUAL = %s, L4_ACTUAL = %s,
+                    P1_ACTUAL = %s, P2_ACTUAL = %s, P3_ACTUAL = %s, P4_ACTUAL = %s,
                     RESULT = %s, SCAN_RESULT = %s,
                     CREATED_BY = %s, 
                     CREATED_DATE = %s 
@@ -3593,6 +3702,8 @@ class EOLTesterGUI:
                 cursor.execute(query, (
                     l1_result, l2_result, l3_result, l4_result,
                     p1_result, p2_result, p3_result, p4_result,
+                    l1_actual, l2_actual, l3_actual, l4_actual,
+                    p1_actual, p2_actual, p3_actual, p4_actual,
                     result, scan_result,
                     emp_code, 
                     datetime.now(), 
@@ -3604,14 +3715,18 @@ class EOLTesterGUI:
                 # Insert new record
                 query = """
                 INSERT INTO TBL_TEST_RESULTS 
-                (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
+                 L1_ACTUAL, L2_ACTUAL, L3_ACTUAL, L4_ACTUAL, P1_ACTUAL, P2_ACTUAL, P3_ACTUAL, P4_ACTUAL,
+                 RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 cursor.execute(query, (
                     lot_number, 
                     part_number, 
                     l1_result, l2_result, l3_result, l4_result,
                     p1_result, p2_result, p3_result, p4_result,
+                    l1_actual, l2_actual, l3_actual, l4_actual,
+                    p1_actual, p2_actual, p3_actual, p4_actual,
                     result, scan_result,
                     emp_code, 
                     datetime.now()
@@ -4007,9 +4122,18 @@ class EOLTesterGUI:
                     )
                     
                     if not response.isError():
-                        value = response.registers[0]
-                        results[addr_str] = value
-                        print(f"Register {addr_str} = {value}")
+                        # Get raw register value (unsigned 16-bit)
+                        raw_value = response.registers[0]
+                        
+                        # Convert to signed 16-bit integer if needed
+                        # If the value is greater than 32767, it represents a negative number
+                        if raw_value > 32767:
+                            signed_value = raw_value - 65536
+                        else:
+                            signed_value = raw_value
+                        
+                        results[addr_str] = signed_value
+                        print(f"Register {addr_str} = {signed_value} (raw: {raw_value})")
                     else:
                         print(f"Error reading register {addr_str}: {response}")
                         results[addr_str] = None
