@@ -886,35 +886,36 @@ class WorkspaceApp:
                 # Get the first quadrant
                 first_quadrant = self.quadrants[0]
                 
-                # Create a frame to hold the image
+                # Ensure image_frame exists and has correct dimensions
                 if not hasattr(self, 'image_frame'):
                     self.image_frame = tk.Frame(first_quadrant, bg='white')
-                    self.image_frame.place(relwidth=1, relheight=1)  # Use place with relative dimensions
+                    self.image_frame.place(relx=0.5, rely=0.5, anchor='center')
+                    self.image_frame.config(width=750, height=450)  # Match test_console.py exactly
                 
                 # Load the image
                 image = Image.open(file_path)
                 
-                # Get the exact quadrant dimensions
-                quad_width = first_quadrant.winfo_width()
-                quad_height = first_quadrant.winfo_height()
+                # Use exact same dimensions as test_console.py: 750x450
+                target_width = 750
+                target_height = 450
                 
-                # Resize image to exactly match quadrant dimensions
-                resized_image = image.resize((quad_width, quad_height), Image.Resampling.LANCZOS)
+                # Resize image to exactly match test_console.py dimensions
+                resized_image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(resized_image)
                 
                 # Remove old image label if it exists
                 if hasattr(self, 'image_label') and self.image_label:
                     self.image_label.destroy()
                 
-                # Create new image label that fills the entire frame
+                # Create new image label with exact dimensions
                 self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
                 self.image_label.image = photo  # Keep a reference
-                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)  # Fill entire frame
+                self.image_label.place(x=0, y=0, width=target_width, height=target_height)
                 
-                # Store image dimensions
+                # Store image dimensions to match test_console.py exactly
                 self.image_dimensions = {
-                    'width': quad_width,
-                    'height': quad_height,
+                    'width': target_width,
+                    'height': target_height,
                     'x_offset': 0,
                     'y_offset': 0
                 }
@@ -1638,32 +1639,41 @@ class WorkspaceApp:
             messagebox.showerror("Database Error", f"Failed to load record: {err}")
 
     def load_image(self, image_path):
-        """Load image from path"""
+        """Load image from path with exact same dimensions as test_console.py"""
         try:
             if os.path.exists(image_path):
                 # Get the first quadrant
                 first_quadrant = self.quadrants[0]
                 
-                # Create a frame to hold the image if it doesn't exist
+                # Ensure image_frame exists and has correct dimensions
                 if not hasattr(self, 'image_frame'):
                     self.image_frame = tk.Frame(first_quadrant, bg='white')
-                    self.image_frame.place(relwidth=1, relheight=1)
+                    self.image_frame.place(relx=0.5, rely=0.5, anchor='center')
+                    self.image_frame.config(width=750, height=450)  # Match test_console.py exactly
                 
-                # Load and resize the image
+                # Load and resize the image using exact same dimensions as test_console.py
                 image = Image.open(image_path)
-                quad_width = first_quadrant.winfo_width()
-                quad_height = first_quadrant.winfo_height()
-                resized_image = image.resize((quad_width, quad_height), Image.Resampling.LANCZOS)
+                target_width = 750
+                target_height = 450
+                resized_image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(resized_image)
                 
                 # Remove old image label if it exists
                 if hasattr(self, 'image_label') and self.image_label:
                     self.image_label.destroy()
                 
-                # Create new image label
+                # Create new image label with exact dimensions
                 self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
                 self.image_label.image = photo  # Keep a reference
-                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
+                self.image_label.place(x=0, y=0, width=target_width, height=target_height)
+                
+                # Store image dimensions to match test_console.py exactly
+                self.image_dimensions = {
+                    'width': target_width,
+                    'height': target_height,
+                    'x_offset': 0,
+                    'y_offset': 0
+                }
                 
                 # Update image path and flag
                 self.update_image_path(image_path)
