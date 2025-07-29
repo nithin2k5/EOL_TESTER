@@ -185,6 +185,11 @@ class EOLTesterGUI:
         # Initialize timers
         self.alc_timer = None
         self.alcInput_TimeInterval = 200  # milliseconds
+        
+        # Track test result states to prevent duplicate saves
+        self.last_test_result_pass_state = False
+        self.last_test_result_ng_state = False
+        self.test_result_saved = False
 
     def setup_window(self):
         """Set up the window after initialization"""
@@ -1199,7 +1204,129 @@ class EOLTesterGUI:
         messagebox.showinfo("2nd Pull", "Performing length test")
 
     def test_result_command(self):
-        messagebox.showinfo("Test Result", "Generating test results")
+        """Process test results and save to database automatically"""
+        try:
+            print("Test Result command triggered - Processing test results")
+            
+            # Check if we have a valid lot number (from barcode scanning)
+            lot_number = getattr(self, 'current_lot_number', None)
+            
+            if not lot_number:
+                self.safe_update_message("No LOT number available for test result saving", "orange")
+                print("Warning: No LOT number available - cannot save test results")
+                return
+                
+            # Get test results from spec tree
+            values_dict = {}
+            values_dict["LOT NUMBER"] = lot_number
+            
+            has_result = False
+            all_devices_pass = True
+            
+            # If we have specifications available, collect them
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                available_devices = set()
+                
+                # First, collect all device values and check if any are NG
+                for item in self.spec_tree.get_children():
+                    values = self.spec_tree.item(item, "values")
+                    if len(values) > 1 and values[1]:  # If device column has a value
+                        device = values[1]
+                        result_value = values[-1] if len(values) > 5 else None
+                        actual_value = values[-2] if len(values) > 5 else None
+                        
+                        # Store device in available devices set
+                        available_devices.add(device)
+                        
+                        # Store both the result and actual value
+                        if result_value:
+                            has_result = True
+                            # Store the actual value (not the result) for L1-L4 and P1-P4
+                            if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual_value:
+                                values_dict[device] = actual_value
+                            else:
+                                values_dict[device] = result_value
+                            
+                            # Check if this result is NG
+                            if result_value == "NG":
+                                all_devices_pass = False
+                
+                # If there are any device results, set an overall RESULT value
+                if has_result:
+                    values_dict["RESULT"] = "PASS" if all_devices_pass else "NG"
+                
+                # Check if all existing devices have values and all are passing
+                all_existing_devices_pass = True
+                if has_result:
+                    # Loop through specifications to see if any with values are NG
+                    for item in self.spec_tree.get_children():
+                        values = self.spec_tree.item(item, "values")
+                        if len(values) > 5:
+                            device = values[1] if len(values) > 1 else ""
+                            result = values[-1]
+                            actual = values[-2]
+                            
+                            # Only check devices that have actual values
+                            if actual and actual != "N/A":
+                                if result == "NG":
+                                    all_existing_devices_pass = False
+                                    break
+            
+            # Save test results to database if we have results
+            if has_result:
+                print("Test results found - saving to database")
+                success = self.save_lot_data_to_database(values_dict)
+                
+                if success:
+                    if all_existing_devices_pass:
+                        self.safe_update_message(f"Test Results: LOT {lot_number} - PASS result saved automatically", "green")
+                        print(f"Test Result: LOT {lot_number} - PASS result automatically saved to database")
+                    else:
+                        self.safe_update_message(f"Test Results: LOT {lot_number} - FAIL result saved automatically", "orange")
+                        print(f"Test Result: LOT {lot_number} - FAIL result automatically saved to database")
+                    
+                    # Optional: Add to tree view display for PASS results
+                    if all_existing_devices_pass and hasattr(self, 'tree') and hasattr(self, 'current_columns'):
+                        # Create values list with PASS/NG for display in treeview
+                        display_values = []
+                        for col in self.current_columns:
+                            if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                                # For device columns, display PASS/NG in the tree view
+                                if col in values_dict and values_dict[col]:
+                                    # If we have a numeric value, determine if it's PASS or NG
+                                    device_item = None
+                                    for tree_item in self.spec_tree.get_children():
+                                        tree_values = self.spec_tree.item(tree_item, "values")
+                                        if len(tree_values) > 1 and tree_values[1] == col:
+                                            device_item = tree_item
+                                            break
+                                    
+                                    if device_item:
+                                        result = self.spec_tree.item(device_item, "values")[-1]
+                                        display_values.append(result)
+                                    else:
+                                        display_values.append("N/A")
+                                else:
+                                    display_values.append("N/A")
+                            else:
+                                # For non-device columns, use the value directly
+                                display_values.append(values_dict.get(col, "N/A"))
+                        
+                        # Insert new row at the top for PASS results
+                        self.tree.insert('', 0, values=tuple(display_values))
+                        print("PASS result added to tree view display")
+                        
+                else:
+                    self.safe_update_message("Failed to save test results to database", "red")
+                    print("Error: Failed to save test results to database")
+            else:
+                self.safe_update_message("No test results found - nothing to save", "orange")
+                print("Warning: No test results found - nothing to save")
+                
+        except Exception as e:
+            print(f"Error in test_result_command: {e}")
+            traceback.print_exc()
+            self.safe_update_message(f"Error processing test results: {e}", "red")
 
     def next_model_command(self):
         messagebox.showinfo("Next Model", "Moving to next model")
@@ -1282,6 +1409,12 @@ class EOLTesterGUI:
               self.alc_entry.get() and self.alc_entry.get() != "ALC CODE"):
             # Store as current lot number
             self.current_lot_number = barcode
+            
+            # Reset test result saved flag for new test cycle
+            self.test_result_saved = False
+            self.last_test_result_pass_state = False
+            self.last_test_result_ng_state = False
+            
             # Display in camera textbox
             if hasattr(self, 'cam_textbox'):
                 self.cam_textbox.delete("1.0", tk.END)
@@ -1516,6 +1649,33 @@ class EOLTesterGUI:
                     print("2nd Pull FAIL detected")
                     self.update_specification_values('P1', 'P2', 'P3', 'P4', result_color='RED')
                     self.safe_update_message("2nd Pull Failed", "red")
+                
+                # Check for TEST RESULT completion and automatically save to database
+                test_result_pass_current = test_result_addr and status_values.get(test_result_addr, False)
+                test_result_ng_current = test_result_ng_addr and status_values.get(test_result_ng_addr, False)
+                
+                # Check for state change from LOW to HIGH (rising edge) to prevent duplicate saves
+                if test_result_pass_current and not self.last_test_result_pass_state and not self.test_result_saved:
+                    print("Test Result PASS detected (rising edge) - Auto-saving to database")
+                    self.safe_update_message("Test Result PASS - Auto-saving to database", "green")
+                    
+                    # Automatically trigger test result processing and database saving
+                    # Use a small delay to ensure all values are updated
+                    self.root.after(500, self.test_result_command)
+                    self.test_result_saved = True
+                    
+                elif test_result_ng_current and not self.last_test_result_ng_state and not self.test_result_saved:
+                    print("Test Result FAIL detected (rising edge) - Auto-saving to database")
+                    self.safe_update_message("Test Result FAIL - Auto-saving to database", "orange")
+                    
+                    # Automatically trigger test result processing and database saving
+                    # Use a small delay to ensure all values are updated
+                    self.root.after(500, self.test_result_command)
+                    self.test_result_saved = True
+                
+                # Update the last states for next cycle
+                self.last_test_result_pass_state = test_result_pass_current
+                self.last_test_result_ng_state = test_result_ng_current
         
         except Exception as e:
             print(f"Error updating status labels: {e}")
@@ -3425,6 +3585,11 @@ class EOLTesterGUI:
             
             # Clear barcode data
             self.barcode_data = ""
+            
+            # Reset test result saved flag for next test cycle
+            self.test_result_saved = False
+            self.last_test_result_pass_state = False
+            self.last_test_result_ng_state = False
             
             # Clear camera textbox
             if hasattr(self, 'cam_textbox'):
