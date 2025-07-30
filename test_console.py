@@ -15,6 +15,9 @@ import traceback
 from datetime import datetime
 import random
 import sys
+from dotenv import load_dotenv, set_key
+import queue
+import re
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -707,7 +710,7 @@ class EOLTesterGUI:
                                highlightbackground="#e0e0e0",
                                highlightcolor="#1e88e5")
         
-        # Next Label Button (centered)
+        # Next Label Button
         next_btn = tk.Button(input_frame,
                             text="NEXT LABEL ➜",
                             bg="#ffd700",
@@ -719,7 +722,7 @@ class EOLTesterGUI:
                             pady=2)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
         
-        # Add hover effect
+        # Add hover effect for next label button
         next_btn.bind('<Enter>', lambda e: next_btn.configure(bg="#ffeb3b"))
         next_btn.bind('<Leave>', lambda e: next_btn.configure(bg="#ffd700"))
         
@@ -873,19 +876,15 @@ class EOLTesterGUI:
         
         return adjusted_widths
 
-    def update_tree_columns(self, devices):
-        """Update tree columns based on available devices"""
-        # Determine which columns to show based on available devices
+    def update_tree_columns(self, devices=None):
+        """Update tree columns to always include all L1-L4 and P1-P4 columns"""
+        # Always include all columns regardless of data availability
         new_columns = ["LOT NUMBER"]
         
-        # Always include L1, L2, P1, P2
-        for device in ["L1", "L2", "P1", "P2"]:
+        # Always include all L1-L4 and P1-P4 devices
+        for device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
             new_columns.append(device)
-        
-        # Add L3, L4, P3, P4 if they exist in devices
-        for device in ["L3", "L4", "P3", "P4"]:
-            if device in devices:
-                new_columns.append(device)
+            print(f"Including {device} column - auto-generated")
         
         # Always include RESULT and SCAN RESULT
         new_columns.extend(["RESULT", "SCAN RESULT"])
@@ -921,22 +920,15 @@ class EOLTesterGUI:
             self.load_history_to_treeview()
             
             print(f"Tree columns updated to: {new_columns}")
-            
-            # Force the frame to maintain its fixed size
-            self.grid_frame.config(width=800)
-            self.grid_frame.grid_propagate(False)
-            
-            # Make sure the tree uses the whole fixed width
-            total_width = sum(int(self.tree.column(col, "width")) for col in new_columns)
-            if total_width != self.tree_fixed_width:  # No need to adjust for scrollbar width
-                # Recalculate column widths to match exactly
-                new_widths = self.adjust_column_widths(new_columns, self.tree_fixed_width)
-                # Apply the exact widths to prevent width creep
-                for col, width in new_widths.items():
-                    self.tree.column(col, width=width, stretch=False)
-            
-            # Force layout update
-            self.grid_frame.update_idletasks()
+        else:
+            print(f"No column update needed - columns remain: {new_columns}")
+
+    def get_devices_with_data(self):
+        """Get list of all devices - always returns all L1-L4 and P1-P4 devices"""
+        # Always return all devices to ensure all columns are shown
+        devices_with_data = set(["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"])
+        print(f"Auto-generating all device columns: {devices_with_data}")
+        return devices_with_data
 
     def on_tree_double_click(self, event):
         """Handle double-click on treeview item"""
@@ -1204,17 +1196,23 @@ class EOLTesterGUI:
         messagebox.showinfo("2nd Pull", "Performing length test")
 
     def test_result_command(self):
-        """Process test results and save to database automatically"""
+        """Automatically process test results, save to database, and reset for next test"""
         try:
-            print("Test Result command triggered - Processing test results")
+            print("=== AUTO TEST RESULT PROCESSING STARTED ===")
             
-            # Check if we have a valid lot number (from barcode scanning)
-            lot_number = getattr(self, 'current_lot_number', None)
-            
-            if not lot_number:
-                self.safe_update_message("No LOT number available for test result saving", "orange")
-                print("Warning: No LOT number available - cannot save test results")
-                return
+            # Auto-generate lot number for test results
+            if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
+                if (hasattr(self, 'current_part_number') and self.current_part_number and 
+                    self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
+                    lot_number = self.generate_lot_number()
+                    self.current_lot_number = lot_number
+                    print(f"Auto-generated LOT number {lot_number} for test results")
+                else:
+                    self.safe_update_message("Cannot save test results - missing required data", "red")
+                    print("ERROR: Cannot save test results - missing part number or employee code")
+                    return
+            else:
+                lot_number = self.current_lot_number
                 
             # Get test results from spec tree
             values_dict = {}
@@ -1272,20 +1270,20 @@ class EOLTesterGUI:
                                     all_existing_devices_pass = False
                                     break
             
-            # Save test results to database if we have results
+            # Always save test results to database if we have results, regardless of pass/fail status
             if has_result:
-                print("Test results found - saving to database")
+                print("Test results found - saving to database regardless of pass/fail status")
                 success = self.save_lot_data_to_database(values_dict)
                 
                 if success:
                     if all_existing_devices_pass:
-                        self.safe_update_message(f"Test Results: LOT {lot_number} - PASS result saved automatically", "green")
-                        print(f"Test Result: LOT {lot_number} - PASS result automatically saved to database")
+                        self.safe_update_message(f"Test Results: LOT {lot_number} - PASS result saved to database", "green")
+                        print(f"Test Result: LOT {lot_number} - PASS result saved to database")
                     else:
-                        self.safe_update_message(f"Test Results: LOT {lot_number} - FAIL result saved automatically", "orange")
-                        print(f"Test Result: LOT {lot_number} - FAIL result automatically saved to database")
+                        self.safe_update_message(f"Test Results: LOT {lot_number} - FAIL result saved to database", "orange")
+                        print(f"Test Result: LOT {lot_number} - FAIL result saved to database")
                     
-                    # Optional: Add to tree view display for PASS results
+                    # Add to tree view display ONLY if ALL specifications pass
                     if all_existing_devices_pass and hasattr(self, 'tree') and hasattr(self, 'current_columns'):
                         # Create values list with PASS/NG for display in treeview
                         display_values = []
@@ -1312,21 +1310,115 @@ class EOLTesterGUI:
                                 # For non-device columns, use the value directly
                                 display_values.append(values_dict.get(col, "N/A"))
                         
-                        # Insert new row at the top for PASS results
-                        self.tree.insert('', 0, values=tuple(display_values))
-                        print("PASS result added to tree view display")
+                        # Insert new row at the top ONLY if ALL specifications pass
+                        if values_dict.get("RESULT") == "PASS":
+                            self.tree.insert('', 0, values=tuple(display_values))
+                            print("PASS result added to tree view display")
+                            self.safe_update_message(f"Test Results: LOT {lot_number} - All specifications PASS, displayed in tree view", "green")
+                        else:
+                            print("Result not displayed in tree view - not all specifications passed")
+                            self.safe_update_message(f"Test Results: LOT {lot_number} - Some specifications failed, data stored in database only", "orange")
+                        
+                        # Auto-reset system for next test after successful save
+                        self.safe_update_message(f"Test complete - LOT {lot_number} saved. Resetting for next test...", "green")
+                        self.root.after(2000, self.auto_reset_for_next_test)
                         
                 else:
                     self.safe_update_message("Failed to save test results to database", "red")
                     print("Error: Failed to save test results to database")
             else:
-                self.safe_update_message("No test results found - nothing to save", "orange")
-                print("Warning: No test results found - nothing to save")
+                self.safe_update_message("No test data to save", "orange")
+                print("Warning: No test data to save")
                 
         except Exception as e:
             print(f"Error in test_result_command: {e}")
             traceback.print_exc()
             self.safe_update_message(f"Error processing test results: {e}", "red")
+
+    def auto_reset_for_next_test(self):
+        """Automatically reset system for next test while keeping PLC status"""
+        try:
+            print("=== AUTO RESET FOR NEXT TEST ===")
+            
+            # Check if all existing values of L1-L4 and P1-P4 are pass
+            all_pass = True
+            any_values = False
+            
+            # Check all devices in the spec tree
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = self.spec_tree.item(item, "values")
+                    if len(values) > 1:
+                        device = values[1]  # Device column
+                        result = values[-1] if len(values) > 6 else None  # Result column
+                        actual = values[-2] if len(values) > 6 else None  # Actual column
+                        
+                        # Only check devices that have actual values
+                        if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual and actual != "":
+                            any_values = True
+                            if result != "PASS":
+                                all_pass = False
+                                print(f"Device {device} is not PASS: {result}")
+            
+            # Declare scan result based on all devices
+            if any_values:
+                if all_pass:
+                    self.safe_update_message("All tests PASSED! Ready for next test.", "green")
+                    print("ALL TESTS PASSED - Scan result is PASS")
+                else:
+                    self.safe_update_message("Some tests failed. Ready for next test.", "orange")
+                    print("SOME TESTS FAILED - Scan result is FAIL")
+            
+            # Store current lot number for incrementing
+            current_lot = None
+            if hasattr(self, 'current_lot_number'):
+                current_lot = self.current_lot_number
+                delattr(self, 'current_lot_number')
+            
+            # Reset test result saved flag for next test cycle
+            self.test_result_saved = False
+            self.last_test_result_pass_state = False
+            self.last_test_result_ng_state = False
+            
+            # Clear barcode data
+            self.barcode_data = ""
+            
+            # Clear camera textbox
+            if hasattr(self, 'cam_textbox'):
+                self.cam_textbox.delete("1.0", tk.END)
+                self.cam_textbox.insert("1.0", "Ready for next test\nScan employee code to begin")
+            
+            # Reset specification tree - clear actual values and results
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = list(self.spec_tree.item(item, "values"))
+                    if len(values) >= 7:
+                        values[-2] = ""  # Clear Actual column
+                        values[-1] = ""  # Clear Result column
+                        self.spec_tree.item(item, values=values, tags=('neutral',))
+            
+            # Reset process status labels to default but keep PLC in high state
+            self.reset_process_status_labels_keep_plc_high()
+            
+            # Clear any placed labels (keep the image but remove test indicators)
+            if hasattr(self, 'placed_labels'):
+                for label in self.placed_labels.values():
+                    label.configure(bg="yellow")  # Reset to default color
+            
+            # Stop all label blinking
+            self.stop_all_label_blinking()
+            
+            print("Auto-reset complete - PLC connection and high state maintained")
+            self.safe_update_message("Ready for next test", "blue")
+            
+            # Schedule the next test with incremented lot number after 2 seconds
+            if current_lot and hasattr(self, 'emp_entry') and self.emp_entry.get() and self.emp_entry.get() != "EMP CODE":
+                # Check if PLC is still high before scheduling next test
+                self.root.after(2000, lambda: self.start_next_test_cycle(current_lot))
+            
+        except Exception as e:
+            print(f"Error in auto_reset_for_next_test: {e}")
+            traceback.print_exc()
 
     def next_model_command(self):
         messagebox.showinfo("Next Model", "Moving to next model")
@@ -1403,25 +1495,13 @@ class EOLTesterGUI:
             self.barcode_data = ""
             return
             
-        # If we have ALC code and employee code, treat this as a LOT number
+        # Ready for testing when both codes are entered
         elif (hasattr(self, 'current_part_number') and self.current_part_number and 
               self.emp_entry.get() and self.emp_entry.get() != "EMP CODE" and
               self.alc_entry.get() and self.alc_entry.get() != "ALC CODE"):
-            # Store as current lot number
-            self.current_lot_number = barcode
             
-            # Reset test result saved flag for new test cycle
-            self.test_result_saved = False
-            self.last_test_result_pass_state = False
-            self.last_test_result_ng_state = False
-            
-            # Display in camera textbox
-            if hasattr(self, 'cam_textbox'):
-                self.cam_textbox.delete("1.0", tk.END)
-                self.cam_textbox.insert("1.0", f"LOT NUMBER: {barcode}\nReady for testing...")
-            
-            self.safe_update_message(f"LOT {barcode} scanned - Ready for testing", "green")
-            print(f"LOT number {barcode} stored")
+            self.safe_update_message("Ready for testing - waiting for test completion", "green")
+            print("System ready for testing")
             
             # Reset barcode data after processing
             self.barcode_data = ""
@@ -1655,23 +1735,25 @@ class EOLTesterGUI:
                 test_result_ng_current = test_result_ng_addr and status_values.get(test_result_ng_addr, False)
                 
                 # Check for state change from LOW to HIGH (rising edge) to prevent duplicate saves
-                if test_result_pass_current and not self.last_test_result_pass_state and not self.test_result_saved:
-                    print("Test Result PASS detected (rising edge) - Auto-saving to database")
-                    self.safe_update_message("Test Result PASS - Auto-saving to database", "green")
+                if (test_result_pass_current or test_result_ng_current) and not self.test_result_saved:
+                    print("Test Result detected (rising edge) - Processing results and saving to database")
                     
-                    # Automatically trigger test result processing and database saving
+                    # Check if it's a pass or fail result
+                    if test_result_pass_current and not self.last_test_result_pass_state:
+                        self.safe_update_message("Test Result received - Processing and saving to database", "blue")
+                    elif test_result_ng_current and not self.last_test_result_ng_state:
+                        self.safe_update_message("Test Result received - Processing and saving to database", "blue")
+                    else:
+                        # Skip if it's not a rising edge
+                        pass
+                    
+                    # Always trigger test result processing and database saving for both PASS and FAIL results
                     # Use a small delay to ensure all values are updated
                     self.root.after(500, self.test_result_command)
                     self.test_result_saved = True
                     
-                elif test_result_ng_current and not self.last_test_result_ng_state and not self.test_result_saved:
-                    print("Test Result FAIL detected (rising edge) - Auto-saving to database")
-                    self.safe_update_message("Test Result FAIL - Auto-saving to database", "orange")
-                    
-                    # Automatically trigger test result processing and database saving
-                    # Use a small delay to ensure all values are updated
-                    self.root.after(500, self.test_result_command)
-                    self.test_result_saved = True
+                    # Reset PLC after processing test result
+                    self.root.after(1000, self.reset_plc_after_test)
                 
                 # Update the last states for next cycle
                 self.last_test_result_pass_state = test_result_pass_current
@@ -2962,7 +3044,7 @@ class EOLTesterGUI:
                 else:
                     print("Cannot start monitoring - PLC connection failed")
                     self.safe_update_message("Cannot start monitoring - PLC connection failed. Check COM port settings.", "red")
-
+            
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
         except Exception as e:
@@ -3304,6 +3386,195 @@ class EOLTesterGUI:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to reset PLC: {str(e)}")
+            
+    def reset_plc_after_test(self):
+        """Reset PLC test result coils after test result processing while keeping PLC high"""
+        try:
+            if self.plc_client and self.plc_client.is_socket_open():
+                station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                
+                # Get the addresses from ProcessStatus.txt
+                if hasattr(self, 'process_addresses') and self.process_addresses:
+                    # Reset test result coils first (index 6 and 7)
+                    test_result_indices = [6, 7]  # TEST RESULT PASS and TEST RESULT NG
+                    
+                    for index in test_result_indices:
+                        if index < len(self.process_addresses):
+                            address_str = self.process_addresses[index]
+                            if address_str and address_str.startswith('M'):
+                                try:
+                                    # Extract hex part and convert to int
+                                    hex_part = address_str[1:]
+                                    coil_address = int(hex_part, 16)
+                                    
+                                    # Write 0 to reset the coil
+                                    self.plc_client.write_coil(
+                                        address=coil_address,
+                                        value=False,
+                                        slave=station_id
+                                    )
+                                    print(f"Reset PLC coil at address {address_str}")
+                                except Exception as e:
+                                    print(f"Error resetting coil at {address_str}: {e}")
+                
+                # Ensure PLC main control coil (P0000) stays HIGH
+                try:
+                    # Write 1 to P0000 to keep PLC in HIGH state
+                    self.plc_client.write_coil(
+                        address=0x0000,  # P0000 address
+                        value=True,
+                        slave=station_id
+                    )
+                    print("Ensured PLC P0000 remains HIGH")
+                except Exception as e:
+                    print(f"Error ensuring PLC stays HIGH: {e}")
+                
+                print("PLC test result coils reset successfully while keeping PLC HIGH")
+                self.safe_update_message("PLC reset for next test (PLC remains HIGH)", "blue")
+                
+        except Exception as e:
+            print(f"Error in reset_plc_after_test: {e}")
+            traceback.print_exc()
+            
+    def start_next_test_cycle(self, previous_lot):
+        """Start next test cycle with incremented lot number"""
+        try:
+            # Check if PLC is still HIGH
+            plc_state = self.check_plc_control_state()
+            if plc_state is not True:
+                print("PLC is not HIGH - stopping test cycle")
+                self.safe_update_message("PLC is not HIGH - test cycle stopped", "red")
+                return
+                
+            print("=== STARTING NEXT TEST CYCLE ===")
+            
+            # Generate new lot number by incrementing the previous one
+            if previous_lot:
+                # Extract parts of the lot number
+                try:
+                    # Format: YYMMDDXXYZNNNNNNNN
+                    # Extract the date part (first 6 digits)
+                    date_part = previous_lot[:6]
+                    # Extract the machine part (next 3 characters)
+                    machine_part = previous_lot[6:9]
+                    # Extract the increment part (last 8 digits)
+                    increment_part = previous_lot[-8:]
+                    
+                    # Increment the number
+                    try:
+                        new_increment = int(increment_part) + 1
+                        # Format back to 8 digits with leading zeros
+                        new_increment_str = f"{new_increment:08d}"
+                        
+                        # Create new lot number
+                        new_lot = f"{date_part}{machine_part}{new_increment_str}"
+                        print(f"Incremented lot number: {previous_lot} -> {new_lot}")
+                        
+                        # Set as current lot number
+                        self.current_lot_number = new_lot
+                        self.safe_update_message(f"New test cycle with lot: {new_lot}", "green")
+                    except ValueError:
+                        print(f"Could not parse increment part: {increment_part}")
+                        # Generate new lot number instead
+                        self.current_lot_number = self.generate_lot_number()
+                        print(f"Generated new lot number: {self.current_lot_number}")
+                except Exception as e:
+                    print(f"Error parsing lot number {previous_lot}: {e}")
+                    # Generate new lot number instead
+                    self.current_lot_number = self.generate_lot_number()
+                    print(f"Generated new lot number: {self.current_lot_number}")
+            else:
+                # Generate new lot number
+                self.current_lot_number = self.generate_lot_number()
+                print(f"Generated new lot number: {self.current_lot_number}")
+                
+            # Reset process status to simulate start of a new test
+            # This will trigger the PLC to start a new test cycle
+            self.reset_process_status_for_new_cycle()
+            
+            # Check PLC status continuously to detect when test is complete
+            self.root.after(500, self.monitor_test_completion)
+                
+        except Exception as e:
+            print(f"Error starting next test cycle: {e}")
+            traceback.print_exc()
+            
+    def reset_process_status_for_new_cycle(self):
+        """Reset process status registers to start a new test cycle"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                print("PLC not connected - cannot reset process status")
+                return False
+                
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Reset all process status registers except P0000 (main control)
+            if hasattr(self, 'process_addresses') and self.process_addresses:
+                # Skip index 0 which is the AUTO register - we want to keep that HIGH
+                for i in range(1, len(self.process_addresses)):
+                    address_str = self.process_addresses[i]
+                    if address_str and address_str.startswith('M'):
+                        try:
+                            # Extract hex part and convert to int
+                            hex_part = address_str[1:]
+                            coil_address = int(hex_part, 16)
+                            
+                            # Write 0 to reset the coil
+                            self.plc_client.write_coil(
+                                address=coil_address,
+                                value=False,
+                                slave=station_id
+                            )
+                            print(f"Reset process status coil at address {address_str}")
+                        except Exception as e:
+                            print(f"Error resetting coil at {address_str}: {e}")
+            
+            print("Process status reset for new test cycle")
+            self.safe_update_message("Starting new test cycle...", "blue")
+            return True
+            
+        except Exception as e:
+            print(f"Error resetting process status: {e}")
+            return False
+            
+    def monitor_test_completion(self):
+        """Monitor PLC status to detect when test is complete"""
+        try:
+            # Check if PLC is still HIGH
+            plc_state = self.check_plc_control_state()
+            if plc_state is not True:
+                print("PLC is not HIGH - stopping test cycle monitoring")
+                self.safe_update_message("PLC is not HIGH - test cycle stopped", "red")
+                return
+                
+            # Read current status
+            status_values = self.read_process_status_values()
+            
+            # Check if test result registers are HIGH
+            test_result_pass = False
+            test_result_ng = False
+            
+            if hasattr(self, 'process_addresses') and len(self.process_addresses) > 7:
+                test_result_pass_addr = self.process_addresses[6]  # TEST RESULT PASS
+                test_result_ng_addr = self.process_addresses[7]    # TEST RESULT NG
+                
+                test_result_pass = status_values.get(test_result_pass_addr, False)
+                test_result_ng = status_values.get(test_result_ng_addr, False)
+                
+            # If test is complete (either pass or fail)
+            if test_result_pass or test_result_ng:
+                print("Test completion detected - processing results")
+                # Let the normal test result processing handle it
+                # The auto_reset_for_next_test will be called after processing
+                # which will then schedule the next test cycle
+            else:
+                # Continue monitoring
+                self.root.after(500, self.monitor_test_completion)
+                
+        except Exception as e:
+            print(f"Error monitoring test completion: {e}")
+            # Continue monitoring despite error
+            self.root.after(500, self.monitor_test_completion)
 
     def read_loadcell_data(self):
         """Read and process loadcell data"""
@@ -3445,119 +3716,142 @@ class EOLTesterGUI:
     def next_label_command(self):
         """Process test results, save to database, reset page, and prepare for next test"""
         try:
-            # Check if we have a valid lot number (from barcode scanning)
+            print("=== NEXT LABEL COMMAND STARTED ===")
+            
+            # Check if we have a valid lot number, auto-generate if needed
             lot_number = getattr(self, 'current_lot_number', None)
+            print(f"LOT Number: {lot_number}")
             
             if not lot_number:
-                messagebox.showwarning("Warning", "Please scan a barcode first to get LOT number")
+                # Auto-generate lot number if not already generated
+                if (hasattr(self, 'current_part_number') and self.current_part_number and 
+                    self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
+                    lot_number = self.generate_lot_number()
+                    self.current_lot_number = lot_number
+                    print(f"Auto-generated LOT number {lot_number} for next label command")
+                else:
+                    messagebox.showwarning("Warning", "Cannot generate LOT number - missing part number or employee code")
+                    return
+                
+            # Check if we have a current part number
+            part_number = getattr(self, 'current_part_number', None)
+            print(f"Part Number: {part_number}")
+            
+            if not part_number:
+                messagebox.showwarning("Warning", "Please select an ALC code first to identify the part")
                 return
                 
             # Get test results from spec tree
             values_dict = {}
             values_dict["LOT NUMBER"] = lot_number
+            values_dict["PART NUMBER"] = part_number
             
             has_result = False
             all_devices_pass = True
             
             # If we have specifications available, collect them
             if hasattr(self, 'spec_tree') and self.spec_tree:
+                print("Processing spec tree data...")
                 available_devices = set()
                 
                 # First, collect all device values and check if any are NG
                 for item in self.spec_tree.get_children():
                     values = self.spec_tree.item(item, "values")
+                    print(f"Spec tree item values: {values}")
+                    
                     if len(values) > 1 and values[1]:  # If device column has a value
                         device = values[1]
-                        result_value = values[-1] if len(values) > 5 else None
-                        actual_value = values[-2] if len(values) > 5 else None
+                        result_value = values[-1] if len(values) > 6 else None  # Result column
+                        actual_value = values[-2] if len(values) > 5 else None  # Actual column
+                        
+                        print(f"Device: {device}, Actual: {actual_value}, Result: {result_value}")
                         
                         # Store device in available devices set
                         available_devices.add(device)
                         
                         # Store both the result and actual value
-                        if result_value:
+                        if result_value and result_value.strip():
                             has_result = True
-                            # Store the actual value (not the result) for L1-L4 and P1-P4
-                            if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual_value:
-                                values_dict[device] = actual_value
-                            else:
-                                values_dict[device] = result_value
+                            # Store the result for the device
+                            values_dict[device] = result_value
                             
                             # Check if this result is NG
-                            if result_value == "NG":
+                            if result_value == "NG" or result_value == "FAIL":
                                 all_devices_pass = False
+                                print(f"Device {device} failed with result: {result_value}")
+                        elif actual_value and actual_value.strip() and actual_value != "N/A":
+                            # If no result but we have actual value, assume test happened
+                            has_result = True
+                            values_dict[device] = "PASS"  # Default to PASS if we have actual data
+                            print(f"Device {device} has actual value {actual_value}, defaulting to PASS")
+                
+                print(f"Available devices: {available_devices}")
+                print(f"Has result: {has_result}")
+                print(f"All devices pass: {all_devices_pass}")
                 
                 # If there are any device results, set an overall RESULT value
                 if has_result:
                     values_dict["RESULT"] = "PASS" if all_devices_pass else "NG"
-                
-                # Check if all existing devices have values and all are passing
-                all_existing_devices_pass = True
-                if has_result:
-                    # Loop through specifications to see if any with values are NG
-                    for item in self.spec_tree.get_children():
-                        values = self.spec_tree.item(item, "values")
-                        if len(values) > 5:
-                            device = values[1] if len(values) > 1 else ""
-                            result = values[-1]
-                            actual = values[-2]
-                            
-                            # Only check devices that have actual values
-                            if actual and actual != "N/A":
-                                if result == "NG":
-                                    all_existing_devices_pass = False
-                                    break
+                    print(f"Overall result: {values_dict['RESULT']}")
+                else:
+                    # Even if no explicit results, create a test record if we have LOT and PART
+                    print("No test results found, creating basic record...")
+                    has_result = True
+                    values_dict["RESULT"] = "NO_DATA"
+                    all_devices_pass = False  # Don't display in tree if no data
             
-            # Always add to tree view and database if we have results
-            if has_result:
-                # Create values list with PASS/NG for display in treeview
-                display_values = []
-                for col in self.current_columns:
-                    if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                        # For device columns, display PASS/NG in the tree view
-                        if col in values_dict and values_dict[col]:
-                            # If we have a numeric value, determine if it's PASS or NG
-                            device_item = None
-                            for tree_item in self.spec_tree.get_children():
-                                tree_values = self.spec_tree.item(tree_item, "values")
-                                if len(tree_values) > 1 and tree_values[1] == col:
-                                    device_item = tree_item
-                                    break
-                            
-                            if device_item:
-                                result = self.spec_tree.item(device_item, "values")[-1]
-                                display_values.append(result)
-                            else:
-                                display_values.append("N/A")
-                        else:
-                            display_values.append("N/A")
-                    else:
-                        # For non-device columns, use the value directly
-                        display_values.append(values_dict.get(col, "N/A"))
-                
-                # Only add PASS results to tree view (but save all to database)
-                should_display_in_tree = all_existing_devices_pass
-                if should_display_in_tree:
-                    # Insert new row at the top for PASS results only
-                    self.tree.insert('', 0, values=tuple(display_values))
+            # Always save to database if we have a LOT and PART number
+            if has_result and lot_number and part_number:
+                print(f"Preparing to save to database: {values_dict}")
                 
                 # Save lot data to database (always save both PASS and FAIL)
-                print("Saving test result to database")
                 success = self.save_lot_data_to_database(values_dict)
+                print(f"Database save result: {success}")
                 
                 if success:
-                    if all_existing_devices_pass:
+                    # Always update tree view after successful save
+                    print("Refreshing tree view...")
+                    self.load_history_to_treeview()
+                    
+                    # Create values list for immediate display in treeview
+                    display_values = []
+                    for col in self.current_columns:
+                        if col == "LOT NUMBER":
+                            display_values.append(lot_number)
+                        elif col == "SCAN RESULT":
+                            display_values.append(f"LOT: {lot_number}")
+                        elif col == "RESULT":
+                            display_values.append(values_dict.get("RESULT", "N/A"))
+                        elif col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                            # For device columns, show the result
+                            display_values.append(values_dict.get(col, "N/A"))
+                        else:
+                            display_values.append(values_dict.get(col, "N/A"))
+                    
+                    # Always add to tree view for immediate feedback
+                    print(f"Adding to tree view: {display_values}")
+                    self.tree.insert('', 0, values=tuple(display_values))
+                    
+                    if all_devices_pass and values_dict.get("RESULT") == "PASS":
                         self.safe_update_message(f"LOT {lot_number} - PASS result saved and displayed", "green")
                     else:
-                        self.safe_update_message(f"LOT {lot_number} - FAIL result saved (not displayed in tree)", "orange")
+                        self.safe_update_message(f"LOT {lot_number} - Test result saved to database", "blue")
                     
                     # Start 3-second timer for automatic reset
-                    self.safe_update_message("Resetting in 3 seconds...", "blue")
+                    self.root.after(1000, lambda: self.safe_update_message("Resetting in 2 seconds...", "blue"))
+                    self.root.after(2000, lambda: self.safe_update_message("Resetting in 1 second...", "blue"))
                     self.root.after(3000, self.reset_page_for_next_test)
                 else:
-                    self.safe_update_message("Failed to save to database", "red")
+                    self.safe_update_message("Failed to save to database - check database connection", "red")
             else:
-                self.safe_update_message("No test results found - nothing to save", "orange")
+                if not lot_number:
+                    self.safe_update_message("Missing LOT number - scan barcode first", "orange")
+                elif not part_number:
+                    self.safe_update_message("Missing part number - select ALC code first", "orange")
+                else:
+                    self.safe_update_message("No test data to save", "orange")
+            
+            print("=== NEXT LABEL COMMAND COMPLETED ===")
             
         except Exception as e:
             print(f"Error in next_label_command: {e}")
@@ -3742,76 +4036,104 @@ class EOLTesterGUI:
         try:
             # Validate values
             if not values_dict or "LOT NUMBER" not in values_dict:
-                print("Invalid values provided for database save")
+                print("ERROR: Invalid values provided for database save")
                 return False
                 
-            # Connect to database
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            # Test database connection first with improved settings
+            print("Attempting database connection...")
+            try:
+                conn = mysql.connector.connect(
+                    host="localhost",
+                    user="root",
+                    password="12345",
+                    database="EOL",
+                    autocommit=False,
+                    connection_timeout=10,
+                    charset='utf8mb4',
+                    use_unicode=True,
+                    raise_on_warnings=True,
+                    sql_mode='STRICT_TRANS_TABLES',
+                    pool_reset_session=True
+                )
+                print("Database connection successful with enhanced settings")
+            except mysql.connector.Error as db_err:
+                print(f"Database connection failed: {db_err}")
+                self.safe_update_message(f"Database connection failed: {db_err}", "red")
+                return False
             
             cursor = conn.cursor()
             
-            # Check if table exists, create if not
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_TEST_RESULTS (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    LOT_NUMBER VARCHAR(255),
-                    PART_NUMBER VARCHAR(255),
-                    L1 VARCHAR(50),
-                    L2 VARCHAR(50),
-                    L3 VARCHAR(50),
-                    L4 VARCHAR(50),
-                    P1 VARCHAR(50),
-                    P2 VARCHAR(50),
-                    P3 VARCHAR(50),
-                    P4 VARCHAR(50),
-                    RESULT VARCHAR(50),
-                    SCAN_RESULT VARCHAR(255),
-                    CREATED_BY VARCHAR(255),
-                    CREATED_DATE DATETIME
-                )
-            """)
+            # Work with existing table structure - don't alter it
+            # The table already exists with columns: LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
+            # RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE, SPEC_DATA, EMP_CODE
+            print("Using existing TBL_TEST_RESULTS table structure")
             
             # Get values for insertion
             lot_number = values_dict.get("LOT NUMBER", "")
-            part_number = getattr(self, 'current_part_number', '')
+            part_number = values_dict.get("PART NUMBER", "") or getattr(self, 'current_part_number', '')
+            
+            print(f"Database save for LOT: {lot_number}, PART: {part_number}")
             
             # Get employee code
-            emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else "Unknown"
+            emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else ""
+            print(f"Employee code: {emp_code}")
             
-            # Get all device values - store everything directly in the main columns
-            # All obtained values (whether numeric measurements or PASS/NG results) go directly to L1-L4, P1-P4
+            # Extract actual measurement values from spec tree and store in device columns (L1-P4)
             device_values = {}
             
-            for device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                if device in values_dict:
-                    raw_value = values_dict[device]
-                    device_values[device] = raw_value
-                else:
-                    device_values[device] = ""
+            print("Extracting actual values from spec tree...")
+            for item in self.spec_tree.get_children():
+                spec_values = self.spec_tree.item(item, "values")
+                if len(spec_values) > 1:
+                    device = spec_values[1]  # Device column
+                    actual_value = spec_values[-2] if len(spec_values) > 5 else None  # Actual column
+                    
+                    if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                        # Store actual measurement values directly in device columns
+                        if actual_value and actual_value.strip() and actual_value != "N/A" and actual_value != "":
+                            try:
+                                # Store the actual numeric value in the device column
+                                device_values[device] = float(actual_value)
+                                print(f"Extracted {device} actual value: {device_values[device]}")
+                            except (ValueError, TypeError):
+                                # If not numeric, store as empty/NULL
+                                device_values[device] = None
+                                print(f"Could not parse {device} value '{actual_value}' as number, storing as NULL")
+                        else:
+                            device_values[device] = None
+                            print(f"No actual value for {device}, storing as NULL")
             
-            l1_value = device_values.get("L1", "")
-            l2_value = device_values.get("L2", "")
-            l3_value = device_values.get("L3", "")
-            l4_value = device_values.get("L4", "")
-            p1_value = device_values.get("P1", "")
-            p2_value = device_values.get("P2", "")
-            p3_value = device_values.get("P3", "")
-            p4_value = device_values.get("P4", "")
+            # Get individual device values (store actual measurements in L1-P4 columns)
+            l1_value = device_values.get("L1", None)
+            l2_value = device_values.get("L2", None)
+            l3_value = device_values.get("L3", None)
+            l4_value = device_values.get("L4", None)
+            p1_value = device_values.get("P1", None)
+            p2_value = device_values.get("P2", None)
+            p3_value = device_values.get("P3", None)
+            p4_value = device_values.get("P4", None)
             
+            # Validate that the number of L values equals the number of P values
+            if not self.validate_l_p_equality(l1_value, l2_value, l3_value, l4_value, 
+                                             p1_value, p2_value, p3_value, p4_value):
+                print("ERROR: Number of L values does not equal number of P values")
+                self.safe_update_message("Data validation failed - L and P counts must match", "red")
+                return False
             
-            result = values_dict.get("RESULT", "")
+            # Determine overall result based on specifications vs actual values
+            overall_result = self.determine_overall_result_from_specs(device_values)
+            print(f"Overall result determined: {overall_result}")
+            
+            # Create scan result and spec data
             scan_result = f"LOT: {lot_number}"
+            spec_data = self.get_spec_data_summary(device_values)
             
             # Print debug info about what's being saved
             print(f"Database Save - LOT: {lot_number}, Part: {part_number}, Employee: {emp_code}")
-            print(f"Values - L1:{l1_value}, L2:{l2_value}, L3:{l3_value}, L4:{l4_value}")
-            print(f"Values - P1:{p1_value}, P2:{p2_value}, P3:{p3_value}, P4:{p4_value}")
-            print(f"Overall Result: {result}")
+            print(f"Device Values - L1:{l1_value}, L2:{l2_value}, L3:{l3_value}, L4:{l4_value}")
+            print(f"Device Values - P1:{p1_value}, P2:{p2_value}, P3:{p3_value}, P4:{p4_value}")
+            print(f"Overall Result: {overall_result}")
+            print(f"Scan Result: {scan_result}")
             
             # Check if record already exists
             cursor.execute(
@@ -3821,48 +4143,57 @@ class EOLTesterGUI:
             existing_record = cursor.fetchone()
             
             if existing_record:
-                # Update existing record
+                # Update existing record using exact column names from database
                 query = """
                 UPDATE TBL_TEST_RESULTS 
-                SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, 
+                SET L1 = %s, L2 = %s, L3 = %s, L4 = %s,
                     P1 = %s, P2 = %s, P3 = %s, P4 = %s,
-                    RESULT = %s, SCAN_RESULT = %s,
-                    CREATED_BY = %s, 
-                    CREATED_DATE = %s 
+                    RESULT = %s,
+                    SCAN_RESULT = %s,
+                    EMP_CODE = %s, 
+                    SPEC_DATA = %s,
+                    CREATED_DATE = NOW()
                 WHERE LOT_NUMBER = %s AND PART_NUMBER = %s
                 """
                 cursor.execute(query, (
                     l1_value, l2_value, l3_value, l4_value,
                     p1_value, p2_value, p3_value, p4_value,
-                    result, scan_result,
-                    emp_code, 
-                    datetime.now(), 
+                    overall_result,
+                    scan_result,
+                    emp_code,
+                    spec_data,
                     lot_number, 
                     part_number
                 ))
                 print(f"Updated existing database record for LOT {lot_number}")
             else:
-                # Insert new record
+                # Insert new record using exact column names from database
                 query = """
                 INSERT INTO TBL_TEST_RESULTS 
                 (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                 RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 RESULT, SCAN_RESULT, CREATED_BY, EMP_CODE, SPEC_DATA) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 cursor.execute(query, (
                     lot_number, 
                     part_number, 
                     l1_value, l2_value, l3_value, l4_value,
                     p1_value, p2_value, p3_value, p4_value,
-                    result, scan_result,
-                    emp_code, 
-                    datetime.now()
+                    overall_result,
+                    scan_result,
+                    emp_code,  # CREATED_BY
+                    emp_code,  # EMP_CODE
+                    spec_data
                 ))
                 print(f"Inserted new database record for LOT {lot_number}")
             
             # Commit changes
             conn.commit()
-            print(f"Database save successful for LOT {lot_number}")
+            print(f"*** DATABASE SAVE SUCCESSFUL for LOT {lot_number} ***")
+            
+            # Update tree columns to include any new devices with data
+            self.update_tree_columns()
+            
             return True
             
         except mysql.connector.Error as e:
@@ -3873,10 +4204,74 @@ class EOLTesterGUI:
             return False
         finally:
             # Ensure cleanup
-            if cursor:
+            if 'cursor' in locals():
                 cursor.close()
-            if conn:
+            if 'conn' in locals():
                 conn.close()
+
+    def determine_overall_result_from_specs(self, device_values):
+        """Determine overall result by comparing actual values with specifications"""
+        try:
+            if not device_values or not any(device_values.values()):
+                return "NO_DATA"
+            
+            # Check each device against its specifications
+            all_pass = True
+            any_tested = False
+            
+            for item in self.spec_tree.get_children():
+                spec_values = self.spec_tree.item(item, "values")
+                if len(spec_values) > 1:
+                    device = spec_values[1]  # Device column
+                    
+                    if device in device_values and device_values[device] is not None:
+                        any_tested = True
+                        try:
+                            min_val = float(spec_values[3]) if spec_values[3] and spec_values[3] != "N/A" else None
+                            max_val = float(spec_values[4]) if spec_values[4] and spec_values[4] != "N/A" else None
+                            actual_val = device_values[device]
+                            
+                            # Check if actual value is within specifications
+                            if min_val is not None and actual_val < min_val:
+                                all_pass = False
+                                print(f"{device} FAIL: {actual_val} < {min_val} (min)")
+                                break
+                            elif max_val is not None and actual_val > max_val:
+                                all_pass = False
+                                print(f"{device} FAIL: {actual_val} > {max_val} (max)")
+                                break
+                            else:
+                                print(f"{device} PASS: {actual_val} within specs")
+                        except (ValueError, TypeError):
+                            print(f"Could not validate {device} specifications")
+                            continue
+            
+            if not any_tested:
+                return "NO_DATA"
+            elif all_pass:
+                return "PASS"
+            else:
+                return "FAIL"
+                
+        except Exception as e:
+            print(f"Error determining overall result: {e}")
+            return "ERROR"
+
+    def get_spec_data_summary(self, device_values):
+        """Create a summary of specification data for storage"""
+        try:
+            # Create a dictionary for JSON conversion
+            spec_data = {}
+            for device, value in device_values.items():
+                if value is not None:
+                    spec_data[device] = round(value, 3)
+            
+            # Convert to JSON string for database storage
+            import json
+            return json.dumps(spec_data) if spec_data else '{"status": "NO_MEASUREMENTS"}'
+        except Exception as e:
+            print(f"Error creating spec data summary: {e}")
+            return '{"status": "ERROR"}'
             
     def add_to_tree(self, lotnum, pass_tests, total_tests):
         """Add entry to the treeview"""
@@ -4055,33 +4450,43 @@ class EOLTesterGUI:
     def get_lot_history(self, limit=50):
         """Get lot test result history from database"""
         try:
+            print(f"Getting lot history (limit: {limit})...")
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
                 password="12345",
-                database="EOL"
+                database="EOL",
+                connection_timeout=10,
+                charset='utf8mb4',
+                use_unicode=True,
+                autocommit=True
             )
             
             cursor = conn.cursor()
             
             # Get current part number if available
             part_number = getattr(self, 'current_part_number', '')
+            print(f"Current part number: {part_number}")
             
             if part_number:
-                # If part number is available, filter by it
+                # If part number is available, filter by it and only show PASS results
                 query = """
-                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_DATE
+                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
+                       RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
                 FROM TBL_TEST_RESULTS
-                WHERE PART_NUMBER = %s
+                WHERE PART_NUMBER = %s AND RESULT = 'PASS'
                 ORDER BY CREATED_DATE DESC
                 LIMIT %s
                 """
                 cursor.execute(query, (part_number, limit))
+                print(f"Executed query with part number filter: {part_number}")
             else:
-                # Otherwise get the most recent results
+                # Otherwise get the most recent PASS results only
                 query = """
-                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, RESULT, SCAN_RESULT, CREATED_DATE
+                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
+                       RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
                 FROM TBL_TEST_RESULTS
+                WHERE RESULT = 'PASS'
                 ORDER BY CREATED_DATE DESC
                 LIMIT %s
                 """
@@ -4106,16 +4511,24 @@ class EOLTesterGUI:
     def load_history_to_treeview(self):
         """Load lot history from database to treeview"""
         try:
+            print("=== LOADING HISTORY TO TREEVIEW ===")
+            
             # Get lot history
             history = self.get_lot_history()
+            print(f"Retrieved {len(history)} records from database")
             
             if not history:
+                print("No history found in database")
                 self.safe_update_message("No history found", "blue")
                 return
+            
+            # Update tree columns based on available data before loading
+            self.update_tree_columns()
                 
             # Clear treeview
             for item in self.tree.get_children():
                 self.tree.delete(item)
+            print("Cleared existing tree view items")
             
             # Count records for reporting
             total_records = len(history)
@@ -4127,59 +4540,62 @@ class EOLTesterGUI:
                 values_dict = {}
                 values_dict["LOT NUMBER"] = item[0] if len(item) > 0 else ""
                 
-                # Track if this record has any device values with results
-                has_device_values = False
-                all_devices_pass = True
+                # Track if this record has any actual values
+                has_actual_values = False
                 
-                # Map database columns to treeview columns
-                db_columns = ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4", "RESULT", "SCAN RESULT"]
-                for i, col in enumerate(db_columns, 1):
+                # Map database columns to treeview columns using actual column names
+                # item structure: LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
+                #                RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
+                device_columns = ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]
+                for i, device in enumerate(device_columns, 1):  # Start from index 1
                     if i < len(item):
-                        db_value = item[i]
-                        if db_value and db_value != "N/A":
-                            has_device_values = True
-                            
-                            # For device columns (L1-P4), determine PASS/NG based on values
-                            if i <= 8:  # Only the device columns (L1-P4)
-                                try:
-                                    # Try to convert the value to float for comparison
-                                    # This is a simplified check - in a real implementation,
-                                    # you'd need to load the min/max specs for this part number
-                                    # Here we're just checking if the value exists
-                                    float(db_value)
-                                    # If we can parse it as a float, consider it PASS
-                                    values_dict[col] = "PASS"
-                                except (ValueError, TypeError):
-                                    # If it's not a numeric value, check if it's a result value
-                                    if db_value == "PASS":
-                                        values_dict[col] = "PASS"
-                                    elif db_value == "NG" or db_value == "FAIL":
-                                        values_dict[col] = "NG"
-                                        all_devices_pass = False
-                                    else:
-                                        # For any other value, just use it directly
-                                        values_dict[col] = db_value
-                            else:
-                                # For non-device columns, use the value directly
-                                values_dict[col] = db_value or "N/A"
+                        device_value = item[i]
+                        if device_value is not None:
+                            has_actual_values = True
+                            # Display the actual measurement value stored in device columns
+                            values_dict[device] = f"{device_value:.3f}" if isinstance(device_value, (int, float)) else str(device_value)
                         else:
-                            values_dict[col] = "N/A"
+                            values_dict[device] = "N/A"
+                    else:
+                        values_dict[device] = "N/A"
                 
-                # Only display records that have overall PASS or all existing device columns show PASS
-                if has_device_values and (item[9] == "PASS" or all_devices_pass):
+                # Add result and scan result from correct positions
+                if len(item) > 9:
+                    values_dict["RESULT"] = item[9] or "N/A"  # RESULT column
+                else:
+                    values_dict["RESULT"] = "N/A"
+                
+                if len(item) > 10:
+                    values_dict["SCAN RESULT"] = item[10] or f"LOT: {item[0]}"  # SCAN_RESULT column
+                else:
+                    values_dict["SCAN RESULT"] = f"LOT: {item[0]}"
+                
+                # Only display records with PASS result
+                result_value = item[9] if len(item) > 9 else ""
+                if result_value == "PASS" and has_actual_values:
                     # Create values list in the same order as self.current_columns
                     values = []
                     for col in self.current_columns:
-                        values.append(values_dict.get(col, "N/A"))
+                        if col == "SR":  # Handle short form of SCAN RESULT
+                            values.append(values_dict.get("SCAN RESULT", "N/A"))
+                        elif col == "SCAN RESULT":
+                            values.append(values_dict.get("SCAN RESULT", "N/A"))
+                        else:
+                            values.append(values_dict.get(col, "N/A"))
                     
                     # Insert the record into the tree
+                    print(f"Adding to tree: {values}")
                     self.tree.insert("", "end", text=values[0], values=tuple(values))
                     displayed_records += 1
+                else:
+                    print(f"Skipping record (no device values or result): {item}")
                 
             # Display message about records
             if displayed_records > 0:
-                self.safe_update_message(f"Loaded {displayed_records} PASS records (filtered from {total_records} total records)", "green")
+                self.safe_update_message(f"Loaded {displayed_records} PASS test records from database", "green")
+                print(f"Successfully displayed {displayed_records} PASS records out of {total_records} total records")
             else:
+                print("No records met display criteria")
                 self.safe_update_message(f"No PASS records found (filtered from {total_records} total records)", "blue")
             
         except Exception as e:
@@ -4374,6 +4790,12 @@ class EOLTesterGUI:
         for device in devices:
             if device not in updated_devices:
                 print(f"Warning: Device {device} not found in specification tree")
+        
+        # If any devices were updated with actual values, update tree columns
+        if updated_devices:
+            print(f"Devices updated with actual values: {updated_devices}")
+            print("Triggering tree column update due to new measurement data...")
+            self.update_tree_columns()
                 
     def flash_spec_row(self, item, final_tag):
         """Briefly flash a row to highlight it was updated"""
@@ -4412,6 +4834,129 @@ class EOLTesterGUI:
                 return values[-2] if len(values) > 2 else None
                 
         return None
+
+    def generate_lot_number(self):
+        """Generate lot number with format: YYMMDD+I+machine_id_last_digit+G+A+increment"""
+        try:
+            # Get current date in YYMMDD format
+            current_date = datetime.now()
+            date_str = current_date.strftime('%y%m%d')
+            
+            # Get machine ID from environment variable
+            machine_id = getattr(self, 'machineid', 'PHA1')  # Default to PHA1 if not set
+            
+            # Extract last digit/character from machine ID
+            machine_last_digit = '1'  # Default
+            if machine_id:
+                # Extract the last digit from machine ID (e.g., PHA1 -> 1, PHA2 -> 2)
+                last_char = machine_id[-1] if machine_id else '1'
+                if last_char.isdigit():
+                    machine_last_digit = last_char
+                else:
+                    machine_last_digit = '1'
+            
+            # Get next increment for today
+            increment = self.get_next_lot_increment(date_str, machine_last_digit)
+            
+            # Format: YYMMDD + I + machine_last_digit + G + A + increment (7 digits)
+            lot_number = f"{date_str}I{machine_last_digit}GA{increment:07d}"
+            
+            print(f"Generated lot number: {lot_number}")
+            print(f"  Date: {date_str}")
+            print(f"  Machine ID: {machine_id}")
+            print(f"  Machine last digit: {machine_last_digit}")
+            print(f"  Increment: {increment:07d}")
+            
+            return lot_number
+            
+        except Exception as e:
+            print(f"Error generating lot number: {e}")
+            traceback.print_exc()
+            # Return a fallback lot number
+            fallback_date = datetime.now().strftime('%y%m%d')
+            return f"{fallback_date}I1GA0000001"
+    
+    def validate_l_p_equality(self, l1, l2, l3, l4, p1, p2, p3, p4):
+        """Validate that the number of non-null L values equals the number of non-null P values"""
+        # Count non-null L values
+        l_values = [l1, l2, l3, l4]
+        l_count = sum(1 for l in l_values if l is not None)
+        
+        # Count non-null P values
+        p_values = [p1, p2, p3, p4]
+        p_count = sum(1 for p in p_values if p is not None)
+        
+        print(f"Validation: L count = {l_count}, P count = {p_count}")
+        
+        # Check if counts match
+        if l_count == p_count:
+            return True
+        else:
+            return False
+            
+    def get_next_lot_increment(self, date_str, machine_digit):
+        """Get the next increment number for lot generation"""
+        try:
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="12345",
+                database="EOL",
+                connection_timeout=10,
+                charset='utf8mb4',
+                use_unicode=True
+            )
+            cursor = conn.cursor()
+            
+            # Create lot sequence table if it doesn't exist
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS TBL_LOT_SEQUENCE (
+                    ID INT AUTO_INCREMENT PRIMARY KEY,
+                    DATE_STR VARCHAR(6) NOT NULL,
+                    MACHINE_DIGIT VARCHAR(1) NOT NULL,
+                    LAST_INCREMENT INT DEFAULT 0,
+                    CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UPDATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_date_machine (DATE_STR, MACHINE_DIGIT)
+                )
+            ''')
+            
+            # Get current increment for this date and machine
+            cursor.execute(
+                "SELECT LAST_INCREMENT FROM TBL_LOT_SEQUENCE WHERE DATE_STR = %s AND MACHINE_DIGIT = %s",
+                (date_str, machine_digit)
+            )
+            result = cursor.fetchone()
+            
+            if result:
+                # Increment existing counter
+                next_increment = result[0] + 1
+                cursor.execute(
+                    "UPDATE TBL_LOT_SEQUENCE SET LAST_INCREMENT = %s WHERE DATE_STR = %s AND MACHINE_DIGIT = %s",
+                    (next_increment, date_str, machine_digit)
+                )
+            else:
+                # Create new entry starting from 1
+                next_increment = 1
+                cursor.execute(
+                    "INSERT INTO TBL_LOT_SEQUENCE (DATE_STR, MACHINE_DIGIT, LAST_INCREMENT) VALUES (%s, %s, %s)",
+                    (date_str, machine_digit, next_increment)
+                )
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return next_increment
+            
+        except mysql.connector.Error as e:
+            print(f"Database error in get_next_lot_increment: {e}")
+            traceback.print_exc()
+            return 1  # Fallback to 1
+        except Exception as e:
+            print(f"Error in get_next_lot_increment: {e}")
+            traceback.print_exc()
+            return 1  # Fallback to 1
 
 def main():
     try:
