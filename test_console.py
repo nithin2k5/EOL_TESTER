@@ -3769,14 +3769,6 @@ class EOLTesterGUI:
                     P2 VARCHAR(50),
                     P3 VARCHAR(50),
                     P4 VARCHAR(50),
-                    L1_ACTUAL DECIMAL(10,3),
-                    L2_ACTUAL DECIMAL(10,3),
-                    L3_ACTUAL DECIMAL(10,3),
-                    L4_ACTUAL DECIMAL(10,3),
-                    P1_ACTUAL DECIMAL(10,3),
-                    P2_ACTUAL DECIMAL(10,3),
-                    P3_ACTUAL DECIMAL(10,3),
-                    P4_ACTUAL DECIMAL(10,3),
                     RESULT VARCHAR(50),
                     SCAN_RESULT VARCHAR(255),
                     CREATED_BY VARCHAR(255),
@@ -3791,57 +3783,34 @@ class EOLTesterGUI:
             # Get employee code
             emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else "Unknown"
             
-            # Get result values and actual measurement values
-            # For devices L1-L4 and P1-P4, we need both the result (PASS/NG) and actual value
-            device_results = {}
-            device_actuals = {}
+            # Get all device values - store everything directly in the main columns
+            # All obtained values (whether numeric measurements or PASS/NG results) go directly to L1-L4, P1-P4
+            device_values = {}
             
             for device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
                 if device in values_dict:
                     raw_value = values_dict[device]
-                    
-                    # Check if this is an actual measurement value (numeric) or result string
-                    try:
-                        # Try to parse as float - if successful, it's an actual value
-                        actual_value = float(raw_value)
-                        device_actuals[device] = actual_value
-                        
-                        # Get the corresponding PASS/NG result from spec tree
-                        result_from_spec = self.get_device_result_from_spec_tree(device)
-                        device_results[device] = result_from_spec if result_from_spec else ""
-                        
-                    except (ValueError, TypeError):
-                        # It's a result string (PASS/NG)
-                        device_results[device] = raw_value
-                        device_actuals[device] = None
+                    device_values[device] = raw_value
+                else:
+                    device_values[device] = ""
             
-            l1_result = device_results.get("L1", "")
-            l2_result = device_results.get("L2", "")
-            l3_result = device_results.get("L3", "")
-            l4_result = device_results.get("L4", "")
-            p1_result = device_results.get("P1", "")
-            p2_result = device_results.get("P2", "")
-            p3_result = device_results.get("P3", "")
-            p4_result = device_results.get("P4", "")
+            l1_value = device_values.get("L1", "")
+            l2_value = device_values.get("L2", "")
+            l3_value = device_values.get("L3", "")
+            l4_value = device_values.get("L4", "")
+            p1_value = device_values.get("P1", "")
+            p2_value = device_values.get("P2", "")
+            p3_value = device_values.get("P3", "")
+            p4_value = device_values.get("P4", "")
             
-            l1_actual = device_actuals.get("L1", None)
-            l2_actual = device_actuals.get("L2", None)
-            l3_actual = device_actuals.get("L3", None)
-            l4_actual = device_actuals.get("L4", None)
-            p1_actual = device_actuals.get("P1", None)
-            p2_actual = device_actuals.get("P2", None)
-            p3_actual = device_actuals.get("P3", None)
-            p4_actual = device_actuals.get("P4", None)
             
             result = values_dict.get("RESULT", "")
             scan_result = f"LOT: {lot_number}"
             
             # Print debug info about what's being saved
             print(f"Database Save - LOT: {lot_number}, Part: {part_number}, Employee: {emp_code}")
-            print(f"Results - L1:{l1_result}, L2:{l2_result}, L3:{l3_result}, L4:{l4_result}")
-            print(f"Results - P1:{p1_result}, P2:{p2_result}, P3:{p3_result}, P4:{p4_result}")
-            print(f"Actuals - L1:{l1_actual}, L2:{l2_actual}, L3:{l3_actual}, L4:{l4_actual}")
-            print(f"Actuals - P1:{p1_actual}, P2:{p2_actual}, P3:{p3_actual}, P4:{p4_actual}")
+            print(f"Values - L1:{l1_value}, L2:{l2_value}, L3:{l3_value}, L4:{l4_value}")
+            print(f"Values - P1:{p1_value}, P2:{p2_value}, P3:{p3_value}, P4:{p4_value}")
             print(f"Overall Result: {result}")
             
             # Check if record already exists
@@ -3857,18 +3826,14 @@ class EOLTesterGUI:
                 UPDATE TBL_TEST_RESULTS 
                 SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, 
                     P1 = %s, P2 = %s, P3 = %s, P4 = %s,
-                    L1_ACTUAL = %s, L2_ACTUAL = %s, L3_ACTUAL = %s, L4_ACTUAL = %s,
-                    P1_ACTUAL = %s, P2_ACTUAL = %s, P3_ACTUAL = %s, P4_ACTUAL = %s,
                     RESULT = %s, SCAN_RESULT = %s,
                     CREATED_BY = %s, 
                     CREATED_DATE = %s 
                 WHERE LOT_NUMBER = %s AND PART_NUMBER = %s
                 """
                 cursor.execute(query, (
-                    l1_result, l2_result, l3_result, l4_result,
-                    p1_result, p2_result, p3_result, p4_result,
-                    l1_actual, l2_actual, l3_actual, l4_actual,
-                    p1_actual, p2_actual, p3_actual, p4_actual,
+                    l1_value, l2_value, l3_value, l4_value,
+                    p1_value, p2_value, p3_value, p4_value,
                     result, scan_result,
                     emp_code, 
                     datetime.now(), 
@@ -3881,17 +3846,14 @@ class EOLTesterGUI:
                 query = """
                 INSERT INTO TBL_TEST_RESULTS 
                 (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                 L1_ACTUAL, L2_ACTUAL, L3_ACTUAL, L4_ACTUAL, P1_ACTUAL, P2_ACTUAL, P3_ACTUAL, P4_ACTUAL,
                  RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 cursor.execute(query, (
                     lot_number, 
                     part_number, 
-                    l1_result, l2_result, l3_result, l4_result,
-                    p1_result, p2_result, p3_result, p4_result,
-                    l1_actual, l2_actual, l3_actual, l4_actual,
-                    p1_actual, p2_actual, p3_actual, p4_actual,
+                    l1_value, l2_value, l3_value, l4_value,
+                    p1_value, p2_value, p3_value, p4_value,
                     result, scan_result,
                     emp_code, 
                     datetime.now()

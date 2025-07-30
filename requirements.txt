@@ -1,0 +1,40 @@
+# EOL Tester Application Dependencies
+
+# Image Processing
+Pillow>=9.0.0
+
+# Database
+mysql-connector-python>=8.0.0
+
+# Calendar Widget
+tkcalendar>=1.6.0
+
+# Input Monitoring
+pynput>=1.7.0
+
+# Serial Communication
+pyserial>=3.5
+
+# Modbus Communication
+pymodbus>=3.0.0
+
+# Environment Variables
+python-dotenv>=0.19.0
+
+# Data Processing
+pandas>=1.3.0
+
+# Standard Libraries (included with Python)
+# tkinter - Built-in with Python
+# threading
+# json
+# os
+# time
+# traceback
+# datetime
+# random
+# sys
+# csv
+# shutil
+# configparser
+# subprocess 
