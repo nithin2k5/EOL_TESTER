@@ -887,8 +887,8 @@ class EOLTesterGUI:
             new_columns.append(device)
             print(f"Including {device} column - auto-generated")
         
-        # Always include RESULT, ITERATION, and SCAN RESULT
-        new_columns.extend(["RESULT", "ITERATION", "SCAN RESULT"])
+        # Always include RESULT and SCAN RESULT
+        new_columns.extend(["RESULT", "SCAN RESULT"])
         
         # Check if columns are different from current ones
         if set(new_columns) != set(self.current_columns):
@@ -1199,14 +1199,8 @@ class EOLTesterGUI:
     def test_result_command(self):
         """Automatically process test results, save to database, and reset for next test"""
         try:
-            # Get current iteration number
-            current_iteration = getattr(self, 'iteration_count', 1)
-            print(f"=== PROCESSING RESULTS FOR ITERATION #{current_iteration} ===")
-            
-            # Check if data has already been saved for this iteration
-            if hasattr(self, 'iteration_data_saved') and self.iteration_data_saved == current_iteration:
-                print(f"Data already saved for iteration #{current_iteration} - skipping duplicate save")
-                return
+            # Remove iteration tracking - not needed for database operations
+            print("=== PROCESSING TEST RESULTS ===")
             
             # Auto-generate lot number for test results
             if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
@@ -1214,7 +1208,7 @@ class EOLTesterGUI:
                     self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
                     lot_number = self.generate_lot_number()
                     self.current_lot_number = lot_number
-                    print(f"Auto-generated LOT number {lot_number} for iteration #{current_iteration}")
+                    print(f"Auto-generated LOT number {lot_number}")
                 else:
                     self.safe_update_message("Cannot save test results - missing required data", "red")
                     print("ERROR: Cannot save test results - missing part number or employee code")
@@ -1227,7 +1221,7 @@ class EOLTesterGUI:
             # Get test results from spec tree
             values_dict = {}
             values_dict["LOT NUMBER"] = lot_number
-            values_dict["ITERATION"] = str(current_iteration)  # Store iteration number
+            # Remove iteration tracking from values_dict
             
             has_result = False
             all_devices_pass = True
@@ -1251,7 +1245,7 @@ class EOLTesterGUI:
                         if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual_value:
                             values_dict[device] = actual_value
                             has_result = True
-                            print(f"ITERATION #{current_iteration} - {device}: {actual_value}")
+                            print(f"{device}: {actual_value}")
                         elif result_value:
                             has_result = True
                             values_dict[device] = result_value
@@ -1266,83 +1260,73 @@ class EOLTesterGUI:
                 
                 # Check if all existing devices have values and all are passing
                 all_existing_devices_pass = True
-                if has_result:
-                    # Loop through specifications to see if any with values are NG
-                    for item in self.spec_tree.get_children():
-                        values = self.spec_tree.item(item, "values")
-                        if len(values) > 5:
-                            device = values[1] if len(values) > 1 else ""
-                            result = values[-1]
-                            actual = values[-2]
-                            
-                            # Only check devices that have actual values
-                            if actual and actual != "N/A":
-                                if result == "NG":
-                                    all_existing_devices_pass = False
-                                    break
-            
-            # Always save test results to database if we have results, regardless of pass/fail status
-            if has_result:
-                print(f"ITERATION #{current_iteration} - Saving results to database for LOT: {lot_number}")
-                success = self.save_lot_data_to_database(values_dict)
+                any_existing_devices = False
                 
-                if success:
-                    # Mark this iteration as having data saved to prevent duplicates
-                    self.iteration_data_saved = current_iteration
-                    print(f"ITERATION #{current_iteration} - Data saved successfully and marked as completed")
+                for device in available_devices:
+                    if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                        device_result = self.get_device_result_from_spec_tree(device)
+                        if device_result:
+                            any_existing_devices = True
+                            if device_result != "PASS":
+                                all_existing_devices_pass = False
+                
+                # Only save if we have actual test data
+                if has_result:
+                    print(f"Saving results to database for LOT: {lot_number}")
+                    success = self.save_lot_data_to_database(values_dict)
                     
-                    if all_existing_devices_pass:
-                        status_text = f"ITERATION #{current_iteration} - LOT {lot_number} - PASS result saved"
-                        self.safe_update_message(status_text, "green")
-                        print(f"ITERATION #{current_iteration} - LOT {lot_number} - PASS result saved to database")
-                    else:
-                        status_text = f"ITERATION #{current_iteration} - LOT {lot_number} - FAIL result saved"
-                        self.safe_update_message(status_text, "orange")
-                        print(f"ITERATION #{current_iteration} - LOT {lot_number} - FAIL result saved to database")
-                    
-                    # Create display values for tree view
-                    if hasattr(self, 'tree') and hasattr(self, 'current_columns'):
-                        # Create values list with actual values for display in treeview
-                        display_values = []
-                        for col in self.current_columns:
-                            if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                                # For device columns, display actual values in the tree view
-                                if col in values_dict and values_dict[col]:
-                                    display_values.append(values_dict[col])
+                    if success:
+                        print(f"Data saved successfully")
+                        
+                        if all_existing_devices_pass:
+                            status_text = f"LOT {lot_number} - PASS result saved"
+                            self.safe_update_message(status_text, "green")
+                            print(f"LOT {lot_number} - PASS result saved to database")
+                        else:
+                            status_text = f"LOT {lot_number} - FAIL result saved"
+                            self.safe_update_message(status_text, "orange")
+                            print(f"LOT {lot_number} - FAIL result saved to database")
+                        
+                        # Create display values for tree view
+                        if hasattr(self, 'tree') and hasattr(self, 'current_columns'):
+                            # Create values list with actual values for display in treeview
+                            display_values = []
+                            for col in self.current_columns:
+                                if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
+                                    # For device columns, display actual values in the tree view
+                                    if col in values_dict and values_dict[col]:
+                                        display_values.append(values_dict[col])
+                                    else:
+                                        display_values.append("N/A")
+                                elif col == "SCAN RESULT":
+                                    # Add lot number to scan result
+                                    display_values.append(f"LOT: {lot_number}")
                                 else:
-                                    display_values.append("N/A")
-                            elif col == "SCAN RESULT":
-                                # Add iteration number to scan result
-                                display_values.append(f"ITER #{current_iteration} - {lot_number}")
-                            elif col == "ITERATION":
-                                # Add iteration number
-                                display_values.append(str(current_iteration))
-                            else:
-                                # For non-device columns, use the value directly
-                                display_values.append(values_dict.get(col, "N/A"))
-                        
-                        # Always insert new row at the top with actual values regardless of pass/fail
-                        self.tree.insert('', 0, values=tuple(display_values))
-                        print(f"ITERATION #{current_iteration} - Added to tree view with values: {display_values}")
-                        
-                        # Update camera textbox with result info
-                        if hasattr(self, 'cam_textbox'):
-                            self.cam_textbox.delete("1.0", tk.END)
-                            self.cam_textbox.insert("1.0", f"ITERATION #{current_iteration} COMPLETE\n")
-                            self.cam_textbox.insert("2.0", f"LOT: {lot_number}\n")
-                            self.cam_textbox.insert("3.0", f"Result: {values_dict.get('RESULT', 'N/A')}")
-                        
-                        # Auto-reset system for next test after successful save
-                        next_message = f"ITERATION #{current_iteration} complete - Starting next iteration in 2 seconds..."
-                        self.safe_update_message(next_message, "green")
-                        self.root.after(2000, self.auto_reset_for_next_test)
-                        
+                                    # For non-device columns, use the value directly
+                                    display_values.append(values_dict.get(col, "N/A"))
+                            
+                            # Always insert new row at the top with actual values regardless of pass/fail
+                            self.tree.insert('', 0, values=tuple(display_values))
+                            print(f"Added to tree view with values: {display_values}")
+                            
+                            # Update camera textbox with result info
+                            if hasattr(self, 'cam_textbox'):
+                                self.cam_textbox.delete("1.0", tk.END)
+                                self.cam_textbox.insert("1.0", f"TEST COMPLETE\n")
+                                self.cam_textbox.insert("2.0", f"LOT: {lot_number}\n")
+                                self.cam_textbox.insert("3.0", f"Result: {values_dict.get('RESULT', 'N/A')}")
+                            
+                            # Auto-reset system for next test after successful save
+                            next_message = f"Test complete - Starting next test in 2 seconds..."
+                            self.safe_update_message(next_message, "green")
+                            self.root.after(2000, self.auto_reset_for_next_test)
+                            
+                    else:
+                        self.safe_update_message(f"Failed to save results", "red")
+                        print(f"Error: Failed to save test results to database")
                 else:
-                    self.safe_update_message(f"ITERATION #{current_iteration} - Failed to save results", "red")
-                    print(f"ITERATION #{current_iteration} - Error: Failed to save test results to database")
-            else:
-                self.safe_update_message(f"ITERATION #{current_iteration} - No test data to save", "orange")
-                print(f"ITERATION #{current_iteration} - Warning: No test data to save")
+                    self.safe_update_message(f"No test data to save", "orange")
+                    print(f"Warning: No test data to save")
                 
         except Exception as e:
             print(f"Error in test_result_command: {e}")
@@ -1431,14 +1415,6 @@ class EOLTesterGUI:
         try:
             print("=== AUTO RESET FOR NEXT TEST ===")
             
-            # Track iteration count
-            if not hasattr(self, 'iteration_count'):
-                self.iteration_count = 1
-            else:
-                self.iteration_count += 1
-            
-            print(f"=== ITERATION #{self.iteration_count - 1} COMPLETED ===")
-            
             # Check if all existing values of L1-L4 and P1-P4 are pass
             all_pass = True
             any_values = False
@@ -1467,7 +1443,7 @@ class EOLTesterGUI:
             
             # Log all device values
             if device_values:
-                print(f"=== DEVICE VALUES FOR ITERATION #{self.iteration_count} ===")
+                print(f"=== DEVICE VALUES FOR TEST ===")
                 for device, value in device_values.items():
                     print(f"{device}: {value}")
                 print("=================================")
@@ -1480,16 +1456,16 @@ class EOLTesterGUI:
                 # Don't delete the lot number yet - it will be used for incrementing
                 # The lot number will be cleared in reset_page_for_next_test
             
-            # Display iteration status in the message area
+            # Display test status in the message area
             if any_values:
                 if all_pass:
-                    status_text = f"ITERATION #{self.iteration_count} COMPLETE - All tests PASSED!"
+                    status_text = f"TEST COMPLETE - All tests PASSED!"
                     self.safe_update_message(status_text, "green")
-                    print(f"ITERATION #{self.iteration_count} - ALL TESTS PASSED")
+                    print(f"TEST - ALL TESTS PASSED")
                 else:
-                    status_text = f"ITERATION #{self.iteration_count} COMPLETE - Some tests failed"
+                    status_text = f"TEST COMPLETE - Some tests failed"
                     self.safe_update_message(status_text, "orange")
-                    print(f"ITERATION #{self.iteration_count} - SOME TESTS FAILED")
+                    print(f"TEST - SOME TESTS FAILED")
             
             # Reset test result saved flag for next test cycle
             self.test_result_saved = False
@@ -1499,7 +1475,7 @@ class EOLTesterGUI:
             # Critical: Reset process status index to ensure proper synchronization for next cycle
             if hasattr(self, 'process_status_index'):
                 self.process_status_index = 0
-                print(f"Reset process status index to 0 for iteration #{self.iteration_count + 1}")
+                print(f"Reset process status index to 0 for next test")
             
             # Reset all process status tracking variables to prevent sync issues
             if hasattr(self, 'last_status_update_time'):
@@ -1507,10 +1483,10 @@ class EOLTesterGUI:
             if hasattr(self, 'process_status_states'):
                 self.process_status_states = {}
             
-            # Clear any data from previous iteration to ensure we get fresh data
+            # Clear any data from previous test to ensure we get fresh data
             self.barcode_data = ""
             
-            # Reset data collection flags to ensure we get fresh data for each iteration
+            # Reset data collection flags to ensure we get fresh data for each test
             if hasattr(self, 'data_collected'):
                 self.data_collected = {}
             else:
@@ -1522,19 +1498,19 @@ class EOLTesterGUI:
             if hasattr(self, 'simulate_test_counter'):
                 self.simulate_test_counter = 0
                 
-            # Reset iteration data saved flag to allow saving for next iteration
+            # Remove iteration data saved flag - not needed
             if hasattr(self, 'iteration_data_saved'):
                 delattr(self, 'iteration_data_saved')
-                print(f"Reset iteration data saved flag for next iteration #{self.iteration_count + 1}")
+                print(f"Reset iteration data saved flag for next test")
             
             # Don't clear tree view - keep existing data for continuous display
             # Tree view will be updated with new data without clearing
             
-            # Update camera textbox with iteration info
+            # Update camera textbox with test info
             if hasattr(self, 'cam_textbox'):
                 self.cam_textbox.delete("1.0", tk.END)
-                self.cam_textbox.insert("1.0", f"ITERATION #{self.iteration_count} COMPLETE\n")
-                self.cam_textbox.insert("2.0", f"Starting iteration #{self.iteration_count + 1} in 2 seconds...")
+                self.cam_textbox.insert("1.0", f"TEST COMPLETE\n")
+                self.cam_textbox.insert("2.0", f"Starting next test in 2 seconds...")
             
             # Reset specification tree - clear actual values and results
             if hasattr(self, 'spec_tree') and self.spec_tree:
@@ -1556,7 +1532,7 @@ class EOLTesterGUI:
             # Always schedule the next test with incremented lot number after cycling PLC power
             # if employee code is available
             if hasattr(self, 'emp_entry') and self.emp_entry.get() and self.emp_entry.get() != "EMP CODE":
-                next_message = f"Cycling PLC power before starting iteration #{self.iteration_count + 1}..."
+                next_message = f"Cycling PLC power before starting next test..."
                 self.safe_update_message(next_message, "blue")
                 
                 # First cycle PLC power (turn off and on)
@@ -3990,13 +3966,10 @@ class EOLTesterGUI:
     def monitor_test_completion(self):
         """Monitor PLC status to detect when test is complete"""
         try:
-            # Get current iteration number
-            current_iteration = getattr(self, 'iteration_count', 1)
-            
             # Check if PLC is still HIGH
             plc_state = self.check_plc_control_state()
             if plc_state is not True:
-                print(f"ITERATION #{current_iteration} - PLC is not HIGH - attempting to set HIGH")
+                print(f"PLC is not HIGH - attempting to set HIGH")
                 try:
                     # Try to set PLC HIGH automatically instead of stopping
                     if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
@@ -4006,11 +3979,11 @@ class EOLTesterGUI:
                             value=True,
                             slave=station_id
                         )
-                        print(f"ITERATION #{current_iteration} - Automatically set PLC HIGH - continuing")
-                        self.safe_update_message(f"ITERATION #{current_iteration} - Auto-set PLC HIGH", "orange")
+                        print(f"Automatically set PLC HIGH - continuing")
+                        self.safe_update_message(f"Auto-set PLC HIGH", "orange")
                     else:
-                        print(f"ITERATION #{current_iteration} - Cannot set PLC HIGH - PLC not connected")
-                        self.safe_update_message(f"ITERATION #{current_iteration} - PLC not connected", "red")
+                        print(f"Cannot set PLC HIGH - PLC not connected")
+                        self.safe_update_message(f"PLC not connected", "red")
                 except Exception as e:
                     print(f"Error setting PLC HIGH: {e}")
                 
@@ -4048,7 +4021,7 @@ class EOLTesterGUI:
                 
             # If test completion is detected (rising edge) and not already processed
             if (test_result_pass_rising_edge or test_result_ng_rising_edge) and not getattr(self, 'test_result_saved', False):
-                print(f"ITERATION #{current_iteration} - Test completion detected - automatically processing results")
+                print(f"Test completion detected - automatically processing results")
                 
                 # Mark as processed to prevent duplicate processing
                 self.test_result_saved = True
@@ -4058,16 +4031,16 @@ class EOLTesterGUI:
                 
                 # Store test completion state for reporting
                 if test_result_pass_rising_edge:
-                    print(f"ITERATION #{current_iteration} - LOT {lot_number} - Test PASS detected (rising edge)")
-                    self.safe_update_message(f"ITERATION #{current_iteration} - Test PASS detected - processing results", "green")
+                    print(f"LOT {lot_number} - Test PASS detected (rising edge)")
+                    self.safe_update_message(f"Test PASS detected - processing results", "green")
                 elif test_result_ng_rising_edge:
-                    print(f"ITERATION #{current_iteration} - LOT {lot_number} - Test FAIL detected (rising edge)")
-                    self.safe_update_message(f"ITERATION #{current_iteration} - Test FAIL detected - processing results", "orange")
+                    print(f"LOT {lot_number} - Test FAIL detected (rising edge)")
+                    self.safe_update_message(f"Test FAIL detected - processing results", "orange")
                 
                 # Update camera textbox with processing info
                 if hasattr(self, 'cam_textbox'):
                     self.cam_textbox.delete("1.0", tk.END)
-                    self.cam_textbox.insert("1.0", f"ITERATION #{current_iteration} - PROCESSING\n")
+                    self.cam_textbox.insert("1.0", f"PROCESSING\n")
                     self.cam_textbox.insert("2.0", f"LOT: {lot_number}\n")
                     status = "PASS" if test_result_pass_rising_edge else "FAIL" if test_result_ng_rising_edge else "UNKNOWN"
                     self.cam_textbox.insert("3.0", f"Status: {status}")
@@ -4145,11 +4118,11 @@ class EOLTesterGUI:
                     
                 # Check if process_status_index exists and reset it if needed
                 # This ensures we start from the beginning of the process status cycle
-                # for each iteration
+                # for each test
                 if hasattr(self, 'process_status_index') and self.process_status_index > 0:
                     # If we've gone through all process statuses, reset to start next cycle
                     if hasattr(self, 'process_addresses') and self.process_status_index >= len(self.process_addresses):
-                        print(f"ITERATION #{current_iteration} - Completed one process status cycle, resetting index")
+                        print(f"Completed one process status cycle, resetting index")
                         self.process_status_index = 0
                         
                         # Update status labels to match the reset process status
@@ -4162,8 +4135,8 @@ class EOLTesterGUI:
                 self.monitor_counter += 1
                 if self.monitor_counter % 20 == 0:  # Update every 10 seconds (20 * 500ms) to reduce overhead
                     lot_number = getattr(self, 'current_lot_number', "Unknown")
-                    print(f"ITERATION #{current_iteration} - LOT {lot_number} - Monitoring for test completion...")
-                    self.safe_update_message(f"ITERATION #{current_iteration} - Monitoring test progress...", "blue")
+                    print(f"LOT {lot_number} - Monitoring for test completion...")
+                    self.safe_update_message(f"Monitoring test progress...", "blue")
                     
                     # Update status labels only every 10 seconds to reduce PLC load
                     self.update_status_labels()
@@ -4184,12 +4157,10 @@ class EOLTesterGUI:
             if not hasattr(self, 'data_collected'):
                 self.data_collected = {}
                 
-            current_iteration = getattr(self, 'iteration_count', 1)
-                
             for i, client in enumerate([self.loadcell1_client, self.loadcell2_client], 1):
-                device_key = f"L{i}_iter{current_iteration}"
+                device_key = f"L{i}"
                 
-                # Skip if we've already collected data for this device in this iteration
+                # Skip if we've already collected data for this device
                 if device_key in self.data_collected:
                     continue
                     
@@ -4691,15 +4662,12 @@ class EOLTesterGUI:
             
             # Work with existing table structure - don't alter it
             # The table already exists with columns: LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-            # RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE, SPEC_DATA, EMP_CODE, ITERATION
+            # RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE, SPEC_DATA, EMP_CODE
             print("Using existing TBL_TEST_RESULTS table structure")
-            
-            # Remove iteration column handling - not needed
             
             # Get values for insertion
             lot_number = values_dict.get("LOT NUMBER", "")
             part_number = values_dict.get("PART NUMBER", "") or getattr(self, 'current_part_number', '')
-            # Remove iteration tracking from database - not needed
             
             print(f"Database save for LOT: {lot_number}, PART: {part_number}")
             
@@ -4764,38 +4732,17 @@ class EOLTesterGUI:
             print(f"Overall Result: {overall_result}")
             print(f"Scan Result: {scan_result}")
             
-            # Check if record already exists for this specific lot number
-            # Use LOT_NUMBER + PART_NUMBER to prevent duplicates
+            # Check if record already exists for this specific lot number and part number
+            # Use LOT_NUMBER + PART_NUMBER + EMP_CODE to prevent duplicates
             cursor.execute(
-                "SELECT ID FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s",
-                (lot_number, part_number)
+                "SELECT ID FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s AND EMP_CODE = %s",
+                (lot_number, part_number, emp_code)
             )
             existing_record = cursor.fetchone()
             
             if existing_record:
-                # Update existing record using exact column names from database
-                query = """
-                UPDATE TBL_TEST_RESULTS 
-                SET L1 = %s, L2 = %s, L3 = %s, L4 = %s,
-                    P1 = %s, P2 = %s, P3 = %s, P4 = %s,
-                    RESULT = %s,
-                    SCAN_RESULT = %s,
-                    EMP_CODE = %s, 
-                    SPEC_DATA = %s,
-                    CREATED_DATE = NOW()
-                WHERE LOT_NUMBER = %s AND PART_NUMBER = %s
-                """
-                cursor.execute(query, (
-                    l1_value, l2_value, l3_value, l4_value,
-                    p1_value, p2_value, p3_value, p4_value,
-                    overall_result,
-                    scan_result,
-                    emp_code,
-                    spec_data,
-                    lot_number, 
-                    part_number
-                ))
-                print(f"Updated existing database record for LOT {lot_number}")
+                print(f"Record already exists for LOT {lot_number}, PART {part_number}, EMP {emp_code} - skipping duplicate save")
+                return True  # Return success to prevent error messages
             else:
                 # Insert new record using exact column names from database
                 query = """
