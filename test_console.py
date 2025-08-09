@@ -1224,8 +1224,11 @@ class EOLTesterGUI:
             
             print(f"Test complete for LOT: {lot_number}, Part: {part_number}")
             
-            # Call our new cycle workflow: Save → Disconnect → Wait 2s → Reconnect → Reset
-            self.save_test_results_and_cycle_reset(lot_number, part_number)
+            # Save test results directly without disconnecting PLC
+            self.save_current_test_results(lot_number, part_number)
+            
+            # Trigger auto reset for next test without PLC cycling
+            self.auto_reset_for_next_test()
             
         except Exception as e:
             print(f"Error in test_result_command: {e}")
@@ -1428,17 +1431,15 @@ class EOLTesterGUI:
             # Stop all label blinking
             self.stop_all_label_blinking()
             
-            # Always schedule the next test with incremented lot number after cycling PLC power
+            # Always schedule the next test with incremented lot number
             # if employee code is available
             if hasattr(self, 'emp_entry') and self.emp_entry.get() and self.emp_entry.get() != "EMP CODE":
-                next_message = f"Cycling PLC power before starting next test..."
+                next_message = f"Preparing next test cycle..."
                 self.safe_update_message(next_message, "blue")
                 
-                # First cycle PLC power (turn off and on)
-                self.root.after(500, self.cycle_plc_power)
-                
-                # Then start next test cycle with a delay and incremented lot number
-                self.root.after(2000, lambda: self.start_next_test_cycle(current_lot))
+                # Start next test cycle with a delay and incremented lot number
+                # No need to cycle power - just reset and start
+                self.root.after(1000, lambda: self.start_next_test_cycle(current_lot))
             else:
                 print("Cannot start next test automatically - employee code not available")
                 self.safe_update_message("Please scan employee code to start next test", "orange")
@@ -3815,12 +3816,39 @@ class EOLTesterGUI:
     def start_next_test_cycle(self, previous_lot):
         """Start next test cycle with incremented lot number"""
         try:
-            # Check if PLC is still HIGH
+            # Ensure PLC is HIGH before starting - if not, set it HIGH
             plc_state = self.check_plc_control_state()
             if plc_state is not True:
-                print("PLC is not HIGH - stopping test cycle")
-                self.safe_update_message("PLC is not HIGH - test cycle stopped", "red")
-                return
+                print("PLC is not HIGH - setting PLC HIGH for new test cycle")
+                try:
+                    if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
+                        station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                        self.plc_client.write_coil(
+                            address=0x0000,  # P0000 address
+                            value=True,
+                            slave=station_id
+                        )
+                        print("Set PLC HIGH for new test cycle")
+                        self.safe_update_message("Set PLC HIGH for new iteration", "green")
+                    else:
+                        print("PLC not connected - attempting reconnection")
+                        success = self.reconnect_plc()
+                        if success:
+                            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                            self.plc_client.write_coil(
+                                address=0x0000,  # P0000 address
+                                value=True,
+                                slave=station_id
+                            )
+                            print("Reconnected PLC and set HIGH for new test cycle")
+                        else:
+                            print("Failed to reconnect PLC")
+                            self.safe_update_message("Failed to set PLC HIGH - check connection", "red")
+                            return
+                except Exception as e:
+                    print(f"Error setting PLC HIGH: {e}")
+                    self.safe_update_message("Error setting PLC HIGH for new iteration", "red")
+                    return
             
             # Get current iteration number
             current_iteration = getattr(self, 'iteration_count', 1)
@@ -3900,6 +3928,13 @@ class EOLTesterGUI:
                 print(f"Process status reset successfully - starting iteration #{current_iteration + 1}")
                 # Display clear iteration information
                 self.safe_update_message(f"ITERATION #{current_iteration + 1} STARTED - LOT: {self.current_lot_number}", "blue")
+                
+                # Ensure status monitoring is active
+                if not getattr(self, 'status_monitoring_active', False):
+                    print("Starting status monitoring for new iteration")
+                    self.status_monitoring_active = True
+                    self.root.after(1000, self.update_status_from_plc)
+                
                 # Check PLC status continuously to detect when test is complete (optimized timing)
                 self.root.after(750, self.monitor_test_completion)
             else:
@@ -4304,12 +4339,23 @@ class EOLTesterGUI:
             self.last_test_result_ng_state = test_result_ng
                 
             # If test completion is detected (rising edge) and not already processed
-            if (test_result_pass_rising_edge or test_result_ng_rising_edge) and not getattr(self, 'test_result_saved', False):
-                print(f"Test completion detected - automatically processing results")
+            # Also ensure we've progressed through enough steps before allowing test completion
+            min_steps_required = 3  # Minimum steps before test can complete (AUTO, HOME, 1st PULL)
+            current_step = getattr(self, 'current_process_step', 0)
+            
+            if (test_result_pass_rising_edge or test_result_ng_rising_edge) and not getattr(self, 'test_result_saved', False) and current_step >= min_steps_required:
+                print(f"Test completion detected after {current_step + 1} steps - automatically processing results")
                 
                 # Mark as processed to prevent duplicate processing
                 self.test_result_saved = True
-                
+            elif (test_result_pass_rising_edge or test_result_ng_rising_edge) and current_step < min_steps_required:
+                print(f"Test completion detected too early (step {current_step + 1}) - waiting for more steps")
+                # Continue monitoring without processing results yet
+                self.root.after(750, self.monitor_test_completion)
+                return
+            
+            # Process test completion if it was detected and validated
+            if getattr(self, 'test_result_saved', False) and (test_result_pass_rising_edge or test_result_ng_rising_edge):
                 # Get current lot number for reporting
                 lot_number = getattr(self, 'current_lot_number', "Unknown")
                 
