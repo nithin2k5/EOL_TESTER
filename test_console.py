@@ -1197,10 +1197,9 @@ class EOLTesterGUI:
         messagebox.showinfo("2nd Pull", "Performing length test")
 
     def test_result_command(self):
-        """Automatically process test results, save to database, and reset for next test"""
+        """Automatically process test results, save to database, disconnect PLC, wait 2s, reconnect, and reset for next test"""
         try:
-            # Remove iteration tracking - not needed for database operations
-            print("=== PROCESSING TEST RESULTS ===")
+            print("=== TEST COMPLETION DETECTED ===")
             
             # Auto-generate lot number for test results
             if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
@@ -1216,118 +1215,18 @@ class EOLTesterGUI:
             else:
                 lot_number = self.current_lot_number
             
-            print(f"Processing results for LOT: {lot_number}")
-                
-            # Get test results from spec tree
-            values_dict = {}
-            values_dict["LOT NUMBER"] = lot_number
-            # Remove iteration tracking from values_dict
+            # Get part number
+            part_number = getattr(self, 'current_part_number', None)
             
-            has_result = False
-            all_devices_pass = True
+            if not part_number:
+                self.safe_update_message("Cannot save test results - missing part number", "red")
+                return
             
-            # If we have specifications available, collect them
-            if hasattr(self, 'spec_tree') and self.spec_tree:
-                available_devices = set()
-                
-                # First, collect all device values and check if any are NG
-                for item in self.spec_tree.get_children():
-                    values = self.spec_tree.item(item, "values")
-                    if len(values) > 1 and values[1]:  # If device column has a value
-                        device = values[1]
-                        result_value = values[-1] if len(values) > 5 else None
-                        actual_value = values[-2] if len(values) > 5 else None
-                        
-                        # Store device in available devices set
-                        available_devices.add(device)
-                        
-                        # Always store the actual value for L1-L4 and P1-P4
-                        if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"] and actual_value:
-                            values_dict[device] = actual_value
-                            has_result = True
-                            print(f"{device}: {actual_value}")
-                        elif result_value:
-                            has_result = True
-                            values_dict[device] = result_value
-                            
-                        # Check if this result is NG
-                        if result_value == "NG":
-                            all_devices_pass = False
-                
-                # If there are any device results, set an overall RESULT value
-                if has_result:
-                    values_dict["RESULT"] = "PASS" if all_devices_pass else "NG"
-                
-                # Check if all existing devices have values and all are passing
-                all_existing_devices_pass = True
-                any_existing_devices = False
-                
-                for device in available_devices:
-                    if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                        device_result = self.get_device_result_from_spec_tree(device)
-                        if device_result:
-                            any_existing_devices = True
-                            if device_result != "PASS":
-                                all_existing_devices_pass = False
-                
-                # Only save if we have actual test data
-                if has_result:
-                    print(f"Saving results to database for LOT: {lot_number}")
-                    success = self.save_lot_data_to_database(values_dict)
-                    
-                    if success:
-                        print(f"Data saved successfully")
-                        
-                        if all_existing_devices_pass:
-                            status_text = f"LOT {lot_number} - PASS result saved"
-                            self.safe_update_message(status_text, "green")
-                            print(f"LOT {lot_number} - PASS result saved to database")
-                        else:
-                            status_text = f"LOT {lot_number} - FAIL result saved"
-                            self.safe_update_message(status_text, "orange")
-                            print(f"LOT {lot_number} - FAIL result saved to database")
-                        
-                        # Create display values for tree view
-                        if hasattr(self, 'tree') and hasattr(self, 'current_columns'):
-                            # Create values list with actual values for display in treeview
-                            display_values = []
-                            for col in self.current_columns:
-                                if col in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                                    # For device columns, display actual values in the tree view
-                                    if col in values_dict and values_dict[col]:
-                                        display_values.append(values_dict[col])
-                                    else:
-                                        display_values.append("N/A")
-                                elif col == "SCAN RESULT":
-                                    # Add lot number to scan result
-                                    display_values.append(f"LOT: {lot_number}")
-                                else:
-                                    # For non-device columns, use the value directly
-                                    display_values.append(values_dict.get(col, "N/A"))
-                            
-                            # Always insert new row at the top with actual values regardless of pass/fail
-                            self.tree.insert('', 0, values=tuple(display_values))
-                            print(f"Added to tree view with values: {display_values}")
-                            
-                            # Update camera textbox with result info
-                            if hasattr(self, 'cam_textbox'):
-                                self.cam_textbox.delete("1.0", tk.END)
-                                self.cam_textbox.insert("1.0", f"TEST COMPLETE\n")
-                                self.cam_textbox.insert("2.0", f"LOT: {lot_number}\n")
-                                self.cam_textbox.insert("3.0", f"Result: {values_dict.get('RESULT', 'N/A')}")
-                            
-                            # Auto-reset system for next test after successful save
-                            next_message = f"Test complete - Starting next test in 2 seconds..."
-                            self.safe_update_message(next_message, "green")
-                            self.root.after(2000, self.auto_reset_for_next_test)
-                            
-                    else:
-                        self.safe_update_message(f"Failed to save results", "red")
-                        print(f"Error: Failed to save test results to database")
-                else:
-                    self.safe_update_message(f"No test data to save", "orange")
-                    print(f"Warning: No test data to save")
-                
+            print(f"Test complete for LOT: {lot_number}, Part: {part_number}")
+            
+            # Call our new cycle workflow: Save → Disconnect → Wait 2s → Reconnect → Reset
+            self.save_test_results_and_cycle_reset(lot_number, part_number)
+            
         except Exception as e:
             print(f"Error in test_result_command: {e}")
             traceback.print_exc()
@@ -2296,37 +2195,240 @@ class EOLTesterGUI:
         return True
 
     def update_status_from_plc(self):
-        """Periodic update of status from PLC with process halting control"""
+        """Periodic update of status from PLC with process halting control and automatic reconnection"""
         try:
-            # Only update if client is still connected
-            if self.plc_client and self.plc_client.is_socket_open() and self.status_monitoring_active:
-                # Check PLC control state first
-                plc_control_state = self.check_plc_control_state()
+            # Check if monitoring should continue
+            if not self.status_monitoring_active:
+                print("Status monitoring stopped by user")
+                return
                 
-                if plc_control_state is False:  # PLC is LOW - halt process
-                    self.halt_process()
-                elif plc_control_state is True:  # PLC is HIGH - allow process
-                    # Read all process status values
-                    status_values = self.read_process_status_values()
+            # Check if PLC client is connected
+            if self.plc_client and self.plc_client.is_socket_open():
+                try:
+                    # Check PLC control state first
+                    plc_control_state = self.check_plc_control_state()
                     
-                    # Update the labels with the values
-                    if status_values:
-                        self.update_status_labels(status_values)
-                
-                # Schedule next update (optimized to 1000ms for better performance)
-                self.root.after(1000, self.update_status_from_plc)
+                    if plc_control_state is False:  # PLC is LOW - halt process
+                        self.halt_process()
+                    elif plc_control_state is True:  # PLC is HIGH - allow process
+                        # Read all process status values
+                        status_values = self.read_process_status_values()
+                        
+                        # Update the labels with the values
+                        if status_values:
+                            self.update_status_labels(status_values)
+                    
+                        # Reset reconnection attempt counter on successful communication
+                        if hasattr(self, 'plc_reconnection_attempts'):
+                            self.plc_reconnection_attempts = 0
+                    
+                    # Schedule next update (optimized to 1000ms for better performance)
+                    self.root.after(1000, self.update_status_from_plc)
+                        
+                except (ConnectionError, OSError, AttributeError) as e:
+                    print(f"PLC communication error during monitoring: {e}")
+                    # Connection error detected - trigger reconnection
+                    self.attempt_plc_reconnection_and_continue()
             else:
-                print("PLC client not connected or monitoring stopped - stopping status updates")
-                self.status_monitoring_active = False
+                # PLC client not connected - attempt automatic reconnection
+                print("PLC client not connected - attempting automatic reconnection")
+                self.attempt_plc_reconnection_and_continue()
+                
         except Exception as e:
             print(f"Error in status update loop: {e}")
-            self.status_monitoring_active = False
+            # Don't stop monitoring on error - attempt reconnection instead
+            print("Attempting reconnection due to communication error")
+            self.attempt_plc_reconnection_and_continue()
+
+    def attempt_plc_reconnection_and_continue(self):
+        """Attempt to reconnect PLC and continue monitoring with exponential backoff"""
+        try:
+            # Initialize reconnection attempt counter if not exists
+            if not hasattr(self, 'plc_reconnection_attempts'):
+                self.plc_reconnection_attempts = 0
+            
+            # Increment attempt counter
+            self.plc_reconnection_attempts += 1
+            
+            # Maximum reconnection attempts before giving up temporarily
+            max_attempts = 5
+            
+            if self.plc_reconnection_attempts > max_attempts:
+                # Reset counter and wait longer before trying again
+                self.plc_reconnection_attempts = 0
+                retry_delay = 30000  # 30 seconds
+                print(f"PLC reconnection failed after {max_attempts} attempts. Waiting {retry_delay/1000} seconds before retrying...")
+                self.safe_update_message(f"PLC reconnection failed. Retrying in {retry_delay/1000} seconds...", "orange")
+                self.root.after(retry_delay, self.attempt_plc_reconnection_and_continue)
+                return
+            
+            print(f"PLC reconnection attempt {self.plc_reconnection_attempts}/{max_attempts}")
+            self.safe_update_message(f"Attempting PLC reconnection ({self.plc_reconnection_attempts}/{max_attempts})...", "blue")
+            
+            # Attempt reconnection
+            success = self.reconnect_plc()
+            
+            if success:
+                print("PLC reconnection successful - resetting process status and resuming monitoring")
+                self.safe_update_message("PLC reconnected successfully - restarting process from beginning", "green")
+                
+                # Reset attempt counter
+                self.plc_reconnection_attempts = 0
+                
+                # CRITICAL: Reset process status to start from the beginning after reconnection
+                self.reset_process_status_after_reconnection()
+                
+                # Continue monitoring loop
+                self.root.after(1000, self.update_status_from_plc)
+            else:
+                # Calculate exponential backoff delay (1, 2, 4, 8, 16 seconds)
+                delay = min(1000 * (2 ** (self.plc_reconnection_attempts - 1)), 16000)
+                print(f"PLC reconnection failed. Retrying in {delay/1000} seconds...")
+                self.safe_update_message(f"PLC reconnection failed. Retrying in {delay/1000}s...", "orange")
+                
+                # Schedule next reconnection attempt
+                self.root.after(delay, self.attempt_plc_reconnection_and_continue)
+                
+        except Exception as e:
+            print(f"Error in reconnection attempt: {e}")
+            # Wait 5 seconds before trying again
+            self.root.after(5000, self.attempt_plc_reconnection_and_continue)
+
+    def reset_process_status_after_reconnection(self):
+        """Reset all process status variables to start fresh after PLC reconnection"""
+        try:
+            print("Resetting process status to start from beginning after reconnection")
+            
+            # Reset process status index to start from the beginning
+            if hasattr(self, 'process_status_index'):
+                self.process_status_index = 0
+                print("Reset process_status_index to 0")
+            
+            # Reset test result flags to ensure clean state
+            self.test_result_saved = False
+            print("Reset test_result_saved to False")
+            
+            # Reset test result state tracking
+            if hasattr(self, 'last_test_result_pass_state'):
+                self.last_test_result_pass_state = False
+                print("Reset last_test_result_pass_state to False")
+                
+            if hasattr(self, 'last_test_result_ng_state'):
+                self.last_test_result_ng_state = False
+                print("Reset last_test_result_ng_state to False")
+            
+            # Reset simulation counter if in simulation mode
+            if hasattr(self, 'simulate_test_counter'):
+                self.simulate_test_counter = 0
+                print("Reset simulate_test_counter to 0")
+            
+            # Reset monitor counter if it exists
+            if hasattr(self, 'monitor_counter'):
+                self.monitor_counter = 0
+                print("Reset monitor_counter to 0")
+            
+            # Reset any blinking labels to default state
+            if hasattr(self, 'placed_labels'):
+                for label in self.placed_labels.values():
+                    try:
+                        label.configure(bg="yellow")  # Reset to default color
+                    except:
+                        pass  # Ignore if label no longer exists
+            
+            # Stop all label blinking
+            self.stop_all_label_blinking()
+            
+            # Reset specification tree results but keep the structure
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    try:
+                        values = list(self.spec_tree.item(item, "values"))
+                        if len(values) >= 7:
+                            values[-2] = ""  # Clear Actual column
+                            values[-1] = ""  # Clear Result column
+                            self.spec_tree.item(item, values=values, tags=('neutral',))
+                    except:
+                        pass  # Ignore if tree item no longer exists
+            
+            # Reset process status labels to default
+            self.reset_process_status_labels()
+            
+            # Reset PLC process status registers to start fresh cycle
+            self.reset_plc_process_registers_after_reconnection()
+            
+            print("Process status reset completed - ready for fresh test cycle")
+            
+        except Exception as e:
+            print(f"Error resetting process status after reconnection: {e}")
+
+    def reset_plc_process_registers_after_reconnection(self):
+        """Reset PLC process status registers to ensure fresh start after reconnection"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                print("PLC not connected - cannot reset process registers")
+                return
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Reset process status registers to ensure they start from beginning
+            # Read process status addresses
+            status_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'ProcessStatus.txt')
+            if os.path.exists(status_path):
+                with open(status_path, 'r') as f:
+                    process_addresses = [int(addr.strip()) for addr in f.read().strip().split(',') if addr.strip()]
+                
+                # Reset all process status registers to 0 (FALSE)
+                for address in process_addresses:
+                    try:
+                        response = self.plc_client.write_coil(
+                            address=address,
+                            value=False,
+                            slave=station_id
+                        )
+                        if response.isError():
+                            print(f"Warning: Could not reset process register {address}: {response}")
+                    except Exception as e:
+                        print(f"Error resetting process register {address}: {e}")
+                
+                print(f"Reset {len(process_addresses)} process status registers to FALSE")
+            
+            # Reset test result registers if they exist
+            try:
+                # Read test result register addresses
+                result_path = os.path.join(os.path.dirname(__file__), 'txt_files', 'HoldRegistersRead.txt')
+                if os.path.exists(result_path):
+                    with open(result_path, 'r') as f:
+                        content = f.read().strip()
+                        if content:
+                            lines = content.split('\n')
+                            for line in lines:
+                                if 'test_result_pass' in line.lower() or 'test_result_ng' in line.lower():
+                                    parts = line.split(',')
+                                    if len(parts) >= 2 and parts[1].strip().isdigit():
+                                        address = int(parts[1].strip())
+                                        try:
+                                            response = self.plc_client.write_coil(
+                                                address=address,
+                                                value=False,
+                                                slave=station_id
+                                            )
+                                            if not response.isError():
+                                                print(f"Reset test result register {address} to FALSE")
+                                        except Exception as e:
+                                            print(f"Error resetting test result register {address}: {e}")
+            except Exception as e:
+                print(f"Error processing test result registers: {e}")
+                
+            print("PLC process registers reset completed")
+            
+        except Exception as e:
+            print(f"Error resetting PLC process registers: {e}")
 
     def check_plc_control_state(self):
         """Check the PLC control state (P0000) to determine if process should run"""
         try:
             if not self.plc_client or not self.plc_client.is_socket_open():
-                return None
+                raise ConnectionError("PLC client not connected")
                 
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
             
@@ -2340,11 +2442,17 @@ class EOLTesterGUI:
                 return response.bits[0]  # True for HIGH, False for LOW
             else:
                 print(f"Error reading PLC control state: {response}")
-                return None
+                # Raise exception to trigger reconnection attempt
+                raise ConnectionError(f"PLC read error: {response}")
                 
+        except (ConnectionError, OSError, AttributeError) as e:
+            print(f"PLC connection error in control state check: {e}")
+            # Re-raise to trigger reconnection in the calling method
+            raise
         except Exception as e:
-            print(f"Error checking PLC control state: {e}")
-            return None
+            print(f"Unexpected error checking PLC control state: {e}")
+            # Re-raise as connection error to trigger reconnection
+            raise ConnectionError(f"PLC communication failed: {e}")
 
     def halt_process(self):
         """Halt the process when PLC control is LOW"""
@@ -2463,11 +2571,13 @@ class EOLTesterGUI:
                 print(f"Port {plc_port} is still not available after force release")
                 return False
             
-            # Create a fresh PLC client
+            # Create a fresh PLC client with improved timeout settings
+            # Use longer timeout for reconnection to handle slow connections
+            timeout = 3.0  # Increased timeout for reconnection stability
             self.plc_client = ModbusSerialClient(
                 port=plc_port,
                 baudrate=int(plc_baud),
-                timeout=1,
+                timeout=timeout,
                 stopbits=1,
                 bytesize=8,
                 parity='N'
@@ -4104,8 +4214,9 @@ class EOLTesterGUI:
                     self.simulate_test_counter += 1
                     # After 20 seconds (40 * 500ms), simulate test completion
                     if self.simulate_test_counter >= 40:
-                        print(f"ITERATION #{current_iteration} - Simulating test completion for demonstration")
-                        self.safe_update_message(f"ITERATION #{current_iteration} - Simulating test completion", "blue")
+                        iteration_count = getattr(self, 'test_iteration_count', 1)
+                        print(f"ITERATION #{iteration_count} - Simulating test completion for demonstration")
+                        self.safe_update_message(f"ITERATION #{iteration_count} - Simulating test completion", "blue")
                         # Reset counter
                         self.simulate_test_counter = 0
                         # Generate random test values for demonstration
@@ -4302,15 +4413,12 @@ class EOLTesterGUI:
             self.root.destroy()
 
     def next_label_command(self):
-        """Process test results, save to database, reset page, and prepare for next test"""
+        """Process test results, save to database, disconnect PLC, wait 2s, reconnect, and reset for next cycle"""
         try:
-            print("=== NEXT LABEL COMMAND STARTED ===")
+            print("=== CYCLE COMPLETION STARTED ===")
             
             # Get current iteration number
             current_iteration = getattr(self, 'iteration_count', 1)
-            
-            # Always proceed with data saving - remove the duplicate check
-            # The iteration_data_saved flag is managed elsewhere and should not block saving here
             
             # Check if we have a valid lot number, auto-generate if needed
             lot_number = getattr(self, 'current_lot_number', None)
@@ -4322,7 +4430,7 @@ class EOLTesterGUI:
                     self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
                     lot_number = self.generate_lot_number()
                     self.current_lot_number = lot_number
-                    print(f"Auto-generated LOT number {lot_number} for next label command")
+                    print(f"Auto-generated LOT number {lot_number} for cycle completion")
                 else:
                     messagebox.showwarning("Warning", "Cannot generate LOT number - missing part number or employee code")
                     return
@@ -4331,108 +4439,177 @@ class EOLTesterGUI:
             part_number = getattr(self, 'current_part_number', None)
             print(f"Part Number: {part_number}")
             
+            # Save test results first
+            self.save_test_results_and_cycle_reset(lot_number, part_number)
+            
+        except Exception as e:
+            print(f"Error in cycle completion: {e}")
+            messagebox.showerror("Error", f"Cycle completion failed: {str(e)}")
+
+    def save_test_results_and_cycle_reset(self, lot_number, part_number):
+        """Save test results, disconnect PLC, wait 2s, reconnect, and reset for next cycle"""
+        try:
+            print("=== SAVING RESULTS AND CYCLING PLC ===")
+            
             if not part_number:
-                messagebox.showwarning("Warning", "Please select an ALC code first to identify the part")
+                print("No part number - aborting cycle")
                 return
                 
+            # STEP 1: Save test results to database
+            print("STEP 1: Saving test results...")
+            self.save_current_test_results(lot_number, part_number)
+            
+            # STEP 2: Stop monitoring to prevent interference
+            print("STEP 2: Stopping monitoring...")
+            self.status_monitoring_active = False
+            
+            # STEP 3: Disconnect PLC
+            print("STEP 3: Disconnecting PLC...")
+            self.force_disconnect_plc()
+            
+            # STEP 4: Wait 2 seconds (non-blocking)
+            print("STEP 4: Waiting 2 seconds...")
+            self.safe_update_message("Cycling PLC connection - waiting 2 seconds...", "blue")
+            self.root.after(2000, self.reconnect_and_reset_for_next_cycle)
+            
+        except Exception as e:
+            print(f"Error in save and cycle reset: {e}")
+            # Ensure we don't hang - restart monitoring even on error
+            self.root.after(3000, self.restart_monitoring_after_error)
+
+    def save_current_test_results(self, lot_number, part_number):
+        """Save current test results to database"""
+        try:
             # Get test results from spec tree
             values_dict = {}
             values_dict["LOT NUMBER"] = lot_number
             values_dict["PART NUMBER"] = part_number
-            # Remove iteration from values_dict - not needed for database
             
             has_result = False
             all_devices_pass = True
             
-            # If we have specifications available, collect them
+            # Collect results from specification tree
             if hasattr(self, 'spec_tree') and self.spec_tree:
-                print("Processing spec tree data...")
-                available_devices = set()
-                
-                # First, collect all device values and check if any are NG
                 for item in self.spec_tree.get_children():
                     values = self.spec_tree.item(item, "values")
-                    print(f"Spec tree item values: {values}")
-                    
-                    if len(values) > 1 and values[1]:  # If device column has a value
-                        device = values[1]
-                        result_value = values[-1] if len(values) > 6 else None  # Result column
-                        actual_value = values[-2] if len(values) > 5 else None  # Actual column
+                    if len(values) >= 7:
+                        device = values[1]  # Device column
+                        actual = values[5]  # Actual column  
+                        result = values[6]  # Result column
                         
-                        print(f"Device: {device}, Actual: {actual_value}, Result: {result_value}")
-                        
-                        # Store device in available devices set
-                        available_devices.add(device)
-                        
-                        # Store both the result and actual value
-                        if result_value and result_value.strip():
+                        if actual and actual.strip():
                             has_result = True
-                            # Store the result for the device
-                            values_dict[device] = result_value
-                            
-                            # Check if this result is NG
-                            if result_value == "NG" or result_value == "FAIL":
+                            values_dict[device] = actual
+                            if result != "PASS":
                                 all_devices_pass = False
-                                print(f"Device {device} failed with result: {result_value}")
-                        elif actual_value and actual_value.strip() and actual_value != "N/A":
-                            # If no result but we have actual value, assume test happened
-                            has_result = True
-                            values_dict[device] = "PASS"  # Default to PASS if we have actual data
-                            print(f"Device {device} has actual value {actual_value}, defaulting to PASS")
-                
-                print(f"Available devices: {available_devices}")
-                print(f"Has result: {has_result}")
-                print(f"All devices pass: {all_devices_pass}")
-                
-                # If there are any device results, set an overall RESULT value
-                if has_result:
-                    values_dict["RESULT"] = "PASS" if all_devices_pass else "NG"
-                    print(f"Overall result: {values_dict['RESULT']}")
-                else:
-                    # Even if no explicit results, create a test record if we have LOT and PART
-                    print("No test results found, creating basic record...")
-                    has_result = True
-                    values_dict["RESULT"] = "NO_DATA"
-                    all_devices_pass = False  # Don't display in tree if no data
             
-            # Always save to database if we have a LOT and PART number
-            if has_result and lot_number and part_number:
-                print(f"Preparing to save to database: {values_dict}")
+            # Save to database
+            if has_result:
+                overall_result = "PASS" if all_devices_pass else "FAIL"
+                values_dict["OVERALL_RESULT"] = overall_result
                 
-                # Save lot data to database (always save both PASS and FAIL)
-                success = self.save_lot_data_to_database(values_dict)
-                print(f"Database save result: {success}")
-                
-                if success:
-                    # Mark this iteration as having data saved to prevent duplicates
-                    self.iteration_data_saved = current_iteration
-                    print(f"NEXT_LABEL - Data saved successfully and marked as completed for iteration #{current_iteration}")
-                    
-                    # Add new PASS result to tree view without clearing existing data
-                    if all_devices_pass and values_dict.get("RESULT") == "PASS":
-                        print("Adding new PASS result to tree view...")
-                        self.add_new_result_to_treeview(values_dict)
-                    
-                    if all_devices_pass and values_dict.get("RESULT") == "PASS":
-                        self.safe_update_message(f"LOT {lot_number} - PASS result saved and displayed in tree view", "green")
-                    else:
-                        self.safe_update_message(f"LOT {lot_number} - Test result saved to database (FAIL results not shown in tree)", "blue")
-                    
-                    # Start 3-second timer for automatic reset
-                    self.root.after(1000, lambda: self.safe_update_message("Resetting in 2 seconds...", "blue"))
-                    self.root.after(2000, lambda: self.safe_update_message("Resetting in 1 second...", "blue"))
-                    self.root.after(3000, self.reset_page_for_next_test)
-                else:
-                    self.safe_update_message("Failed to save to database - check database connection", "red")
+                # Database save operation
+                self.save_to_database(values_dict)
+                print(f"Test results saved: {overall_result}")
             else:
-                if not lot_number:
-                    self.safe_update_message("Missing LOT number - scan barcode first", "orange")
-                elif not part_number:
-                    self.safe_update_message("Missing part number - select ALC code first", "orange")
-                else:
-                    self.safe_update_message("No test data to save", "orange")
+                print("No test results to save")
+                
+        except Exception as e:
+            print(f"Error saving test results: {e}")
+
+    def force_disconnect_plc(self):
+        """Force disconnect PLC connection"""
+        try:
+            if hasattr(self, 'plc_client') and self.plc_client:
+                if self.plc_client.is_socket_open():
+                    self.plc_client.close()
+                self.plc_client = None
+            print("PLC forcefully disconnected")
+        except Exception as e:
+            print(f"Error disconnecting PLC: {e}")
+
+    def reconnect_and_reset_for_next_cycle(self):
+        """Reconnect PLC and reset everything for next cycle"""
+        try:
+            print("STEP 5: Reconnecting PLC...")
+            self.safe_update_message("Reconnecting PLC for next cycle...", "blue")
             
-            print("=== NEXT LABEL COMMAND COMPLETED ===")
+            # Reconnect PLC
+            success = self.reconnect_plc()
+            
+            if success:
+                print("STEP 6: PLC reconnected - resetting for next cycle...")
+                self.safe_update_message("PLC reconnected - starting fresh cycle", "green")
+                
+                # Reset everything for next cycle
+                self.reset_for_next_cycle()
+                
+                # Restart monitoring from index 0
+                self.status_monitoring_active = True
+                self.root.after(1000, self.update_status_from_plc)
+                
+                print("=== CYCLE RESET COMPLETE - READY FOR NEXT TEST ===")
+            else:
+                print("PLC reconnection failed - will retry automatically")
+                self.safe_update_message("PLC reconnection failed - retrying...", "red")
+                # Try again after 3 seconds
+                self.root.after(3000, self.reconnect_and_reset_for_next_cycle)
+                
+        except Exception as e:
+            print(f"Error in reconnect and reset: {e}")
+            # Fallback - restart monitoring anyway
+            self.restart_monitoring_after_error()
+
+    def reset_for_next_cycle(self):
+        """Reset all variables and UI for next test cycle"""
+        try:
+            # Reset process status index to 0
+            self.process_status_index = 0
+            print("Reset process_status_index to 0")
+            
+            # Reset test result flags
+            self.test_result_saved = False
+            self.last_test_result_pass_state = False
+            self.last_test_result_ng_state = False
+            
+            # Reset simulation counter
+            if hasattr(self, 'simulate_test_counter'):
+                self.simulate_test_counter = 0
+            
+            # Reset UI elements
+            self.reset_process_status_labels()
+            self.stop_all_label_blinking()
+            
+            # Clear specification tree results
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = list(self.spec_tree.item(item, "values"))
+                    if len(values) >= 7:
+                        values[-2] = ""  # Clear Actual column
+                        values[-1] = ""  # Clear Result column
+                        self.spec_tree.item(item, values=values, tags=('neutral',))
+            
+            # Generate new LOT number for next cycle
+            if (hasattr(self, 'current_part_number') and self.current_part_number and 
+                self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
+                self.current_lot_number = self.generate_lot_number()
+                print(f"Generated new LOT number: {self.current_lot_number}")
+            
+            print("Reset complete - ready for next cycle")
+            
+        except Exception as e:
+            print(f"Error resetting for next cycle: {e}")
+
+    def restart_monitoring_after_error(self):
+        """Restart monitoring after an error to prevent hanging"""
+        try:
+            print("Restarting monitoring after error...")
+            self.status_monitoring_active = True
+            self.root.after(1000, self.update_status_from_plc)
+        except Exception as e:
+            print(f"Error restarting monitoring: {e}")
+            # Schedule another restart attempt
+            self.root.after(5000, self.restart_monitoring_after_error)
             
         except Exception as e:
             print(f"Error in next_label_command: {e}")
