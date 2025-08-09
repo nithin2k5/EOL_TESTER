@@ -2214,6 +2214,9 @@ class EOLTesterGUI:
                         # Read all process status values
                         status_values = self.read_process_status_values()
                         
+                        # Control step-by-step process progression
+                        self.control_process_steps(status_values)
+                        
                         # Update the labels with the values
                         if status_values:
                             self.update_status_labels(status_values)
@@ -4026,6 +4029,12 @@ class EOLTesterGUI:
                         self.failCounter = 0
                         print("Reset failCounter to 0 for new simulation cycle")
                     
+                    # Reset step control variables for simulation mode too
+                    self.current_process_step = 0
+                    if hasattr(self, 'step_start_time'):
+                        delattr(self, 'step_start_time')
+                    print("Reset process step control to step 0 (AUTO) for new simulation cycle")
+                    
                     # Stop all label blinking
                     self.stop_all_label_blinking()
                     
@@ -4044,10 +4053,10 @@ class EOLTesterGUI:
             except Exception as e:
                 print(f"Error setting PLC P0000 HIGH: {e}")
             
-            # Reset all process status registers except P0000 (main control)
+            # Reset all process status registers and start with AUTO step
             if hasattr(self, 'process_addresses') and self.process_addresses:
-                # Skip index 0 which is the AUTO register - we want to keep that HIGH
-                for i in range(1, len(self.process_addresses)):
+                # First, reset ALL process status coils to LOW
+                for i in range(len(self.process_addresses)):
                     address_str = self.process_addresses[i]
                     if address_str and address_str.startswith('M'):
                         try:
@@ -4064,6 +4073,28 @@ class EOLTesterGUI:
                             print(f"Reset process status coil at address {address_str}")
                         except Exception as e:
                             print(f"Error resetting coil at {address_str}: {e}")
+                
+                # Now activate the first step (AUTO) to start the sequence
+                if len(self.process_addresses) > 0:
+                    auto_address_str = self.process_addresses[0]  # AUTO step - M0067
+                    if auto_address_str and auto_address_str.startswith('M'):
+                        try:
+                            hex_part = auto_address_str[1:]
+                            auto_coil_address = int(hex_part, 16)
+                            
+                            # Set AUTO step to HIGH to start the process
+                            self.plc_client.write_coil(
+                                address=auto_coil_address,
+                                value=True,
+                                slave=station_id
+                            )
+                            print(f"*** STARTED NEW CYCLE: Set AUTO coil {auto_address_str} to HIGH ***")
+                        except Exception as e:
+                            print(f"Error setting AUTO coil {auto_address_str} HIGH: {e}")
+                
+                # Initialize or reset the current step tracking
+                self.current_process_step = 0  # Start with AUTO (index 0)
+                print(f"*** PROCESS RESET: Starting with step 0 (AUTO) ***")
             
             # Reset the process status array index to ensure we start from the beginning
             # for the next iteration
@@ -4092,6 +4123,12 @@ class EOLTesterGUI:
                 self.failCounter = 0
                 print("Reset failCounter to 0 for new cycle")
             
+            # Reset step control variables for proper progression
+            self.current_process_step = 0
+            if hasattr(self, 'step_start_time'):
+                delattr(self, 'step_start_time')
+            print("Reset process step control to step 0 (AUTO) for new cycle")
+            
             # Reset any other process status tracking variables
             if hasattr(self, 'last_status_update_time'):
                 self.last_status_update_time = time.time()
@@ -4117,6 +4154,98 @@ class EOLTesterGUI:
             if not hasattr(self, 'simulate_test_counter'):
                 self.simulate_test_counter = 0
             return True  # Return true to continue in simulation mode
+    
+    def control_process_steps(self, status_values):
+        """Control the step-by-step progression through process status coils"""
+        try:
+            if not hasattr(self, 'process_addresses') or not self.process_addresses:
+                return
+            
+            if not hasattr(self, 'current_process_step'):
+                self.current_process_step = 0  # Start with AUTO
+            
+            # Don't control steps if we don't have PLC connection
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                return
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Process step names for logging
+            step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
+            
+            # Check current step completion and advance to next step
+            current_step = self.current_process_step
+            if current_step < len(self.process_addresses):
+                current_address = self.process_addresses[current_step]
+                current_status = status_values.get(current_address, False)
+                step_name = step_names[current_step] if current_step < len(step_names) else f"STEP_{current_step}"
+                
+                # If current step is active and we have a next step
+                if current_status and (current_step + 1) < len(self.process_addresses):
+                    # Wait for step completion signal (this could be sensor input or timer-based)
+                    # For now, we'll use a simple timer-based approach
+                    if not hasattr(self, 'step_start_time'):
+                        self.step_start_time = time.time()
+                    
+                    # Each step runs for 2 seconds before advancing (adjust as needed)
+                    step_duration = 2.0
+                    if time.time() - self.step_start_time >= step_duration:
+                        # Advance to next step
+                        next_step = current_step + 1
+                        next_address = self.process_addresses[next_step]
+                        next_step_name = step_names[next_step] if next_step < len(step_names) else f"STEP_{next_step}"
+                        
+                        # Deactivate current step
+                        try:
+                            current_hex = current_address[1:]
+                            current_coil = int(current_hex, 16)
+                            self.plc_client.write_coil(
+                                address=current_coil,
+                                value=False,
+                                slave=station_id
+                            )
+                            print(f"STEP PROGRESSION: Deactivated {step_name} ({current_address})")
+                        except Exception as e:
+                            print(f"Error deactivating step {current_step}: {e}")
+                        
+                        # Activate next step
+                        try:
+                            next_hex = next_address[1:]
+                            next_coil = int(next_hex, 16)
+                            self.plc_client.write_coil(
+                                address=next_coil,
+                                value=True,
+                                slave=station_id
+                            )
+                            print(f"STEP PROGRESSION: Activated {next_step_name} ({next_address})")
+                            
+                            # Update current step and reset timer
+                            self.current_process_step = next_step
+                            self.step_start_time = time.time()
+                            
+                            # Update UI message
+                            self.safe_update_message(f"Process Step: {next_step_name}", "blue")
+                            
+                        except Exception as e:
+                            print(f"Error activating next step {next_step}: {e}")
+                
+                elif not current_status and current_step == 0:
+                    # If AUTO step is not active, reactivate it
+                    try:
+                        hex_part = current_address[1:]
+                        coil_address = int(hex_part, 16)
+                        self.plc_client.write_coil(
+                            address=coil_address,
+                            value=True,
+                            slave=station_id
+                        )
+                        print(f"STEP CONTROL: Reactivated AUTO step ({current_address})")
+                        self.step_start_time = time.time()
+                    except Exception as e:
+                        print(f"Error reactivating AUTO step: {e}")
+            
+        except Exception as e:
+            print(f"Error in control_process_steps: {e}")
             
     def monitor_test_completion(self):
         """Monitor PLC status to detect when test is complete"""
@@ -4641,6 +4770,12 @@ class EOLTesterGUI:
             if hasattr(self, 'plc_reconnection_attempts'):
                 self.plc_reconnection_attempts = 0
                 print("Reset plc_reconnection_attempts to 0")
+            
+            # Reset step control variables
+            self.current_process_step = 0
+            if hasattr(self, 'step_start_time'):
+                delattr(self, 'step_start_time')
+            print("Reset process step control to step 0 (AUTO)")
             
             # Reset UI elements
             self.reset_process_status_labels()
