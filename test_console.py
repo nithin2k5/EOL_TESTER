@@ -1224,16 +1224,96 @@ class EOLTesterGUI:
             
             print(f"Test complete for LOT: {lot_number}, Part: {part_number}")
             
-            # Save test results directly without disconnecting PLC
+            # Save test results
             self.save_current_test_results(lot_number, part_number)
             
-            # Trigger auto reset for next test without PLC cycling
-            self.auto_reset_for_next_test()
+            # Simple reset and start next iteration from scratch
+            self.start_next_iteration_from_scratch(lot_number)
             
         except Exception as e:
             print(f"Error in test_result_command: {e}")
             traceback.print_exc()
             self.safe_update_message(f"Error processing test results: {e}", "red")
+
+    def start_next_iteration_from_scratch(self, previous_lot):
+        """Start next iteration from scratch - simple and clean"""
+        try:
+            print("=== STARTING NEXT ITERATION FROM SCRATCH ===")
+            
+            # Increment lot number
+            if previous_lot:
+                try:
+                    # Extract and increment lot number
+                    date_part = previous_lot[:6]
+                    machine_part = previous_lot[6:9] 
+                    increment_part = previous_lot[-8:]
+                    new_increment = int(increment_part) + 1
+                    new_increment_str = f"{new_increment:08d}"
+                    new_lot = f"{date_part}{machine_part}{new_increment_str}"
+                    self.current_lot_number = new_lot
+                    print(f"New LOT: {new_lot}")
+                except:
+                    self.current_lot_number = self.generate_lot_number()
+            else:
+                self.current_lot_number = self.generate_lot_number()
+            
+            # Reset ALL variables to start fresh
+            self.process_status_index = 0
+            self.current_process_step = 0
+            self.test_result_saved = False
+            self.last_test_result_pass_state = False
+            self.last_test_result_ng_state = False
+            if hasattr(self, 'step_start_time'):
+                delattr(self, 'step_start_time')
+            
+            # Clear UI
+            if hasattr(self, 'spec_tree') and self.spec_tree:
+                for item in self.spec_tree.get_children():
+                    values = list(self.spec_tree.item(item, "values"))
+                    if len(values) >= 7:
+                        values[-2] = ""  # Clear Actual
+                        values[-1] = ""  # Clear Result
+                        self.spec_tree.item(item, values=values, tags=('neutral',))
+            
+            # Now reset PLC and start from AUTO
+            self.reset_plc_to_auto_step()
+            
+            print(f"=== ITERATION STARTED FROM SCRATCH - LOT: {self.current_lot_number} ===")
+            self.safe_update_message(f"ITERATION STARTED - LOT: {self.current_lot_number}", "green")
+            
+        except Exception as e:
+            print(f"Error starting next iteration: {e}")
+            
+    def reset_plc_to_auto_step(self):
+        """Simple PLC reset to AUTO step"""
+        try:
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                print("PLC not connected - attempting reconnection")
+                self.reconnect_plc()
+                
+            if self.plc_client and self.plc_client.is_socket_open():
+                station_id = int(os.getenv('PLC_STATION_ID', '1'))
+                
+                # Set P0000 HIGH
+                self.plc_client.write_coil(address=0x0000, value=True, slave=station_id)
+                print("Set P0000 HIGH")
+                
+                # Reset all process coils to LOW
+                process_addresses = ["M0067", "M0068", "M0076", "M0085", "M0078", "M0087", "M0075", "M0079"]
+                for addr in process_addresses:
+                    hex_part = addr[1:]
+                    coil_address = int(hex_part, 16)
+                    self.plc_client.write_coil(address=coil_address, value=False, slave=station_id)
+                
+                # Set AUTO (M0067) HIGH to start
+                self.plc_client.write_coil(address=0x0067, value=True, slave=station_id)
+                print("*** SET AUTO STEP (M0067) HIGH - STARTING FROM BEGINNING ***")
+                
+                self.current_process_step = 0
+                self.safe_update_message("Starting from AUTO step", "blue")
+                
+        except Exception as e:
+            print(f"Error resetting PLC to AUTO: {e}")
 
     def cycle_plc_power(self):
         """Turn PLC off and then on to simulate power cycling"""
