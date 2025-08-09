@@ -3845,9 +3845,17 @@ class EOLTesterGUI:
                         new_lot = f"{date_part}{machine_part}{new_increment_str}"
                         print(f"Incremented lot number for iteration #{current_iteration + 1}: {previous_lot} -> {new_lot}")
                         
-                        # Set as current lot number
+                        # Set as current lot number - ensure it's properly stored
                         self.current_lot_number = new_lot
+                        
+                        # Also store the previous lot for reference
+                        self.previous_lot_number = previous_lot
+                        
+                        # Increment iteration count for tracking
+                        self.iteration_count = current_iteration + 1
+                        
                         self.safe_update_message(f"ITERATION #{current_iteration + 1} - LOT: {new_lot}", "green")
+                        print(f"*** ITERATION #{current_iteration + 1} STARTED - PREVIOUS LOT: {previous_lot}, NEW LOT: {new_lot} ***")
                     except ValueError:
                         print(f"Could not parse increment part: {increment_part}")
                         # Generate new lot number instead
@@ -3861,6 +3869,8 @@ class EOLTesterGUI:
             else:
                 # Generate new lot number
                 self.current_lot_number = self.generate_lot_number()
+                # Reset iteration count to 1 for new sequence
+                self.iteration_count = 1
                 print(f"Generated new lot number for iteration #{current_iteration + 1}: {self.current_lot_number}")
             
             # Log the new test cycle information
@@ -4006,6 +4016,19 @@ class EOLTesterGUI:
                         self.last_test_result_pass_state = False
                     if hasattr(self, 'last_test_result_ng_state'):
                         self.last_test_result_ng_state = False
+                    
+                    # Reset monitoring and tracking counters in simulation mode too
+                    if hasattr(self, 'monitor_counter'):
+                        self.monitor_counter = 0
+                        print("Reset monitor_counter to 0 for new simulation cycle")
+                    
+                    if hasattr(self, 'failCounter'):
+                        self.failCounter = 0
+                        print("Reset failCounter to 0 for new simulation cycle")
+                    
+                    # Stop all label blinking
+                    self.stop_all_label_blinking()
+                    
                     return True  # Return true to continue in simulation mode
                 
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
@@ -4055,9 +4078,31 @@ class EOLTesterGUI:
             if hasattr(self, 'last_test_result_ng_state'):
                 self.last_test_result_ng_state = False
                 
+            # Reset monitoring and tracking counters
+            if hasattr(self, 'monitor_counter'):
+                self.monitor_counter = 0
+                print("Reset monitor_counter to 0 for new cycle")
+            
+            if hasattr(self, 'simulate_test_counter'):
+                self.simulate_test_counter = 0
+                print("Reset simulate_test_counter to 0 for new cycle")
+            
+            # Reset failure counter and other tracking variables
+            if hasattr(self, 'failCounter'):
+                self.failCounter = 0
+                print("Reset failCounter to 0 for new cycle")
+            
             # Reset any other process status tracking variables
             if hasattr(self, 'last_status_update_time'):
                 self.last_status_update_time = time.time()
+            
+            # Reset PLC reconnection attempts counter
+            if hasattr(self, 'plc_reconnection_attempts'):
+                self.plc_reconnection_attempts = 0
+                print("Reset plc_reconnection_attempts to 0 for new cycle")
+            
+            # Stop all label blinking to ensure clean state
+            self.stop_all_label_blinking()
             
             # Update status labels to reflect the reset state
             self.update_status_labels()
@@ -4509,8 +4554,14 @@ class EOLTesterGUI:
                 values_dict["OVERALL_RESULT"] = overall_result
                 
                 # Database save operation
-                self.save_to_database(values_dict)
-                print(f"Test results saved: {overall_result}")
+                success = self.save_lot_data_to_database(values_dict)
+                if success:
+                    print(f"Test results saved: {overall_result}")
+                    # Mark that test result has been saved to prevent duplicate saves
+                    self.test_result_saved = True
+                else:
+                    print(f"Failed to save test results: {overall_result}")
+                    self.safe_update_message("Failed to save test results to database", "red")
             else:
                 print("No test results to save")
                 
@@ -4575,6 +4626,21 @@ class EOLTesterGUI:
             # Reset simulation counter
             if hasattr(self, 'simulate_test_counter'):
                 self.simulate_test_counter = 0
+            
+            # Reset monitoring counter
+            if hasattr(self, 'monitor_counter'):
+                self.monitor_counter = 0
+                print("Reset monitor_counter to 0")
+            
+            # Reset failure counter
+            if hasattr(self, 'failCounter'):
+                self.failCounter = 0
+                print("Reset failCounter to 0")
+            
+            # Reset PLC reconnection attempts
+            if hasattr(self, 'plc_reconnection_attempts'):
+                self.plc_reconnection_attempts = 0
+                print("Reset plc_reconnection_attempts to 0")
             
             # Reset UI elements
             self.reset_process_status_labels()
@@ -4912,16 +4978,38 @@ class EOLTesterGUI:
             # Check if record already exists for this specific lot number and part number
             # Use LOT_NUMBER + PART_NUMBER + EMP_CODE to prevent duplicates
             cursor.execute(
-                "SELECT ID FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s AND EMP_CODE = %s",
+                "SELECT ID, L1, L2, L3, L4, P1, P2, P3, P4 FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s AND EMP_CODE = %s",
                 (lot_number, part_number, emp_code)
             )
             existing_record = cursor.fetchone()
             
             if existing_record:
-                print(f"Record already exists for LOT {lot_number}, PART {part_number}, EMP {emp_code} - skipping duplicate save")
-                return True  # Return success to prevent error messages
+                # Check if the existing record has actual data values
+                existing_data = existing_record[1:9]  # L1-P4 values
+                has_existing_data = any(val is not None and val != 0 for val in existing_data)
+                
+                if has_existing_data:
+                    print(f"Record with data already exists for LOT {lot_number}, PART {part_number}, EMP {emp_code} - skipping duplicate save")
+                    return True  # Return success to prevent error messages
+                else:
+                    # Update existing record with new data instead of creating duplicate
+                    print(f"Updating existing empty record for LOT {lot_number}, PART {part_number}, EMP {emp_code}")
+                    update_query = """
+                    UPDATE TBL_TEST_RESULTS 
+                    SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, P1 = %s, P2 = %s, P3 = %s, P4 = %s, 
+                        RESULT = %s, SCAN_RESULT = %s, SPEC_DATA = %s
+                    WHERE ID = %s
+                    """
+                    cursor.execute(update_query, (
+                        l1_value, l2_value, l3_value, l4_value,
+                        p1_value, p2_value, p3_value, p4_value,
+                        overall_result, scan_result, spec_data,
+                        existing_record[0]  # ID
+                    ))
+                    print(f"Updated existing database record for LOT {lot_number}")
             else:
                 # Insert new record using exact column names from database
+                print(f"Creating new record for LOT {lot_number}, PART {part_number}, EMP {emp_code}")
                 query = """
                 INSERT INTO TBL_TEST_RESULTS 
                 (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
