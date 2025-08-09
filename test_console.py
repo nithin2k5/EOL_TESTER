@@ -1311,7 +1311,7 @@ class EOLTesterGUI:
             print(f"Error starting next iteration: {e}")
             
     def reset_plc_to_auto_step(self):
-        """Simple PLC reset to AUTO step"""
+        """Test both approaches to see which one works with your PLC"""
         try:
             if not self.plc_client or not self.plc_client.is_socket_open():
                 print("PLC not connected - attempting reconnection")
@@ -1320,26 +1320,51 @@ class EOLTesterGUI:
             if self.plc_client and self.plc_client.is_socket_open():
                 station_id = int(os.getenv('PLC_STATION_ID', '1'))
                 
-                # Set P0000 HIGH
+                # Always set P0000 HIGH first
                 self.plc_client.write_coil(address=0x0000, value=True, slave=station_id)
-                print("Set P0000 HIGH")
+                print("✅ Set P0000 HIGH - PLC is enabled")
                 
-                # Reset all process coils to LOW
-                process_addresses = ["M0067", "M0068", "M0076", "M0085", "M0078", "M0087", "M0075", "M0079"]
-                for addr in process_addresses:
-                    hex_part = addr[1:]
-                    coil_address = int(hex_part, 16)
-                    self.plc_client.write_coil(address=coil_address, value=False, slave=station_id)
+                # TEST: Try to manipulate process status and see what happens
+                print("🧪 TESTING: Trying to manipulate process status...")
                 
-                # Set AUTO (M0067) HIGH to start
-                self.plc_client.write_coil(address=0x0067, value=True, slave=station_id)
-                print("*** SET AUTO STEP (M0067) HIGH - STARTING FROM BEGINNING ***")
+                # Method 1: Try to force AUTO step HIGH
+                try:
+                    self.plc_client.write_coil(address=0x0067, value=True, slave=station_id)  # M0067 AUTO
+                    print("🔧 ATTEMPT: Set M0067 (AUTO) to HIGH")
+                    
+                    # Wait a moment and read it back
+                    time.sleep(0.5)
+                    read_response = self.plc_client.read_coils(address=0x0067, count=1, slave=station_id)
+                    if not read_response.isError():
+                        actual_value = read_response.bits[0]
+                        if actual_value:
+                            print("✅ SUCCESS: M0067 is HIGH - we CAN control it!")
+                            self.process_control_mode = "MANUAL"  # We control the steps
+                        else:
+                            print("❌ FAILED: M0067 went back to LOW - PLC overrode us")
+                            self.process_control_mode = "AUTO"  # PLC controls the steps
+                    else:
+                        print("❓ UNKNOWN: Could not read back M0067")
+                        self.process_control_mode = "AUTO"  # Default to PLC control
+                        
+                except Exception as e:
+                    print(f"❌ ERROR testing M0067 control: {e}")
+                    self.process_control_mode = "AUTO"
                 
+                # Reset tracking variables
                 self.current_process_step = 0
-                self.safe_update_message("Starting from AUTO step", "blue")
+                self.process_status_index = 0
+                
+                # Set message based on what we discovered
+                if getattr(self, 'process_control_mode', 'AUTO') == "MANUAL":
+                    self.safe_update_message("Manual control mode - we control process steps", "green")
+                    print("🎮 MANUAL MODE: We will control process step progression")
+                else:
+                    self.safe_update_message("Auto control mode - PLC controls process steps", "blue")  
+                    print("🤖 AUTO MODE: PLC will control process step progression")
                 
         except Exception as e:
-            print(f"Error resetting PLC to AUTO: {e}")
+            print(f"Error resetting PLC: {e}")
 
     def cycle_plc_power(self):
         """Turn PLC off and then on to simulate power cycling"""
@@ -2321,8 +2346,11 @@ class EOLTesterGUI:
                         # Read all process status values
                         status_values = self.read_process_status_values()
                         
-                        # Control step-by-step process progression
-                        self.control_process_steps(status_values)
+                        # Monitor or control process progression based on mode
+                        if getattr(self, 'process_control_mode', 'AUTO') == "MANUAL":
+                            self.control_process_steps_manual(status_values)
+                        else:
+                            self.monitor_process_steps(status_values)
                         
                         # Update the labels with the values
                         if status_values:
@@ -4194,48 +4222,17 @@ class EOLTesterGUI:
             except Exception as e:
                 print(f"Error setting PLC P0000 HIGH: {e}")
             
-            # Reset all process status registers and start with AUTO step
-            if hasattr(self, 'process_addresses') and self.process_addresses:
-                # First, reset ALL process status coils to LOW
-                for i in range(len(self.process_addresses)):
-                    address_str = self.process_addresses[i]
-                    if address_str and address_str.startswith('M'):
-                        try:
-                            # Extract hex part and convert to int
-                            hex_part = address_str[1:]
-                            coil_address = int(hex_part, 16)
-                            
-                            # Write 0 to reset the coil
-                            self.plc_client.write_coil(
-                                address=coil_address,
-                                value=False,
-                                slave=station_id
-                            )
-                            print(f"Reset process status coil at address {address_str}")
-                        except Exception as e:
-                            print(f"Error resetting coil at {address_str}: {e}")
-                
-                # Now activate the first step (AUTO) to start the sequence
-                if len(self.process_addresses) > 0:
-                    auto_address_str = self.process_addresses[0]  # AUTO step - M0067
-                    if auto_address_str and auto_address_str.startswith('M'):
-                        try:
-                            hex_part = auto_address_str[1:]
-                            auto_coil_address = int(hex_part, 16)
-                            
-                            # Set AUTO step to HIGH to start the process
-                            self.plc_client.write_coil(
-                                address=auto_coil_address,
-                                value=True,
-                                slave=station_id
-                            )
-                            print(f"*** STARTED NEW CYCLE: Set AUTO coil {auto_address_str} to HIGH ***")
-                        except Exception as e:
-                            print(f"Error setting AUTO coil {auto_address_str} HIGH: {e}")
-                
-                # Initialize or reset the current step tracking
-                self.current_process_step = 0  # Start with AUTO (index 0)
-                print(f"*** PROCESS RESET: Starting with step 0 (AUTO) ***")
+            # DO NOT manipulate process status coils - they are PLC outputs
+            # Just reset our tracking variables and let PLC control the process
+            print("⚠️ Process status coils are PLC outputs - not writing to them")
+            print("📖 PLC program will control M0067, M0068, M0076, etc. based on internal logic")
+            
+            # Reset our tracking variables only
+            self.current_process_step = 0
+            if hasattr(self, 'step_start_time'):
+                delattr(self, 'step_start_time')
+            
+            print("✅ Reset tracking variables - PLC will control process flow")
             
             # Reset the process status array index to ensure we start from the beginning
             # for the next iteration
@@ -4296,97 +4293,94 @@ class EOLTesterGUI:
                 self.simulate_test_counter = 0
             return True  # Return true to continue in simulation mode
     
-    def control_process_steps(self, status_values):
-        """Control the step-by-step progression through process status coils"""
+    def monitor_process_steps(self, status_values):
+        """Monitor the process status steps (read-only) - PLC controls the progression"""
         try:
             if not hasattr(self, 'process_addresses') or not self.process_addresses:
                 return
             
-            if not hasattr(self, 'current_process_step'):
-                self.current_process_step = 0  # Start with AUTO
-            
-            # Don't control steps if we don't have PLC connection
-            if not self.plc_client or not self.plc_client.is_socket_open():
-                return
-            
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
-            
             # Process step names for logging
             step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
             
-            # Check current step completion and advance to next step
-            current_step = self.current_process_step
+            # Check which steps are currently active
+            active_steps = []
+            for i, address in enumerate(self.process_addresses):
+                if address in status_values and status_values[address]:
+                    step_name = step_names[i] if i < len(step_names) else f"STEP_{i}"
+                    active_steps.append(f"{step_name}({address})")
+            
+            # Log current active steps
+            if active_steps:
+                if not hasattr(self, 'last_active_steps') or self.last_active_steps != active_steps:
+                    print(f"📊 ACTIVE PROCESS STEPS: {', '.join(active_steps)}")
+                    self.last_active_steps = active_steps
+                    
+                    # Update UI with current process status
+                    if len(active_steps) == 1:
+                        self.safe_update_message(f"Process: {active_steps[0]}", "blue")
+            else:
+                if not hasattr(self, 'last_active_steps') or self.last_active_steps:
+                    print("📊 NO ACTIVE PROCESS STEPS")
+                    self.last_active_steps = []
+            
+        except Exception as e:
+            print(f"Error monitoring process steps: {e}")
+    
+    def control_process_steps_manual(self, status_values):
+        """Actively control process steps when we have manual control"""
+        try:
+            if not hasattr(self, 'process_addresses') or not self.process_addresses:
+                return
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
+            
+            # Get current step
+            current_step = getattr(self, 'current_process_step', 0)
+            
             if current_step < len(self.process_addresses):
                 current_address = self.process_addresses[current_step]
-                current_status = status_values.get(current_address, False)
                 step_name = step_names[current_step] if current_step < len(step_names) else f"STEP_{current_step}"
                 
-                # If current step is active and we have a next step
-                if current_status and (current_step + 1) < len(self.process_addresses):
-                    # Wait for step completion signal (this could be sensor input or timer-based)
-                    # For now, we'll use a simple timer-based approach
-                    if not hasattr(self, 'step_start_time'):
-                        self.step_start_time = time.time()
-                    
-                    # Each step runs for 2 seconds before advancing (adjust as needed)
-                    step_duration = 2.0
-                    if time.time() - self.step_start_time >= step_duration:
-                        # Advance to next step
-                        next_step = current_step + 1
-                        next_address = self.process_addresses[next_step]
-                        next_step_name = step_names[next_step] if next_step < len(step_names) else f"STEP_{next_step}"
-                        
-                        # Deactivate current step
-                        try:
-                            current_hex = current_address[1:]
-                            current_coil = int(current_hex, 16)
-                            self.plc_client.write_coil(
-                                address=current_coil,
-                                value=False,
-                                slave=station_id
-                            )
-                            print(f"STEP PROGRESSION: Deactivated {step_name} ({current_address})")
-                        except Exception as e:
-                            print(f"Error deactivating step {current_step}: {e}")
-                        
-                        # Activate next step
-                        try:
-                            next_hex = next_address[1:]
-                            next_coil = int(next_hex, 16)
-                            self.plc_client.write_coil(
-                                address=next_coil,
-                                value=True,
-                                slave=station_id
-                            )
-                            print(f"STEP PROGRESSION: Activated {next_step_name} ({next_address})")
-                            
-                            # Update current step and reset timer
-                            self.current_process_step = next_step
-                            self.step_start_time = time.time()
-                            
-                            # Update UI message
-                            self.safe_update_message(f"Process Step: {next_step_name}", "blue")
-                            
-                        except Exception as e:
-                            print(f"Error activating next step {next_step}: {e}")
+                # Check if current step is active
+                current_status = status_values.get(current_address, False)
                 
-                elif not current_status and current_step == 0:
-                    # If AUTO step is not active, reactivate it
+                if not current_status:
+                    # Activate current step
                     try:
                         hex_part = current_address[1:]
                         coil_address = int(hex_part, 16)
-                        self.plc_client.write_coil(
-                            address=coil_address,
-                            value=True,
-                            slave=station_id
-                        )
-                        print(f"STEP CONTROL: Reactivated AUTO step ({current_address})")
+                        self.plc_client.write_coil(address=coil_address, value=True, slave=station_id)
+                        print(f"🎮 MANUAL: Activated {step_name} ({current_address})")
                         self.step_start_time = time.time()
                     except Exception as e:
-                        print(f"Error reactivating AUTO step: {e}")
+                        print(f"Error activating {step_name}: {e}")
+                        
+                elif current_status:
+                    # Step is active, check if it's time to advance
+                    if not hasattr(self, 'step_start_time'):
+                        self.step_start_time = time.time()
+                    
+                    # Each step runs for 3 seconds before advancing
+                    if time.time() - self.step_start_time >= 3.0:
+                        # Deactivate current step
+                        try:
+                            hex_part = current_address[1:]
+                            coil_address = int(hex_part, 16)
+                            self.plc_client.write_coil(address=coil_address, value=False, slave=station_id)
+                            print(f"🎮 MANUAL: Deactivated {step_name} ({current_address})")
+                        except Exception as e:
+                            print(f"Error deactivating {step_name}: {e}")
+                        
+                        # Move to next step
+                        self.current_process_step += 1
+                        if hasattr(self, 'step_start_time'):
+                            delattr(self, 'step_start_time')
+                        
+                        print(f"🎮 MANUAL: Moving to step {self.current_process_step}")
             
         except Exception as e:
-            print(f"Error in control_process_steps: {e}")
+            print(f"Error in manual process control: {e}")
             
     def monitor_test_completion(self):
         """Monitor PLC status to detect when test is complete"""
