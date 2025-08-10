@@ -194,6 +194,17 @@ class EOLTesterGUI:
         self.last_test_result_pass_state = False
         self.last_test_result_ng_state = False
         self.test_result_saved = False
+        
+        # Initialize continuous loop control variables
+        self.continuous_loop_active = False
+        self.current_cycle_number = 0
+        self.loop_start_time = None
+        self.cycle_start_time = None
+        self.auto_cycle_delay = 3.0  # Seconds between cycles
+        self.max_auto_cycles = 50   # Safety limit for auto cycling
+        self.cycle_completion_detected = False
+        self.loop_mode = "MANUAL"   # "MANUAL" or "MONITOR" 
+        self.step_duration = 3.0    # Duration for each step in manual mode
 
     def setup_window(self):
         """Set up the window after initialization"""
@@ -299,6 +310,44 @@ class EOLTesterGUI:
         )
         self.reconnect_button.pack(side="left", padx=5)
         
+        # Add Continuous Loop Control Buttons
+        self.loop_start_button = tk.Button(
+            title_frame,
+            text="START LOOP",
+            font=("Arial", 10, "bold"),
+            bg="#4CAF50",
+            fg="white",
+            relief="raised",
+            command=self.start_continuous_loop,
+            cursor="hand2"
+        )
+        self.loop_start_button.pack(side="left", padx=5)
+        
+        self.loop_stop_button = tk.Button(
+            title_frame,
+            text="STOP LOOP",
+            font=("Arial", 10, "bold"),
+            bg="#F44336",
+            fg="white",
+            relief="raised",
+            command=self.stop_continuous_loop,
+            cursor="hand2",
+            state="disabled"
+        )
+        self.loop_stop_button.pack(side="left", padx=5)
+        
+        # Add Loop Status Label
+        self.loop_status_label = tk.Label(
+            title_frame,
+            text="LOOP: STOPPED",
+            font=("Arial", 10, "bold"),
+            bg="#E0E0E0",
+            fg="#333333",
+            relief="sunken",
+            padx=10
+        )
+        self.loop_status_label.pack(side="left", padx=5)
+        
         # Add status indicator
         self.status_label = tk.Label(
             title_frame,
@@ -350,6 +399,13 @@ class EOLTesterGUI:
         
         self.reconnect_button.bind('<Enter>', lambda e: self.reconnect_button.config(bg="#F57C00"))
         self.reconnect_button.bind('<Leave>', lambda e: self.reconnect_button.config(bg="#FF9800"))
+        
+        # Add hover effects for loop control buttons
+        self.loop_start_button.bind('<Enter>', lambda e: self.loop_start_button.config(bg="#45a049") if self.loop_start_button.cget('state') != 'disabled' else None)
+        self.loop_start_button.bind('<Leave>', lambda e: self.loop_start_button.config(bg="#4CAF50") if self.loop_start_button.cget('state') != 'disabled' else None)
+        
+        self.loop_stop_button.bind('<Enter>', lambda e: self.loop_stop_button.config(bg="#D32F2F") if self.loop_stop_button.cget('state') != 'disabled' else None)
+        self.loop_stop_button.bind('<Leave>', lambda e: self.loop_stop_button.config(bg="#F44336") if self.loop_stop_button.cget('state') != 'disabled' else None)
 
     def manual_reconnect_plc(self):
         """Manual PLC reconnection triggered by user"""
@@ -6274,6 +6330,352 @@ class EOLTesterGUI:
             print(f"Error in get_next_lot_increment: {e}")
             traceback.print_exc()
             return 1  # Fallback to 1
+
+    # ==================== CONTINUOUS LOOP METHODS ====================
+    
+    def start_continuous_loop(self):
+        """Start the continuous process loop"""
+        try:
+            print("🔄 STARTING CONTINUOUS PROCESS LOOP")
+            
+            # Check if PLC is connected
+            if not self.plc_client or not self.plc_client.is_socket_open():
+                self.safe_update_message("Cannot start loop - PLC not connected", "red")
+                print("❌ Cannot start loop - PLC not connected")
+                return
+            
+            # Test control capability first
+            if not self.test_loop_control_capability():
+                self.safe_update_message("Loop control test failed", "red")
+                return
+            
+            # Initialize loop variables
+            self.continuous_loop_active = True
+            self.current_cycle_number = 0
+            self.loop_start_time = time.time()
+            self.cycle_completion_detected = False
+            
+            # Update GUI
+            self.loop_start_button.config(state="disabled")
+            self.loop_stop_button.config(state="normal")
+            self.update_loop_status_display()
+            
+            # Start the continuous loop
+            self.safe_update_message(f"CONTINUOUS LOOP STARTED - Mode: {self.loop_mode}", "green")
+            self.run_continuous_process_loop()
+            
+        except Exception as e:
+            print(f"Error starting continuous loop: {e}")
+            self.safe_update_message(f"Error starting loop: {e}", "red")
+    
+    def stop_continuous_loop(self):
+        """Stop the continuous process loop"""
+        try:
+            print("⏹️ STOPPING CONTINUOUS PROCESS LOOP")
+            
+            self.continuous_loop_active = False
+            
+            # Reset all process steps if in manual mode
+            if self.loop_mode == "MANUAL":
+                self.reset_all_process_steps_for_loop()
+            
+            # Update GUI
+            self.loop_start_button.config(state="normal")
+            self.loop_stop_button.config(state="disabled")
+            self.update_loop_status_display()
+            
+            total_time = time.time() - self.loop_start_time if self.loop_start_time else 0
+            self.safe_update_message(f"LOOP STOPPED - Completed {self.current_cycle_number} cycles in {total_time:.1f}s", "blue")
+            
+        except Exception as e:
+            print(f"Error stopping continuous loop: {e}")
+    
+    def test_loop_control_capability(self):
+        """Test if we can control process status coils for looping"""
+        try:
+            print("🧪 TESTING LOOP CONTROL CAPABILITY...")
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            # Test M0067 (AUTO step)
+            try:
+                self.plc_client.write_coil(address=0x0067, value=True, slave=station_id)
+                print("🔧 ATTEMPT: Set M0067 (AUTO) to HIGH")
+                
+                time.sleep(0.5)
+                read_response = self.plc_client.read_coils(address=0x0067, count=1, slave=station_id)
+                if not read_response.isError():
+                    actual_value = read_response.bits[0]
+                    if actual_value:
+                        print("✅ SUCCESS: We CAN control process status!")
+                        self.loop_mode = "MANUAL"
+                        return True
+                    else:
+                        print("❌ PLC overrode our control - using monitor mode")
+                        self.loop_mode = "MONITOR"
+                        return True  # We can still monitor
+                else:
+                    print("❓ UNKNOWN: Could not read back M0067")
+                    self.loop_mode = "MONITOR"
+                    return True
+                    
+            except Exception as e:
+                print(f"❌ ERROR testing M0067 control: {e}")
+                self.loop_mode = "MONITOR"
+                return True  # Default to monitor mode
+                
+        except Exception as e:
+            print(f"Error testing loop control capability: {e}")
+            return False
+    
+    def run_continuous_process_loop(self):
+        """Run the continuous process loop"""
+        try:
+            if not self.continuous_loop_active:
+                return
+            
+            # Safety check - don't exceed max cycles
+            if self.current_cycle_number >= self.max_auto_cycles:
+                print(f"⚠️ Safety limit reached ({self.max_auto_cycles} cycles)")
+                self.stop_continuous_loop()
+                return
+            
+            # Start a new cycle
+            self.current_cycle_number += 1
+            self.cycle_start_time = time.time()
+            self.cycle_completion_detected = False
+            
+            print(f"\n{'='*50}")
+            print(f"🔄 CYCLE #{self.current_cycle_number}")
+            print(f"{'='*50}")
+            
+            # Update GUI
+            self.update_loop_status_display()
+            
+            # Run cycle based on mode
+            if self.loop_mode == "MANUAL":
+                self.run_manual_cycle_for_loop()
+            else:
+                self.run_monitor_cycle_for_loop()
+            
+        except Exception as e:
+            print(f"Error in continuous process loop: {e}")
+            self.safe_update_message(f"Loop error: {e}", "red")
+    
+    def run_manual_cycle_for_loop(self):
+        """Run manual control cycle for continuous loop"""
+        try:
+            print("🎮 MANUAL CONTROL MODE - We control each step")
+            
+            # Reset all steps first
+            if not self.reset_all_process_steps_for_loop():
+                self.schedule_next_cycle(delay=2.0)
+                return
+            
+            # Start step progression
+            self.current_process_step = 0
+            self.execute_next_step()
+            
+        except Exception as e:
+            print(f"Error in manual cycle: {e}")
+            self.schedule_next_cycle(delay=2.0)
+    
+    def execute_next_step(self):
+        """Execute the next step in manual mode"""
+        try:
+            if not self.continuous_loop_active:
+                return
+                
+            if not hasattr(self, 'process_addresses') or not self.process_addresses:
+                self.schedule_next_cycle(delay=1.0)
+                return
+            
+            # Check if we've completed all steps
+            if self.current_process_step >= len(self.process_addresses):
+                print("✅ Manual cycle completed")
+                self.schedule_next_cycle()
+                return
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
+            
+            current_address = self.process_addresses[self.current_process_step]
+            step_name = step_names[self.current_process_step] if self.current_process_step < len(step_names) else f"STEP_{self.current_process_step}"
+            
+            print(f"⏭️  STEP {self.current_process_step + 1}: {step_name} ({current_address})")
+            
+            # Activate current step
+            try:
+                hex_part = current_address[1:]
+                coil_address = int(hex_part, 16)
+                self.plc_client.write_coil(address=coil_address, value=True, slave=station_id)
+                print(f"🔧 Set {step_name} ({current_address}) to HIGH")
+                
+                # Update UI message
+                self.safe_update_message(f"Cycle {self.current_cycle_number}: {step_name}", "blue")
+                
+                # Schedule deactivation and next step
+                self.root.after(int(self.step_duration * 1000), self.deactivate_current_step_and_advance)
+                
+            except Exception as e:
+                print(f"Error activating {step_name}: {e}")
+                self.schedule_next_cycle(delay=1.0)
+                
+        except Exception as e:
+            print(f"Error executing step: {e}")
+            self.schedule_next_cycle(delay=1.0)
+    
+    def deactivate_current_step_and_advance(self):
+        """Deactivate current step and advance to next"""
+        try:
+            if not self.continuous_loop_active:
+                return
+                
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
+            
+            current_address = self.process_addresses[self.current_process_step]
+            step_name = step_names[self.current_process_step] if self.current_process_step < len(step_names) else f"STEP_{self.current_process_step}"
+            
+            # Deactivate current step
+            try:
+                hex_part = current_address[1:]
+                coil_address = int(hex_part, 16)
+                self.plc_client.write_coil(address=coil_address, value=False, slave=station_id)
+                print(f"🔧 Set {step_name} ({current_address}) to LOW")
+            except Exception as e:
+                print(f"Error deactivating {step_name}: {e}")
+            
+            # Move to next step
+            self.current_process_step += 1
+            
+            # Execute next step
+            self.execute_next_step()
+            
+        except Exception as e:
+            print(f"Error in step deactivation: {e}")
+            self.schedule_next_cycle(delay=1.0)
+    
+    def run_monitor_cycle_for_loop(self):
+        """Run monitor cycle for continuous loop"""
+        try:
+            print("👁️ MONITOR MODE - Watching PLC control")
+            
+            # Schedule monitoring check
+            self.monitor_cycle_progress()
+            
+        except Exception as e:
+            print(f"Error in monitor cycle: {e}")
+            self.schedule_next_cycle(delay=2.0)
+    
+    def monitor_cycle_progress(self):
+        """Monitor the cycle progress and detect completion"""
+        try:
+            if not self.continuous_loop_active:
+                return
+            
+            # Check if we've exceeded the cycle timeout
+            cycle_elapsed = time.time() - self.cycle_start_time
+            if cycle_elapsed > 30.0:  # 30 second timeout
+                print("⏰ Cycle timeout - starting next cycle")
+                self.schedule_next_cycle()
+                return
+            
+            # Read process status
+            if self.plc_client and self.plc_client.is_socket_open():
+                status_values = self.read_process_status_values()
+                
+                if status_values:
+                    # Check for test completion
+                    test_pass = status_values.get("M0075", False)  # TEST RESULT PASS
+                    test_ng = status_values.get("M0079", False)    # TEST RESULT NG
+                    
+                    if test_pass or test_ng:
+                        result = "PASS" if test_pass else "NG"
+                        print(f"🎯 TEST COMPLETED: {result}")
+                        self.safe_update_message(f"Cycle {self.current_cycle_number}: {result}", "green" if test_pass else "red")
+                        self.schedule_next_cycle()
+                        return
+                    
+                    # Check which steps are active for display
+                    active_steps = []
+                    step_names = ["AUTO", "HOME", "1st PULL PASS", "1st PULL NG", "2nd PULL PASS", "2nd PULL NG", "TEST RESULT PASS", "TEST RESULT NG"]
+                    
+                    for i, address in enumerate(self.process_addresses):
+                        if status_values.get(address, False):
+                            step_name = step_names[i] if i < len(step_names) else f"STEP_{i}"
+                            active_steps.append(step_name)
+                    
+                    if active_steps:
+                        current_step = active_steps[0]  # Show first active step
+                        self.safe_update_message(f"Cycle {self.current_cycle_number}: {current_step}", "blue")
+            
+            # Schedule next monitoring check
+            self.root.after(500, self.monitor_cycle_progress)
+            
+        except Exception as e:
+            print(f"Error monitoring cycle progress: {e}")
+            self.schedule_next_cycle(delay=1.0)
+    
+    def schedule_next_cycle(self, delay=None):
+        """Schedule the next cycle after a delay"""
+        try:
+            if not self.continuous_loop_active:
+                return
+            
+            cycle_time = time.time() - self.cycle_start_time
+            print(f"✅ Cycle #{self.current_cycle_number} completed in {cycle_time:.1f}s")
+            
+            # Use provided delay or default
+            if delay is None:
+                delay = self.auto_cycle_delay
+            
+            print(f"⏳ Waiting {delay}s before next cycle...")
+            
+            # Schedule next cycle
+            self.root.after(int(delay * 1000), self.run_continuous_process_loop)
+            
+        except Exception as e:
+            print(f"Error scheduling next cycle: {e}")
+            self.stop_continuous_loop()
+    
+    def reset_all_process_steps_for_loop(self):
+        """Reset all process steps for the loop"""
+        try:
+            if not hasattr(self, 'process_addresses') or not self.process_addresses:
+                return True
+                
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            success_count = 0
+            
+            for i, address_str in enumerate(self.process_addresses):
+                try:
+                    hex_part = address_str[1:]
+                    coil_address = int(hex_part, 16)
+                    self.plc_client.write_coil(address=coil_address, value=False, slave=station_id)
+                    success_count += 1
+                    time.sleep(0.05)  # Small delay between writes
+                except Exception as e:
+                    print(f"Error resetting {address_str}: {e}")
+            
+            print(f"🔄 Reset {success_count}/{len(self.process_addresses)} process steps")
+            return success_count == len(self.process_addresses)
+            
+        except Exception as e:
+            print(f"Error resetting process steps: {e}")
+            return False
+    
+    def update_loop_status_display(self):
+        """Update the loop status display in GUI"""
+        try:
+            if self.continuous_loop_active:
+                elapsed = time.time() - self.loop_start_time if self.loop_start_time else 0
+                status_text = f"LOOP: CYCLE {self.current_cycle_number} ({elapsed:.0f}s)"
+                self.loop_status_label.config(text=status_text, bg="#4CAF50", fg="white")
+            else:
+                self.loop_status_label.config(text="LOOP: STOPPED", bg="#E0E0E0", fg="#333333")
+        except Exception as e:
+            print(f"Error updating loop status display: {e}")
 
 def main():
     try:
