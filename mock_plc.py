@@ -57,7 +57,7 @@ class MockPLCClient:
         """Check if PLC connection is open"""
         return self.is_connected
     
-    def write_coil(self, address, value, slave=1):
+    def write_coil(self, address, value, device_id=1):
         """Write to a PLC coil"""
         try:
             if not self.is_connected:
@@ -84,7 +84,7 @@ class MockPLCClient:
             print(f"❌ Mock PLC write_coil error: {e}")
             return MockModbusResult(True, str(e))
     
-    def read_coils(self, start_address, count, slave=1):
+    def read_coils(self, start_address, count, device_id=1):
         """Read PLC coils"""
         try:
             if not self.is_connected:
@@ -105,7 +105,7 @@ class MockPLCClient:
             print(f"❌ Mock PLC read_coils error: {e}")
             return MockModbusResult(True, str(e))
     
-    def read_discrete_inputs(self, start_address, count, slave=1):
+    def read_discrete_inputs(self, start_address, count, device_id=1):
         """Read PLC discrete inputs"""
         try:
             if not self.is_connected:
@@ -131,7 +131,7 @@ class MockPLCClient:
             print(f"❌ Mock PLC read_discrete_inputs error: {e}")
             return MockModbusResult(True, str(e))
     
-    def write_register(self, address, value, slave=1):
+    def write_register(self, address, value, device_id=1):
         """Write to a PLC register"""
         try:
             if not self.is_connected:
@@ -151,7 +151,7 @@ class MockPLCClient:
             print(f"❌ Mock PLC write_register error: {e}")
             return MockModbusResult(True, str(e))
     
-    def read_holding_registers(self, start_address, count, slave=1):
+    def read_holding_registers(self, start_address, count, device_id=1):
         """Read PLC holding registers"""
         try:
             if not self.is_connected:

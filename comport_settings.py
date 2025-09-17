@@ -277,7 +277,7 @@ class ComPortSettings:
                     test_response = self.modbus_client.read_coils(
                         address=0,
                         count=1,
-                        slave=slave_id
+                        device_id=slave_id
                     )
                     if not test_response.isError():
                         messagebox.showinfo("Connection Status", "Already connected to PLC!")
@@ -310,7 +310,7 @@ class ComPortSettings:
                         test_response = self.modbus_client.read_coils(
                             address=0,
                             count=1,
-                            slave=slave_id
+                            device_id=slave_id
                         )
                         
                         if not test_response.isError():
@@ -456,7 +456,7 @@ class ComPortSettings:
                 response = self.modbus_client.read_coils(
                     address=coil_address,
                     count=1,
-                    slave=slave_id
+                    device_id=slave_id
                 )
 
                 if getattr(response, 'isError', lambda: True)():
@@ -740,7 +740,7 @@ class ComPortSettings:
             self.rx_tcp_text.delete("1.0", tk.END)
             
             # Read holding register (D register) at address 0 (D0000)
-            response = self.modbus_tcp_client.read_holding_registers(0, 1, unit=1)  # Adjust unit ID if needed
+            response = self.modbus_tcp_client.read_holding_registers(0, 1, device_id=1)  # Adjust unit ID if needed
 
             if not response.isError():
                 value = response.registers[0]  # Read the integer value
@@ -1247,7 +1247,7 @@ class ComPortSettings:
                 response = self.modbus_client.read_holding_registers(
                     address=addr,
                     count=points_to_read,
-                    slave=slave_id
+                    device_id=slave_id
                 )
                 
                 if response.isError():

@@ -177,6 +177,103 @@ class EOLTesterGUI:
         # Initialize additional variables
         self.keepWriting = False
         self.breakLoop = False
+        
+        # Database configuration
+        self.db_config = {
+            'host': 'localhost',
+            'port': 3306,
+            'user': 'root',
+            'password': '#nk446420',
+            'database': 'EOL'
+        }
+        
+        # EOL Testing Variables (from C# implementation)
+        self.alcInput_TimeInterval = 3000  # 3000ms for manual entry
+        self.printedLabelScanDataInput_TimeInterval = 4000  # 4000ms for barcode scanner
+        self.printedLabelScanDataInput_WaitTime = 6000  # 6 secs wait for printed label scan
+        self.alertOn_TimeInterval = 5000  # 5 secs alert duration
+        self.printedLabelScanDataInput_Received = False
+        
+        # Part Information Variables
+        self.barcodePrintFileName = ""
+        self.barcodePrintFileNamePath = ""
+        self.prnFileContent = ""
+        self.partNumber = ""
+        self.modelName = ""
+        self.vendorCode = ""
+        self.eoNumber = ""
+        self.specialData = ""
+        self.initialID = ""
+        self.supplierSection = ""
+        self.lotNo = ""
+        self.traceabilityCode = ""
+        self.today = datetime.today().date()
+        self.dataPointX = 0
+        
+        # Machine and Process Variables
+        self.machineID = self.machineid  # Use existing machine ID
+        self.startingNGCableValidation = False
+        self.endingNGCableValidated = False
+        self.endingNGCableValidation = False
+        self.deviceToRead = []
+        
+        # Load Cell Values
+        self.loadcell01Value = 0.0
+        self.loadcell02Value = 0.0
+        self.loadcell03Value = 0.0
+        self.loadcell04Value = 0.0
+        
+        # Maximum Values During Test
+        self.L1MaxValue = 0.0
+        self.L2MaxValue = 0.0
+        self.L3MaxValue = 0.0
+        self.L4MaxValue = 0.0
+        
+        # Pressure Values
+        self.P01Value = 0.0
+        self.P02Value = 0.0
+        self.P03Value = 0.0
+        self.P04Value = 0.0
+        
+        # Test Control Variables
+        self.failCounter = 0
+        self.passCounter = 0
+        self.blink = False
+        
+        # Column Visibility Flags
+        self.columnL2 = False
+        self.columnL3 = False
+        self.columnL4 = False
+        self.columnP3 = False
+        self.columnP4 = False
+        
+        # PLC Communication Variables
+        self.slaveAddress = 1
+        self.inputSensorsArray = []
+        self.processStatusArray = []
+        self.dataRegistersArray = []
+        self.employeeCodesArray = []
+        self.processStatusLabels = ["AUTO", "HOME", "PULL1_OK", "PULL1_NG", "PULL2_OK", "PULL2_NG", "TESTRESULT_OK", "TESTRESULT_NG"]
+        self.rcvdTestRslt = False
+        self.inputSensorsToReadList = []
+        self.programSelectionPLCAddress = ""
+        
+        # Camera and Alert Variables
+        self.cam1Result = ""
+        self.resetPLCOnFormClosing = False
+        self.machineOnPLCCoilAddress = ""
+        self.alertOnPLCCoilAddress = ""
+        self.partRunningSerialExists = False
+        
+        # Monitoring and Threading
+        self.monitoring_active = False
+        self.test_in_progress = False
+        self.employee_validated = False
+        self.alc_validated = False
+        
+        # Specification Data
+        self.mldDataTable = []
+        self.specificationData = []
         self.failCounter = 0
         self.startingNGCableValidation = False
         self.endingNGCableValidation = False
@@ -1976,6 +2073,191 @@ class EOLTesterGUI:
         # Reset barcode data if not used
         self.barcode_data = ""
 
+    def load_configuration_files(self):
+        """Load configuration files for EOL testing"""
+        try:
+            # Load input sensors
+            input_sensors_path = os.path.join(os.getcwd(), "txt_files", "InputSensors.txt")
+            if os.path.exists(input_sensors_path):
+                with open(input_sensors_path, 'r') as f:
+                    content = f.read().strip()
+                    if content:
+                        self.inputSensorsArray = content.split(',')
+                    else:
+                        messagebox.showwarning("Warning", "Input Sensors text file is empty!")
+            else:
+                messagebox.showerror("Error", "Input Sensors text file is missing!")
+            
+            # Load process status addresses
+            process_status_path = os.path.join(os.getcwd(), "txt_files", "ProcessStatus.txt")
+            if os.path.exists(process_status_path):
+                with open(process_status_path, 'r') as f:
+                    content = f.read().strip()
+                    if content:
+                        self.processStatusArray = content.split(',')
+                    else:
+                        messagebox.showwarning("Warning", "Process Status addresses text file is empty!")
+            else:
+                messagebox.showerror("Error", "Process Status addresses text file is missing!")
+            
+            # Load input registers
+            input_registers_path = os.path.join(os.getcwd(), "txt_files", "HoldRegistersRead.txt")
+            if os.path.exists(input_registers_path):
+                with open(input_registers_path, 'r') as f:
+                    content = f.read().strip()
+                    if content:
+                        self.dataRegistersArray = content.split(',')
+                    else:
+                        messagebox.showwarning("Warning", "Input Registers text file is empty!")
+            else:
+                messagebox.showerror("Error", "Input Registers text file is missing!")
+            
+            # Load machine on PLC coil address
+            machine_on_path = os.path.join(os.getcwd(), "txt_files", "MachineOnPLCCoilAddress.txt")
+            if os.path.exists(machine_on_path):
+                with open(machine_on_path, 'r') as f:
+                    self.machineOnPLCCoilAddress = f.read().strip()
+            
+            # Load alert on PLC coil address
+            alert_on_path = os.path.join(os.getcwd(), "txt_files", "AlertOnPLCCoilAddress.txt")
+            if os.path.exists(alert_on_path):
+                with open(alert_on_path, 'r') as f:
+                    self.alertOnPLCCoilAddress = f.read().strip()
+            
+            print("Configuration files loaded successfully")
+            
+        except Exception as e:
+            print(f"Error loading configuration files: {e}")
+            messagebox.showerror("Configuration Error", f"Error loading configuration files: {e}")
+
+    def get_database_connection(self):
+        """Get MySQL database connection"""
+        try:
+            connection = mysql.connector.connect(**self.db_config)
+            return connection
+        except mysql.connector.Error as e:
+            print(f"Database connection error: {e}")
+            messagebox.showerror("Database Error", f"Failed to connect to database: {e}")
+            return None
+
+    def test_database_connection(self):
+        """Test database connectivity and create tables if needed"""
+        try:
+            connection = self.get_database_connection()
+            if connection and connection.is_connected():
+                cursor = connection.cursor()
+                
+                # Create necessary tables
+                self.create_database_tables(cursor)
+                
+                connection.commit()
+                cursor.close()
+                connection.close()
+                return True
+                
+        except mysql.connector.Error as e:
+            print(f"Database test failed: {e}")
+            messagebox.showerror("Database Error", f"Database test failed: {e}")
+            return False
+
+    def create_database_tables(self, cursor):
+        """Create necessary database tables for EOL testing"""
+        try:
+            # Create TBL_MODEL_MASTER table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (
+                    MM_ID INT AUTO_INCREMENT PRIMARY KEY,
+                    MM_ALC_CODE VARCHAR(50) NOT NULL,
+                    MM_PART_NUMBER VARCHAR(100) NOT NULL,
+                    MM_MODEL_NAME VARCHAR(200),
+                    MM_VENDOR_CODE VARCHAR(50),
+                    MM_EO_NUMBER VARCHAR(50),
+                    MM_SPECIAL_DATA VARCHAR(200),
+                    MM_INITIAL_ID VARCHAR(50),
+                    MM_SUPPLIER_SECTION VARCHAR(100),
+                    MM_IMAGE_PATH VARCHAR(500),
+                    MM_BARCODE_PRN_FILE_NAME VARCHAR(200),
+                    MM_PLC_ADDRESS VARCHAR(20),
+                    MM_STATUS BOOLEAN DEFAULT TRUE,
+                    MM_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create TBL_MODEL_SPECIFICATION table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_MODEL_SPECIFICATION (
+                    MS_ID INT AUTO_INCREMENT PRIMARY KEY,
+                    MS_PART_NUMBER VARCHAR(100) NOT NULL,
+                    MS_DESCRIPTION VARCHAR(200),
+                    MS_DEVICE VARCHAR(10) NOT NULL,
+                    MS_NORMAL_MIN DECIMAL(10,3),
+                    MS_NORMAL_MAX DECIMAL(10,3),
+                    MS_UNIT VARCHAR(20),
+                    MS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create TBL_MODEL_LABEL_DETAILS table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_MODEL_LABEL_DETAILS (
+                    MLD_ID INT AUTO_INCREMENT PRIMARY KEY,
+                    MLD_PART_NUMBER VARCHAR(100) NOT NULL,
+                    MLD_LABEL_ID VARCHAR(50) NOT NULL,
+                    MLD_ON_STATUS VARCHAR(100),
+                    MLD_OFF_STATUS VARCHAR(100),
+                    MLD_X INT DEFAULT 0,
+                    MLD_Y INT DEFAULT 0,
+                    MLD_FONT VARCHAR(100) DEFAULT 'Arial, 12pt',
+                    MLD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create TBL_TEST_DATA table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_TEST_DATA (
+                    ID INT AUTO_INCREMENT PRIMARY KEY,
+                    TD_MACHINE_ID VARCHAR(50),
+                    TD_PART_NUMBER VARCHAR(100),
+                    TD_LOT_NUMBER VARCHAR(50),
+                    TD_TRACEABILITY_CODE VARCHAR(100),
+                    TD_RECORD_DATE DATE,
+                    TD_DATETIME DATETIME,
+                    L1 DECIMAL(10,3),
+                    L2 DECIMAL(10,3),
+                    L3 DECIMAL(10,3),
+                    L4 DECIMAL(10,3),
+                    P1 DECIMAL(10,3),
+                    P2 DECIMAL(10,3),
+                    P3 DECIMAL(10,3),
+                    P4 DECIMAL(10,3),
+                    CAM1 VARCHAR(20),
+                    TD_OVERALL_STATUS VARCHAR(10),
+                    TD_EMPLOYEE_CODE VARCHAR(50),
+                    TD_BARCODE_SCAN_RESULT VARCHAR(10),
+                    TD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create TBL_PART_RUNNING_SERIAL table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS TBL_PART_RUNNING_SERIAL (
+                    PRS_ID INT AUTO_INCREMENT PRIMARY KEY,
+                    PART_NUMBER VARCHAR(100) NOT NULL,
+                    TEST_DAY_DATE DATE NOT NULL,
+                    TEST_DAY_LAST_DATE_TIME DATETIME,
+                    TRACEABILITY_CODE VARCHAR(100),
+                    RUNNING_LOT_NUMBER VARCHAR(50),
+                    PRS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_part_date (PART_NUMBER, TEST_DAY_DATE)
+                )
+            """)
+            
+            print("Database tables created/verified successfully")
+            
+        except mysql.connector.Error as e:
+            print(f"Error creating database tables: {e}")
+            raise e
+
     def load_configuration_data(self):
         """Load configuration data from txt_files subdirectory"""
         try:
@@ -2476,7 +2758,7 @@ class EOLTesterGUI:
             if hasattr(self, 'process_addresses') and self.process_addresses:
                 try:
                     station_id = int(os.getenv('PLC_STATION_ID', '1'))
-                    
+            
                     # Read discrete inputs (process status coils)
                     for i, address in enumerate(self.process_addresses):
                         if address.strip():
@@ -2487,13 +2769,13 @@ class EOLTesterGUI:
                                 # Read coil/discrete input
                                 if address.startswith('M'):
                                     # Read coil
-                                    result = self.plc_client.read_coils(addr_num, 1, slave=station_id)
+                                    result = self.plc_client.read_coils(addr_num, 1, device_id=station_id)
                                 elif address.startswith('X'):
                                     # Read discrete input
-                                    result = self.plc_client.read_discrete_inputs(addr_num, 1, slave=station_id)
+                                    result = self.plc_client.read_discrete_inputs(addr_num, 1, device_id=station_id)
                                 else:
                                     continue
-                                
+                
                                 if not result.isError():
                                     status_values[address] = result.bits[0] if result.bits else False
                                 else:
@@ -2506,9 +2788,9 @@ class EOLTesterGUI:
                 except Exception as e:
                     print(f"Error reading PLC status values: {e}")
                     return self.get_simulated_process_status()
-            
+                    
             return status_values
-            
+                
         except Exception as e:
             print(f"Error in read_process_status_values: {e}")
             return self.get_simulated_process_status()
@@ -2632,7 +2914,7 @@ class EOLTesterGUI:
                 print("Error: message_label does not exist. Creating it now.")
                 self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
                 self.message_label.pack(fill="x", pady=2)
-            
+                
             self.safe_update_message("System ready. PLC functionality removed.", "green")
             
         except Exception as e:
@@ -3261,7 +3543,7 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="white")
 
     def validate_employee_code(self, event=None):
-        """Validate employee code against employecode.txt"""
+        """Validate employee code against EmployeeCodes.txt - C# Implementation"""
         emp_code = self.emp_entry.get().strip()
         if emp_code == "EMP CODE" or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
@@ -3281,65 +3563,899 @@ class EOLTesterGUI:
             
             # Check if file exists
             if not os.path.exists(employee_codes_path):
-                print(f"Warning: EmployeeCodes.txt not found at {employee_codes_path}")
-                self.safe_update_message(f"Warning: EmployeeCodes.txt not found - auto-approving", "orange")
-                
-                # Auto-approve employee code if file is missing
-                self.current_employee_id = emp_code
-                self.employee_validation_complete = True
-                
-                self.alc_entry.configure(state='normal')  # Enable ALC entry
-                self.emp_entry.configure(bg="lightgreen")
-                self.alc_entry.focus_set()  # Set focus to ALC entry
-                
-                print(f"Employee {emp_code} auto-approved (file missing)")
+                messagebox.showerror("Error", "Employee Codes text file is either missing or empty!!")
                 return
             
-            # Read from the correct file path
+            # Read employee codes (C# style)
             with open(employee_codes_path, 'r') as file:
-                valid_codes = [code.strip() for code in file.readlines()]
+                content = file.read().strip()
+                if content:
+                    self.employeeCodesArray = content.split(',')
+                    # Clean up employee codes (remove whitespace)
+                    self.employeeCodesArray = [code.strip() for code in self.employeeCodesArray]
+                else:
+                    messagebox.showerror("Error", "Employee Codes text file is either missing or empty!!")
+                    return
             
-            if emp_code in valid_codes:
+            # Validate employee code (exact C# logic)
+            if emp_code in self.employeeCodesArray:
                 # Set employee validation flags
                 self.current_employee_id = emp_code
                 self.employee_validation_complete = True
+                self.employee_validated = True
                 
-                self.safe_update_message("Employee code validated", "green")
-                self.alc_entry.configure(state='normal')  # Enable ALC entry
-                self.emp_entry.configure(bg="lightgreen")
-                self.alc_entry.focus_set()  # Set focus to ALC entry
+                # Make employee entry read-only (C# behavior)
+                self.emp_entry.configure(state='readonly', bg="lightgreen")
+                
+                # Enable ALC entry and set focus (C# behavior)
+                self.alc_entry.configure(state='normal')
+                self.alc_entry.focus_set()
+                
+                self.safe_update_message("Employee code validated - Enter ALC code", "green")
                 
                 print(f"Employee {emp_code} validated successfully")
+                
+                # Initialize database connection test
+                self.test_database_connection()
+                
             else:
-                # Reset validation flags for unauthorized code
-                self.current_employee_id = None
-                self.employee_validation_complete = False
+                # Exact error message from C# code
+                messagebox.showerror(
+                    "Unauthorized Employee", 
+                    f"Employee code: {emp_code} is NOT AUTHORIZED to operate this machine, please consult SUPERVISOR."
+                )
+                self.emp_entry.delete(0, tk.END)
+                self.emp_entry.focus_set()
+                return
                 
-                self.safe_update_message("Error: Employee code unauthorized", "red")
-                messagebox.showerror("Error", "Employee code unauthorized")
-                self.alc_entry.configure(state='disabled')
-                self.emp_entry.configure(bg="pink")
-                
-        except FileNotFoundError:
-            print(f"Error: Employee codes file not found in txt_files directory")
-            self.safe_update_message("Error: Employee codes file not found - auto-approving", "orange")
-            
-            # Auto-approve employee code if file cannot be read
-            self.current_employee_id = emp_code
-            self.employee_validation_complete = True
-            
-            self.alc_entry.configure(state='normal')  # Enable ALC entry
-            self.emp_entry.configure(bg="lightgreen")
-            self.alc_entry.focus_set()  # Set focus to ALC entry
-            
-            print(f"Employee {emp_code} auto-approved (file error)")
         except Exception as e:
+            print(f"Error validating employee code: {e}")
+            messagebox.showerror("Error", f"Error reading employee codes: {e}")
             # Reset validation flags on error
             self.current_employee_id = None
             self.employee_validation_complete = False
+            return
+
+    def process_alc_code_cs_style(self, alc_code):
+        """Process ALC code with C# implementation logic"""
+        try:
+            # Wait for complete input (C# style with 3 second timeout)
+            time.sleep(self.alcInput_TimeInterval / 1000.0)  # Convert ms to seconds
             
-            print(f"Error during employee code validation: {str(e)}")
-            self.safe_update_message(f"Error validating employee code: {str(e)}", "red")
+            # Make ALC entry read-only
+            self.alc_entry.configure(state='readonly')
+            
+            part_exists = False
+            self.barcodePrintFileName = ""
+            self.prnFileContent = ""
+            
+            # Database connection using configured settings
+            connection = self.get_database_connection()
+            if not connection:
+                messagebox.showerror("Database Error", "Failed to connect to database")
+                return
+                
+            cursor = connection.cursor(dictionary=True)
+
+            # Query TBL_MODEL_MASTER for part information (exact C# query)
+            model_query = """
+            SELECT 
+                MM_PART_NUMBER,
+                MM_MODEL_NAME,
+                MM_VENDOR_CODE,
+                MM_EO_NUMBER,
+                MM_SPECIAL_DATA,
+                MM_INITIAL_ID,
+                MM_SUPPLIER_SECTION,
+                MM_IMAGE_PATH,
+                MM_BARCODE_PRN_FILE_NAME,
+                MM_PLC_ADDRESS
+            FROM TBL_MODEL_MASTER 
+            WHERE MM_ALC_CODE = %s AND MM_STATUS = %s
+            """
+            cursor.execute(model_query, (alc_code, True))
+            model_result = cursor.fetchone()
+            
+            if model_result:
+                # Store part information (C# style)
+                self.partNumber = model_result['MM_PART_NUMBER']
+                self.modelName = model_result['MM_MODEL_NAME'] 
+                self.vendorCode = model_result['MM_VENDOR_CODE'] or ""
+                self.eoNumber = model_result['MM_EO_NUMBER'] or ""
+                self.specialData = model_result['MM_SPECIAL_DATA'] or ""
+                self.initialID = model_result['MM_INITIAL_ID'] or ""
+                self.supplierSection = model_result['MM_SUPPLIER_SECTION'] or ""
+                
+                # Update part name label (C# style)
+                if hasattr(self, 'model_header'):
+                    self.model_header.config(text=f"{self.modelName} - {self.partNumber}")
+                
+                # Load part image
+                image_path = model_result['MM_IMAGE_PATH']
+                if image_path and os.path.exists(image_path):
+                    self.load_image_with_path(image_path)
+                
+                # Handle barcode print file
+                self.barcodePrintFileName = model_result['MM_BARCODE_PRN_FILE_NAME'] or ""
+                if self.barcodePrintFileName and self.barcodePrintFileName != "NO_BARCODE_PRINT_FILE":
+                    self.barcodePrintFileNamePath = os.path.join(os.getcwd(), self.barcodePrintFileName)
+                    if os.path.exists(self.barcodePrintFileNamePath):
+                        with open(self.barcodePrintFileNamePath, 'r') as f:
+                            self.prnFileContent = f.read()
+                
+                # Get PLC program selection address
+                self.programSelectionPLCAddress = model_result['MM_PLC_ADDRESS']
+                if self.programSelectionPLCAddress:
+                    # Write to PLC for program selection (C# logic)
+                    self.write_program_selection_to_plc()
+                
+                # Write Machine On signal to PLC
+                self.write_machine_on_to_plc()
+                
+                part_exists = True
+            
+            if part_exists:
+                # Load model specifications (C# style)
+                self.load_model_specifications(cursor)
+                
+                # Load label details for dynamic UI
+                self.load_model_label_details(cursor)
+                
+                # Initialize data display and graphs
+                self.display_data()
+                self.load_graph()
+                
+                # Get lot number for this part
+                self.get_lot_number()
+                
+                # Start NG cable validation process
+                self.safe_update_message("Please Validate NG Cable...", "black")
+                self.startingNGCableValidation = True
+                self.start_check_async()
+                
+            else:
+                messagebox.showwarning("Part Not Found", "Scanned Part Does NOT Exist...")
+                self.alc_entry.delete(0, tk.END)
+                self.alc_entry.configure(state='normal')
+                self.alc_entry.focus_set()
+            
+            cursor.close()
+            connection.close()
+            
+        except Exception as e:
+            print(f"Error processing ALC code: {e}")
+            messagebox.showerror("Error", f"Error processing ALC code: {e}")
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.configure(state='normal')
+            self.alc_entry.focus_set()
+
+    def load_model_specifications(self, cursor):
+        """Load model specifications from database (C# implementation)"""
+        try:
+            spec_query = """
+            SELECT 
+                MS_DESCRIPTION,
+                MS_DEVICE,
+                MS_NORMAL_MIN,
+                MS_UNIT,
+                MS_NORMAL_MAX
+            FROM TBL_MODEL_SPECIFICATION 
+            WHERE MS_PART_NUMBER = %s
+            ORDER BY MS_DEVICE
+            """
+            cursor.execute(spec_query, (self.partNumber,))
+            specifications = cursor.fetchall()
+            
+            # Clear existing specification tree
+            if hasattr(self, 'spec_tree'):
+                self.spec_tree.delete(*self.spec_tree.get_children())
+            
+            # Reset device visibility flags
+            self.columnL2 = self.columnL3 = self.columnL4 = False
+            self.columnP3 = self.columnP4 = False
+            self.deviceToRead = []
+            
+            # Process each specification
+            for spec in specifications:
+                device = spec['MS_DEVICE'].upper()
+                self.deviceToRead.append(device)
+                
+                # Set column visibility flags (C# style)
+                if device == "L2":
+                    self.columnL2 = True
+                elif device == "L3":
+                    self.columnL3 = True
+                elif device == "L4":
+                    self.columnL4 = True
+                elif device == "P3":
+                    self.columnP3 = True
+                elif device == "P4":
+                    self.columnP4 = True
+                
+                # Add to specification tree
+                if hasattr(self, 'spec_tree'):
+                    values = (
+                        spec['MS_DESCRIPTION'],
+                        device,
+                        spec['MS_UNIT'],
+                        f"{float(spec['MS_NORMAL_MIN']):.2f}" if spec['MS_NORMAL_MIN'] is not None else "N/A",
+                        f"{float(spec['MS_NORMAL_MAX']):.2f}" if spec['MS_NORMAL_MAX'] is not None else "N/A",
+                        "",  # Actual value (empty initially)
+                        ""   # Result (empty initially)
+                    )
+                    self.spec_tree.insert('', 'end', values=values)
+            
+            # Update tree columns based on devices
+            if hasattr(self, 'spec_tree'):
+                self.update_tree_columns(set(self.deviceToRead))
+                
+        except Exception as e:
+            print(f"Error loading model specifications: {e}")
+
+    def load_model_label_details(self, cursor):
+        """Load model label details for dynamic UI (C# implementation)"""
+        try:
+            label_query = """
+            SELECT 
+                MLD_LABEL_ID,
+                MLD_ON_STATUS,
+                MLD_OFF_STATUS,
+                MLD_X,
+                MLD_Y,
+                MLD_FONT
+            FROM TBL_MODEL_LABEL_DETAILS 
+            WHERE MLD_PART_NUMBER = %s
+            """
+            cursor.execute(label_query, (self.partNumber,))
+            label_details = cursor.fetchall()
+            
+            self.mldDataTable = label_details
+            self.inputSensorsToReadList = []
+            
+            # Process each label detail
+            for label in label_details:
+                if label['MLD_ON_STATUS'] and label['MLD_ON_STATUS'].strip():
+                    self.inputSensorsToReadList.append(label['MLD_LABEL_ID'])
+                    
+                    # Create or update label widget (simplified for now)
+                    # In full implementation, this would create dynamic labels on the UI
+                    print(f"Label {label['MLD_LABEL_ID']}: {label['MLD_OFF_STATUS']} -> {label['MLD_ON_STATUS']}")
+                    
+        except Exception as e:
+            print(f"Error loading model label details: {e}")
+
+    def write_program_selection_to_plc(self):
+        """Write program selection to PLC (C# implementation)"""
+        try:
+            if self.programSelectionPLCAddress and self.plc_client:
+                # Convert hex address to int (remove 'M' prefix)
+                if self.programSelectionPLCAddress.startswith('M'):
+                    coil_address = int(self.programSelectionPLCAddress[1:], 16)
+                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
+                    if result.isError():
+                        print(f"Error writing program selection to PLC: {result}")
+                    else:
+                        print(f"Program selection written to PLC address {self.programSelectionPLCAddress}")
+        except Exception as e:
+            print(f"Error writing program selection to PLC: {e}")
+
+    def write_machine_on_to_plc(self):
+        """Write Machine On signal to PLC (C# implementation)"""
+        try:
+            if self.machineOnPLCCoilAddress and self.plc_client:
+                # Convert hex address to int (remove 'M' prefix)  
+                if self.machineOnPLCCoilAddress.startswith('M'):
+                    coil_address = int(self.machineOnPLCCoilAddress[1:], 16)
+                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
+                    if result.isError():
+                        print(f"Error writing machine on signal to PLC: {result}")
+                    else:
+                        print(f"Machine On signal written to PLC address {self.machineOnPLCCoilAddress}")
+                else:
+                    messagebox.showerror("Error", "Machine On PLC Coil Address text file is either missing or empty!!")
+        except Exception as e:
+            print(f"Error writing machine on signal to PLC: {e}")
+
+    def display_data(self):
+        """Display test data (C# implementation placeholder)"""
+        # This would update the data grid with today's test results
+        # For now, just print a message
+        print("Displaying test data for part:", self.partNumber)
+
+    def load_graph(self):
+        """Load graph data (C# implementation placeholder)"""
+        # This would load historical chart data
+        # For now, just print a message
+        print("Loading graph data for part:", self.partNumber)
+
+    def get_lot_number(self):
+        """Get lot number from database (C# implementation)"""
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                return
+                
+            cursor = connection.cursor(dictionary=True)
+            
+            lot_query = """
+            SELECT RUNNING_LOT_NUMBER
+            FROM TBL_PART_RUNNING_SERIAL 
+            WHERE PART_NUMBER = %s AND TEST_DAY_DATE = %s
+            ORDER BY RUNNING_LOT_NUMBER DESC
+            LIMIT 1
+            """
+            cursor.execute(lot_query, (self.partNumber, datetime.today().date()))
+            result = cursor.fetchone()
+            
+            if result:
+                self.lotNo = result['RUNNING_LOT_NUMBER']
+                self.partRunningSerialExists = True
+            else:
+                self.lotNo = "0"
+                self.partRunningSerialExists = False
+            
+            cursor.close()
+            connection.close()
+            
+        except Exception as e:
+            print(f"Error getting lot number: {e}")
+            self.lotNo = "0"
+
+    def start_check_async(self):
+        """Start asynchronous testing process (C# implementation)"""
+        # Start the main testing workflow
+        print("Starting EOL testing process...")
+        self.safe_update_message("Starting test process...", "blue")
+        
+        # In full implementation, this would start:
+        # 1. ReadCoils() - PLC status monitoring
+        # 2. ReadSensorInputs() - Sensor monitoring  
+        # 3. ReadInputRegisters() - Load cell/pressure monitoring
+        
+        # For now, simulate the process
+        self.root.after(1000, self.simulate_test_process)
+
+    def simulate_test_process(self):
+        """Simulate the complete EOL testing process"""
+        try:
+            print("Simulating EOL test process...")
+            
+            # Generate simulated test values
+            self.generate_simulated_test_values()
+            
+            # Process test results
+            self.process_simulated_test_results()
+            
+            # If starting NG cable validation
+            if self.startingNGCableValidation:
+                if self.failCounter > 0:
+                    self.safe_update_message("NG Validation successful, continue to testing...", "green")
+                    self.startingNGCableValidation = False
+                    # Continue with normal testing
+                    self.root.after(2000, self.simulate_test_process)
+                else:
+                    self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
+                    # Reset and retry
+                    self.reset_test_parameters()
+                    self.root.after(3000, self.simulate_test_process)
+            else:
+                # Normal test processing
+                self.complete_test_cycle()
+                
+        except Exception as e:
+            print(f"Error in test process simulation: {e}")
+
+    def generate_simulated_test_values(self):
+        """Generate simulated test values for demonstration"""
+        import random
+        
+        # Generate load cell values (simulate real sensor data)
+        self.L1MaxValue = random.uniform(10.0, 50.0)
+        if self.columnL2:
+            self.L2MaxValue = random.uniform(10.0, 50.0)
+        if self.columnL3:
+            self.L3MaxValue = random.uniform(10.0, 50.0)
+        if self.columnL4:
+            self.L4MaxValue = random.uniform(10.0, 50.0)
+        
+        # Generate pressure values
+        self.P01Value = random.uniform(-2.0, 2.0)
+        self.P02Value = random.uniform(-2.0, 2.0)
+        if self.columnP3:
+            self.P03Value = random.uniform(-2.0, 2.0)
+        if self.columnP4:
+            self.P04Value = random.uniform(-2.0, 2.0)
+        
+        # Simulate camera result
+        self.cam1Result = "PASS" if random.random() > 0.1 else "NG"
+
+    def process_simulated_test_results(self):
+        """Process simulated test results against specifications"""
+        self.failCounter = 0
+        self.passCounter = 0
+        
+        if not hasattr(self, 'spec_tree'):
+            return
+        
+        # Process each specification in the tree
+        for item in self.spec_tree.get_children():
+            values = self.spec_tree.item(item)['values']
+            if len(values) >= 5:
+                device = values[1]
+                min_val = float(values[3]) if values[3] != "N/A" else 0.0
+                max_val = float(values[4]) if values[4] != "N/A" else 100.0
+                
+                # Get actual value based on device
+                actual_value = self.get_actual_value_for_device(device)
+                
+                # Determine result
+                if min_val <= actual_value <= max_val:
+                    result = "PASS"
+                    self.passCounter += 1
+                    result_color = "blue"
+                else:
+                    result = "NG"
+                    self.failCounter += 1
+                    result_color = "red"
+                
+                # Update tree with results
+                updated_values = list(values)
+                updated_values[5] = f"{actual_value:.2f}"  # Actual value
+                updated_values[6] = result  # Result
+                self.spec_tree.item(item, values=updated_values)
+                
+                # Update result color (if possible)
+                if result == "NG":
+                    self.spec_tree.set(item, "Result", result)
+
+    def get_actual_value_for_device(self, device):
+        """Get actual value for a specific device"""
+        device_map = {
+            "L1": self.L1MaxValue,
+            "L2": self.L2MaxValue,
+            "L3": self.L3MaxValue,
+            "L4": self.L4MaxValue,
+            "P1": self.P01Value,
+            "P2": self.P02Value,
+            "P3": self.P03Value,
+            "P4": self.P04Value
+        }
+        return device_map.get(device, 0.0)
+
+    def complete_test_cycle(self):
+        """Complete the test cycle and save results"""
+        try:
+            # Generate lot number and traceability code
+            self.generate_lot_and_traceability()
+            
+            # Check for duplicate traceability code
+            if self.check_traceability_duplicate():
+                messagebox.showwarning("Duplicate Code", 
+                    f"Generated Traceability Code: {self.traceabilityCode} already exists. Saving as 'NG'.")
+                self.save_testing_data("NG")
+            elif self.passCounter == len(self.deviceToRead):
+                # All tests passed
+                self.save_testing_data("OK")
+                # Print barcode if configured
+                if self.barcodePrintFileName and self.barcodePrintFileName != "NO_BARCODE_PRINT_FILE":
+                    self.print_barcode_label_async()
+            else:
+                # Some tests failed
+                self.save_testing_data("NG")
+            
+            # Update charts and displays
+            self.update_charts()
+            
+            # Reset for next test
+            self.reset_test_parameters()
+            
+            # Continue testing cycle
+            self.root.after(5000, self.simulate_test_process)
+            
+        except Exception as e:
+            print(f"Error completing test cycle: {e}")
+
+    def generate_lot_and_traceability(self):
+        """Generate lot number and traceability code (C# implementation)"""
+        try:
+            # Check if day has changed
+            current_date = datetime.today().date()
+            if (current_date - self.today).days >= 1:
+                self.lotNo = "0"
+                self.today = current_date
+                self.partRunningSerialExists = False
+            
+            # Increment lot number
+            lot_num = int(self.lotNo) + 1
+            self.lotNo = f"{lot_num:07d}"  # 7-digit format
+            
+            # Generate traceability code: yyMMdd + I + MachineID + G1A + LotNumber
+            date_str = current_date.strftime("%y%m%d")
+            machine_suffix = self.machineID[2:] if len(self.machineID) > 2 else "01"
+            self.traceabilityCode = f"{date_str}I{machine_suffix}G1A{self.lotNo}"
+            
+            print(f"Generated lot: {self.lotNo}, traceability: {self.traceabilityCode}")
+            
+        except Exception as e:
+            print(f"Error generating lot and traceability: {e}")
+
+    def check_traceability_duplicate(self):
+        """Check if traceability code already exists"""
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                return False
+                
+            cursor = connection.cursor()
+            
+            duplicate_query = """
+            SELECT TD_TRACEABILITY_CODE 
+            FROM TBL_TEST_DATA 
+            WHERE TD_PART_NUMBER = %s 
+            AND TD_RECORD_DATE = %s 
+            AND TD_TRACEABILITY_CODE = %s
+            """
+            cursor.execute(duplicate_query, (self.partNumber, datetime.today().date(), self.traceabilityCode))
+            result = cursor.fetchone()
+            
+            cursor.close()
+            connection.close()
+            
+            return result is not None
+            
+        except Exception as e:
+            print(f"Error checking traceability duplicate: {e}")
+            return False
+
+    def reset_test_parameters(self):
+        """Reset test parameters for next cycle (C# implementation)"""
+        # Reset message
+        self.safe_update_message("", "black")
+        
+        # Reset load cell values
+        self.loadcell01Value = 0.0
+        self.loadcell02Value = 0.0
+        self.loadcell03Value = 0.0
+        self.loadcell04Value = 0.0
+        
+        # Reset maximum values
+        self.L1MaxValue = 0.0
+        self.L2MaxValue = 0.0
+        self.L3MaxValue = 0.0
+        self.L4MaxValue = 0.0
+        
+        # Reset pressure values
+        self.P01Value = 0.0
+        self.P02Value = 0.0
+        self.P03Value = 0.0
+        self.P04Value = 0.0
+        
+        # Reset counters
+        self.failCounter = 0
+        self.passCounter = 0
+        
+        # Reset flags
+        self.rcvdTestRslt = False
+        self.cam1Result = ""
+
+    def update_charts(self):
+        """Update charts with new data points (C# implementation)"""
+        try:
+            # This would update the load and length charts
+            # For now, just increment data point counter
+            self.dataPointX += 1
+            print(f"Updated charts with data point {self.dataPointX}")
+            
+        except Exception as e:
+            print(f"Error updating charts: {e}")
+
+    def save_testing_data(self, status):
+        """Save testing data to database (C# implementation)"""
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                messagebox.showerror("Database Error", "Failed to connect to database for saving results")
+                return
+                
+            cursor = connection.cursor()
+            
+            # Build dynamic INSERT query based on available columns
+            base_columns = [
+                'TD_MACHINE_ID', 'TD_PART_NUMBER', 'TD_LOT_NUMBER', 
+                'TD_TRACEABILITY_CODE', 'TD_RECORD_DATE', 'TD_DATETIME', 
+                'L1', 'P1', 'P2', 'CAM1', 'TD_OVERALL_STATUS', 'TD_EMPLOYEE_CODE'
+            ]
+            
+            base_values = [
+                self.machineID, self.partNumber, self.lotNo,
+                self.traceabilityCode, datetime.today().date(), datetime.now(),
+                self.L1MaxValue, self.P01Value, self.P02Value,
+                self.cam1Result, status, self.current_employee_id
+            ]
+            
+            # Add optional columns based on part configuration
+            if self.columnL2:
+                base_columns.append('L2')
+                base_values.append(self.L2MaxValue)
+            if self.columnL3:
+                base_columns.append('L3')
+                base_values.append(self.L3MaxValue)
+            if self.columnL4:
+                base_columns.append('L4')
+                base_values.append(self.L4MaxValue)
+            if self.columnP3:
+                base_columns.append('P3')
+                base_values.append(self.P03Value)
+            if self.columnP4:
+                base_columns.append('P4')
+                base_values.append(self.P04Value)
+            
+            # Create INSERT query
+            columns_str = ', '.join(base_columns)
+            placeholders = ', '.join(['%s'] * len(base_values))
+            
+            insert_query = f"""
+            INSERT INTO TBL_TEST_DATA ({columns_str})
+            VALUES ({placeholders})
+            """
+            
+            cursor.execute(insert_query, base_values)
+            connection.commit()
+            
+            print(f"Test data saved: {status} - Lot: {self.lotNo}, Traceability: {self.traceabilityCode}")
+            
+            # Update or insert part running serial
+            if status == "OK":
+                self.update_part_running_serial(cursor)
+                connection.commit()
+            
+            cursor.close()
+            connection.close()
+            
+            # Update display
+            self.display_data()
+            
+        except Exception as e:
+            print(f"Error saving testing data: {e}")
+            messagebox.showerror("Database Error", f"Failed to save test data: {e}")
+
+    def update_part_running_serial(self, cursor):
+        """Update or insert part running serial record (C# implementation)"""
+        try:
+            if not self.partRunningSerialExists:
+                # Insert new record
+                insert_query = """
+                INSERT INTO TBL_PART_RUNNING_SERIAL 
+                (PART_NUMBER, TEST_DAY_DATE, TEST_DAY_LAST_DATE_TIME, TRACEABILITY_CODE, RUNNING_LOT_NUMBER)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(insert_query, (
+                    self.partNumber,
+                    datetime.today().date(),
+                    datetime.now(),
+                    self.traceabilityCode,
+                    self.lotNo
+                ))
+                self.partRunningSerialExists = True
+                print("Inserted new part running serial record")
+            else:
+                # Update existing record
+                update_query = """
+                UPDATE TBL_PART_RUNNING_SERIAL 
+                SET TEST_DAY_LAST_DATE_TIME = %s,
+                    TRACEABILITY_CODE = %s,
+                    RUNNING_LOT_NUMBER = %s
+                WHERE PART_NUMBER = %s AND TEST_DAY_DATE = %s
+                """
+                cursor.execute(update_query, (
+                    datetime.now(),
+                    self.traceabilityCode,
+                    self.lotNo,
+                    self.partNumber,
+                    datetime.today().date()
+                ))
+                print("Updated existing part running serial record")
+                
+        except Exception as e:
+            print(f"Error updating part running serial: {e}")
+
+    def print_barcode_label_async(self):
+        """Print barcode label asynchronously (C# implementation)"""
+        try:
+            if not self.prnFileContent:
+                print("No barcode template content available")
+                return
+            
+            # Replace placeholders in template (C# style)
+            print_file_text = self.prnFileContent
+            
+            # Replace all placeholders with actual values
+            replacements = {
+                '@alcCode@': self.alc_entry.get() if hasattr(self, 'alc_entry') else '',
+                '@partNumber@': self.partNumber,
+                '@modelName@': self.modelName,
+                '@vendorCode@': self.vendorCode,
+                '@eoNumber@': self.eoNumber,
+                '@specialData@': self.specialData,
+                '@initialID@': self.initialID,
+                '@supplierSection@': self.supplierSection,
+                '@lotNo@': self.lotNo,
+                '@traceabilityCode@': self.traceabilityCode,
+                '@L1MaxValue@': f"{self.L1MaxValue:.1f}",
+                '@L2MaxValue@': f"{self.L2MaxValue:.1f}",
+                '@L3MaxValue@': f"{self.L3MaxValue:.1f}",
+                '@L4MaxValue@': f"{self.L4MaxValue:.1f}",
+                '@P01Value@': f"+{self.P01Value:.2f}" if self.P01Value >= 0 else f"{self.P01Value:.2f}",
+                '@P02Value@': f"+{self.P02Value:.2f}" if self.P02Value >= 0 else f"{self.P02Value:.2f}",
+                '@P03Value@': f"+{self.P03Value:.2f}" if self.P03Value >= 0 else f"{self.P03Value:.2f}",
+                '@P04Value@': f"+{self.P04Value:.2f}" if self.P04Value >= 0 else f"{self.P04Value:.2f}",
+                '@ddMMyy@': datetime.now().strftime("%d%m%y"),
+                '@HH:mm:ss@': datetime.now().strftime("%H:%M:%S"),
+                '@machineID@': self.machineID,
+                '@machineID_NoAlphabet@': self.machineID[2:] if len(self.machineID) > 2 else "01"
+            }
+            
+            for placeholder, value in replacements.items():
+                print_file_text = print_file_text.replace(placeholder, str(value))
+            
+            # Create temporary file for printing
+            import tempfile
+            import uuid
+            
+            temp_filename = os.path.join(tempfile.gettempdir(), f"EOL_LABEL_{uuid.uuid4().hex}.prn")
+            
+            try:
+                with open(temp_filename, 'w') as f:
+                    f.write(print_file_text)
+                
+                # Simulate printing delay
+                time.sleep(0.2)
+                
+                # Here you would send to actual printer
+                # For simulation, just print the file path
+                print(f"Barcode label printed to: {temp_filename}")
+                
+                # Start waiting for barcode scan verification
+                self.wait_for_barcode_scan()
+                
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_filename):
+                    try:
+                        os.remove(temp_filename)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Error printing barcode label: {e}")
+            messagebox.showerror("Print Error", f"Printing failed: {e}")
+
+    def wait_for_barcode_scan(self):
+        """Wait for barcode scan verification (C# implementation)"""
+        try:
+            print("Waiting for barcode scan verification...")
+            
+            # Enable barcode scan input (simulated)
+            self.printedLabelScanDataInput_Received = False
+            
+            # Wait for scan input with timeout
+            self.root.after(self.printedLabelScanDataInput_WaitTime, self.check_barcode_scan_timeout)
+            
+            # In real implementation, this would enable a text input field for barcode scanner
+            # For simulation, we'll automatically generate a scan result after delay
+            self.root.after(2000, self.simulate_barcode_scan)
+            
+        except Exception as e:
+            print(f"Error waiting for barcode scan: {e}")
+
+    def simulate_barcode_scan(self):
+        """Simulate barcode scan for demonstration"""
+        try:
+            # Simulate successful scan 90% of the time
+            import random
+            scan_successful = random.random() > 0.1
+            
+            if scan_successful:
+                # Simulate scanned data containing traceability code
+                scanned_data = f"LABEL_{self.traceabilityCode}_END"
+                self.process_barcode_scan_result(scanned_data)
+            else:
+                # Simulate scan failure
+                print("Simulated barcode scan failure")
+                
+        except Exception as e:
+            print(f"Error simulating barcode scan: {e}")
+
+    def check_barcode_scan_timeout(self):
+        """Check if barcode scan timed out (C# implementation)"""
+        if not self.printedLabelScanDataInput_Received:
+            # Scanner could not detect any barcode - update scan result as '***'
+            self.update_scan_result("***")
+            print("Barcode scan timed out - marked as '***'")
+
+    def process_barcode_scan_result(self, scanned_text):
+        """Process barcode scan result (C# implementation)"""
+        try:
+            self.printedLabelScanDataInput_Received = True
+            
+            if self.traceabilityCode in scanned_text:
+                self.update_scan_result("OK")
+                print("Barcode scan successful - marked as 'OK'")
+            else:
+                self.update_scan_result("NG")
+                print("Barcode scan failed - marked as 'NG'")
+                
+                # Activate PLC alert if configured
+                if self.alertOnPLCCoilAddress:
+                    self.activate_plc_alert()
+                
+                messagebox.showwarning(
+                    "Scan NG",
+                    "Barcode Scan found NG.\\nDo NOT fix the Barcode Label to the part.\\nPaste it on Production Log Book as NG."
+                )
+            
+        except Exception as e:
+            print(f"Error processing barcode scan result: {e}")
+
+    def update_scan_result(self, result):
+        """Update barcode scan result in database (C# implementation)"""
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                return
+                
+            cursor = connection.cursor()
+            
+            update_query = """
+            UPDATE TBL_TEST_DATA 
+            SET TD_BARCODE_SCAN_RESULT = %s
+            WHERE TD_PART_NUMBER = %s AND TD_TRACEABILITY_CODE = %s
+            """
+            cursor.execute(update_query, (result, self.partNumber, self.traceabilityCode))
+            connection.commit()
+            
+            cursor.close()
+            connection.close()
+            
+            print(f"Barcode scan result updated: {result}")
+            
+        except Exception as e:
+            print(f"Error updating scan result: {e}")
+
+    def activate_plc_alert(self):
+        """Activate PLC alert signal (C# implementation)"""
+        try:
+            if self.alertOnPLCCoilAddress and self.plc_client:
+                # Convert hex address to int (remove 'M' prefix)
+                if self.alertOnPLCCoilAddress.startswith('M'):
+                    coil_address = int(self.alertOnPLCCoilAddress[1:], 16)
+                    
+                    # Turn alert ON
+                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
+                    if result.isError():
+                        print(f"Error activating PLC alert: {result}")
+                    else:
+                        print(f"PLC alert activated at address {self.alertOnPLCCoilAddress}")
+                        
+                        # Schedule alert OFF after timeout
+                        self.root.after(self.alertOn_TimeInterval, lambda: self.deactivate_plc_alert(coil_address))
+            else:
+                messagebox.showerror("Error", "Alert On PLC Coil Address text file is either missing or empty!!")
+                
+        except Exception as e:
+            print(f"Error activating PLC alert: {e}")
+
+    def deactivate_plc_alert(self, coil_address):
+        """Deactivate PLC alert signal"""
+        try:
+            if self.plc_client:
+                result = self.plc_client.write_coil(coil_address, False, slave=self.slaveAddress)
+                if result.isError():
+                    print(f"Error deactivating PLC alert: {result}")
+                else:
+                    print(f"PLC alert deactivated at address {coil_address}")
+        except Exception as e:
+            print(f"Error deactivating PLC alert: {e}")
 
     def on_alc_entry_focus(self, is_focused):
         """Handle ALC entry focus with visual feedback"""
@@ -3373,6 +4489,10 @@ class EOLTesterGUI:
             
         # Log part number entry attempt
         self.log_operator_action("PART_NUMBER_ENTRY", f"ALC Code: {alc_code}", self.current_employee_id)
+        
+        # Call the C# style implementation
+        threading.Thread(target=self.process_alc_code_cs_style, args=(alc_code,), daemon=True).start()
+        return
 
         try:
             conn = mysql.connector.connect(
@@ -3484,9 +4604,9 @@ class EOLTesterGUI:
             # Process monitoring started (PLC functionality removed)
             print("Process monitoring started after ALC code entry")
             self.safe_update_message(
-                    f"Process monitoring started for Part: {self.current_part_number} - Scan LOT number to begin",
-                    "green"
-                )
+                f"Process monitoring started for Part: {self.current_part_number} - Scan LOT number to begin",
+                "green"
+            )
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
@@ -3735,10 +4855,10 @@ class EOLTesterGUI:
                 # Display clear iteration information
                 self.safe_update_message(f"ITERATION #{current_iteration + 1} STARTED - LOT: {self.current_lot_number}", "blue")
                 
-                            # Ensure status monitoring is active
-            if not getattr(self, 'status_monitoring_active', False):
-                print("Starting status monitoring for new iteration")
-                self.status_monitoring_active = True
+                # Ensure status monitoring is active
+                if not getattr(self, 'status_monitoring_active', False):
+                    print("Starting status monitoring for new iteration")
+                    self.status_monitoring_active = True
                 # PLC monitoring removed
                 
                 # Check PLC status continuously to detect when test is complete (optimized timing)
@@ -3860,7 +4980,7 @@ class EOLTesterGUI:
             
             # STEP 1: First, set P0000 to LOW to stop current process
             try:
-                p0000_result = self.plc_client.write_coil(0, False, slave=station_id)
+                p0000_result = self.plc_client.write_coil(0, False, device_id=station_id)
                 if not p0000_result.isError():
                     print("✅ Set P0000 to LOW - stopped current process")
                     self.log_plc_command("WRITE", "P0000", "LOW", "Stop current process for cycle reset")
@@ -3883,7 +5003,7 @@ class EOLTesterGUI:
                             reset_value = False
                             
                             if address.startswith('M'):
-                                result = self.plc_client.write_coil(addr_num, reset_value, slave=station_id)
+                                result = self.plc_client.write_coil(addr_num, reset_value, device_id=station_id)
                                 if result.isError():
                                     print(f"❌ Failed to reset coil {address}")
                                     reset_success = False
@@ -3899,7 +5019,7 @@ class EOLTesterGUI:
                 print("🔄 Resetting test result registers to 0...")
                 # Reset load cell result registers
                 for reg_addr in range(100, 108):  # D100-D107 for test results
-                    result = self.plc_client.write_register(reg_addr, 0, slave=station_id)
+                    result = self.plc_client.write_register(reg_addr, 0, device_id=station_id)
                     if result.isError():
                         print(f"⚠️ Failed to reset register D{reg_addr}")
                     else:
@@ -3907,7 +5027,7 @@ class EOLTesterGUI:
                 
                 # Reset any other relevant registers
                 for reg_addr in range(200, 210):  # D200-D209 for additional data
-                    result = self.plc_client.write_register(reg_addr, 0, slave=station_id)
+                    result = self.plc_client.write_register(reg_addr, 0, device_id=station_id)
                     if result.isError():
                         print(f"⚠️ Failed to reset register D{reg_addr}")
                     else:
@@ -3926,7 +5046,7 @@ class EOLTesterGUI:
                     auto_address = self.process_addresses[0]  # First address should be AUTO
                     if auto_address.strip():
                         addr_num = int(auto_address[1:]) if len(auto_address) > 1 else 0
-                        auto_result = self.plc_client.write_coil(addr_num, True, slave=station_id)
+                        auto_result = self.plc_client.write_coil(addr_num, True, device_id=station_id)
                         if not auto_result.isError():
                             print(f"✅ Set {auto_address} to TRUE - AUTO state activated")
                             self.log_plc_command("WRITE", auto_address, "TRUE", "AUTO state activated for new cycle")
@@ -3939,7 +5059,7 @@ class EOLTesterGUI:
             
             # STEP 6: Finally, set P0000 back to HIGH to start new cycle
             try:
-                final_p0000_result = self.plc_client.write_coil(0, True, slave=station_id)
+                final_p0000_result = self.plc_client.write_coil(0, True, device_id=station_id)
                 if not final_p0000_result.isError():
                     print("✅ Set P0000 to HIGH - new cycle started")
                     self.log_plc_command("WRITE", "P0000", "HIGH", "New cycle started after complete reset")
@@ -3975,7 +5095,7 @@ class EOLTesterGUI:
                 self.last_test_result_pass_state = False
             if hasattr(self, 'last_test_result_ng_state'):
                 self.last_test_result_ng_state = False
-            
+                
             # Reset counters
             if hasattr(self, 'monitor_counter'):
                 self.monitor_counter = 0
@@ -4383,7 +5503,7 @@ class EOLTesterGUI:
             
             # Continue monitoring for completion of this new cycle
             self.root.after(500, self.monitor_test_completion)
-            
+                
         except Exception as e:
             print(f"Error starting next automated cycle: {e}")
             traceback.print_exc()
@@ -4654,10 +5774,10 @@ class EOLTesterGUI:
             print("STEP 5: Resetting for next cycle...")
             self.safe_update_message("Resetting for next cycle...", "blue")
                 
-                # Reset everything for next cycle
+            # Reset everything for next cycle
             self.reset_for_next_cycle()
-                
-                # Restart monitoring from index 0
+            
+            # Restart monitoring from index 0
             self.status_monitoring_active = True
             # PLC monitoring removed
                 

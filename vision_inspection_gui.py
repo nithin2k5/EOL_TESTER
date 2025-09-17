@@ -206,7 +206,7 @@ class VisionInspectionGUI:
                 result = self.modbus_client.read_holding_registers(
                     address=0,
                     count=1,
-                    slave=1
+                    device_id=1
                 )
                 if result.isError():
                     raise ModbusException("Failed to read from PLC")

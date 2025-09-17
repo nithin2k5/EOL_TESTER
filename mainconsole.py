@@ -7,7 +7,6 @@ from test_console import EOLTesterGUI    # Import TestConsole
 from comport_settings import ComPortSettings  # Add this import
 from dataconsole import DataConsole  # Add this import
 from adminconsole import AdminConsole  # Add this import
-# Add this import
 
 
 class MainConsole(tk.Tk):
@@ -164,7 +163,19 @@ class MainConsole(tk.Tk):
         # Open work data window
         work_data_window = tk.Toplevel(self)
         work_data_window.title("Work Data")
-        # Add your work data window content here
+        
+        # Set the window to full screen
+        work_data_window.state('zoomed')
+        work_data_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+        app = DataConsole(work_data_window)
+        work_data_window.grab_set()
+        self.withdraw()
+        
+        def on_work_data_close():
+            work_data_window.destroy()
+            self.deiconify()
+            
+        work_data_window.protocol("WM_DELETE_WINDOW", on_work_data_close)
         
     def admin_click(self):
         admin_window = tk.Toplevel(self)
@@ -186,17 +197,7 @@ class MainConsole(tk.Tk):
         messagebox.showinfo("User Manual", "User manual functionality will be implemented here.")
 
     def support_click(self):
-        support_window = tk.Toplevel(self)
-        support_window.state('zoomed')  # Make it full screen
-        app = SupportInfo(support_window)
-        support_window.grab_set()  # Make the window modal
-        self.withdraw()  # Hide main window
-        
-        def on_support_close():
-            support_window.destroy()
-            self.deiconify()  # Show main window again
-            
-        support_window.protocol("WM_DELETE_WINDOW", on_support_close)
+        messagebox.showinfo("Support", "For technical support, please contact:\n\nEmail: support@company.com\nPhone: +1-800-SUPPORT\n\nFor immediate assistance, refer to the User Manual.")
 
     def exit_click(self):
         self.quit()

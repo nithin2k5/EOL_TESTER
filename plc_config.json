@@ -1,0 +1,51 @@
+{
+    "plc_settings": {
+        "com_port": "COM5",
+        "baudrate": 38400,
+        "station_id": 1,
+        "bytesize": 8,
+        "parity": "N",
+        "stopbits": 1,
+        "timeout": 1,
+        "description": "COM4 PLC Configuration - 38400 baud, Station ID 1"
+    },
+    "common_addresses": {
+        "coils": [
+            0,
+            1,
+            100,
+            101,
+            1000,
+            1001
+        ],
+        "input_registers": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+        ],
+        "holding_registers": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+        ]
+    },
+    "monitoring_settings": {
+        "addresses_to_monitor": [
+            0,
+            1,
+            100,
+            101
+        ],
+        "update_interval": 1.0
+    }
+}
