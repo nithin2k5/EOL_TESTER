@@ -1,23 +1,22 @@
 import tkinter as tk
-import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import os
-import mysql.connector
-from pynput import keyboard
-import threading
-import json
-from pymodbus.client import ModbusSerialClient, ModbusTcpClient  # PLC functionality restored
-import serial
-from dotenv import load_dotenv
-import time
-import traceback
-from datetime import datetime
-import random
 import sys
-from dotenv import load_dotenv, set_key
-import queue
-import re
+import mysql.connector
+from mysql.connector import Error
+import json
+
+# ======= MySQL Database Configuration =======
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 3306,
+    "user": "root",
+    "password": "12345",
+    "database": "eol",
+    "raise_on_warnings": True
+}
+# ======= END MySQL Database Configuration =======
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -101,37 +100,8 @@ class EOLTesterGUI:
             print(f"Error reloading environment settings: {str(e)}")
             return False
 
-    def load_plc_config(self):
-        """Load PLC configuration from environment variables"""
-        try:
-            # PLC connection settings
-            self.plc_com_port = os.getenv('PLC_COM_PORT', 'COM5').strip("'")
-            self.plc_baud_rate = int(os.getenv('PLC_BAUD_RATE', '38400'))
-            self.plc_station_id = int(os.getenv('PLC_STATION_ID', '1'))
-            
-            # TCP settings (if available)
-            self.plc_tcp_ip = os.getenv('MODBUS_TCP_IP', '').strip("'")
-            self.plc_tcp_port = int(os.getenv('MODBUS_TCP_PORT', '502')) if os.getenv('MODBUS_TCP_PORT') else 502
-            
-            # Register settings
-            self.plc_reg_address = os.getenv('PLC_REG_ADDRESS', '').strip("'")
-            self.plc_points_to_read = int(os.getenv('PLC_POINTS_TO_READ', '1'))
-            
-            print(f"PLC Config loaded - COM: {self.plc_com_port}, Baud: {self.plc_baud_rate}, Station: {self.plc_station_id}")
-            if self.plc_tcp_ip:
-                print(f"PLC TCP Config - IP: {self.plc_tcp_ip}, Port: {self.plc_tcp_port}")
-                
-        except Exception as e:
-            print(f"Error loading PLC configuration: {e}")
-            # Set defaults
-            self.plc_com_port = 'COM5'
-            self.plc_baud_rate = 38400
-            self.plc_station_id = 1
-            self.plc_tcp_ip = ''
-            self.plc_tcp_port = 502
-
     def initialize_variables(self):
-        """Initialize all variables before window setup and ensure clean COM ports"""
+        """Initialize UI-related variables"""
         # Initialize UI-related variables
         self.image_label = None
         self.current_image = None
@@ -139,170 +109,21 @@ class EOLTesterGUI:
         self.selected_label = None
         self.barcode_data = ""
         self.label_widgets = {}
-        
+
         # Initialize container references (will be properly created in setup_window)
         self.main_container = None
         self.message_label = None
         self.workspace = None
-        
-        # PLC connection variables
-        self.plc_client = None
-        self.plc_connected = False
-        self.plc_monitoring = False
-        
-        # Ensure .env file exists and load environment variables
-        env_file = self.ensure_env_file_exists()
-        load_dotenv(dotenv_path=env_file, override=True)
-        
-        # Load PLC configuration from .env
-        self.load_plc_config()
-        
+
         # Get machine ID from environment variable and store it
         self.machineid = os.getenv('MACHINE_ID', 'Not Set')
-        
-        # Initialize arrays for different data types
-        self.process_status_array = []
-        self.program_selection_array = []
-        self.input_sensors_array = []
-        self.employee_codes = []
-        
-        # Employee validation system
-        self.current_employee_id = None
-        self.employee_validation_complete = False
-        self.authorized_employee_codes = []
-        self.current_part_number = None
-        self.current_lot_number = None
-        self.specifications = {}
-        
-        # Initialize additional variables
-        self.keepWriting = False
-        self.breakLoop = False
-        
-        # Database configuration
-        self.db_config = {
-            'host': 'localhost',
-            'port': 3306,
-            'user': 'root',
-            'password': '#nk446420',
-            'database': 'EOL'
-        }
-        
-        # EOL Testing Variables (from C# implementation)
-        self.alcInput_TimeInterval = 3000  # 3000ms for manual entry
-        self.printedLabelScanDataInput_TimeInterval = 4000  # 4000ms for barcode scanner
-        self.printedLabelScanDataInput_WaitTime = 6000  # 6 secs wait for printed label scan
-        self.alertOn_TimeInterval = 5000  # 5 secs alert duration
-        self.printedLabelScanDataInput_Received = False
-        
-        # Part Information Variables
-        self.barcodePrintFileName = ""
-        self.barcodePrintFileNamePath = ""
-        self.prnFileContent = ""
-        self.partNumber = ""
-        self.modelName = ""
-        self.vendorCode = ""
-        self.eoNumber = ""
-        self.specialData = ""
-        self.initialID = ""
-        self.supplierSection = ""
-        self.lotNo = ""
-        self.traceabilityCode = ""
-        self.today = datetime.today().date()
-        self.dataPointX = 0
-        
-        # Machine and Process Variables
-        self.machineID = self.machineid  # Use existing machine ID
-        self.startingNGCableValidation = False
-        self.endingNGCableValidated = False
-        self.endingNGCableValidation = False
-        self.deviceToRead = []
-        
-        # Load Cell Values
-        self.loadcell01Value = 0.0
-        self.loadcell02Value = 0.0
-        self.loadcell03Value = 0.0
-        self.loadcell04Value = 0.0
-        
-        # Maximum Values During Test
-        self.L1MaxValue = 0.0
-        self.L2MaxValue = 0.0
-        self.L3MaxValue = 0.0
-        self.L4MaxValue = 0.0
-        
-        # Pressure Values
-        self.P01Value = 0.0
-        self.P02Value = 0.0
-        self.P03Value = 0.0
-        self.P04Value = 0.0
-        
-        # Test Control Variables
-        self.failCounter = 0
-        self.passCounter = 0
-        self.blink = False
-        
-        # Column Visibility Flags
-        self.columnL2 = False
-        self.columnL3 = False
-        self.columnL4 = False
-        self.columnP3 = False
-        self.columnP4 = False
-        
-        # PLC Communication Variables
-        self.slaveAddress = 1
-        self.inputSensorsArray = []
-        self.processStatusArray = []
-        self.dataRegistersArray = []
-        self.employeeCodesArray = []
-        self.processStatusLabels = ["AUTO", "HOME", "PULL1_OK", "PULL1_NG", "PULL2_OK", "PULL2_NG", "TESTRESULT_OK", "TESTRESULT_NG"]
-        self.rcvdTestRslt = False
-        self.inputSensorsToReadList = []
-        self.programSelectionPLCAddress = ""
-        
-        # Camera and Alert Variables
-        self.cam1Result = ""
-        self.resetPLCOnFormClosing = False
-        self.machineOnPLCCoilAddress = ""
-        self.alertOnPLCCoilAddress = ""
-        self.partRunningSerialExists = False
-        
-        # Monitoring and Threading
-        self.monitoring_active = False
-        self.test_in_progress = False
-        self.employee_validated = False
-        self.alc_validated = False
-        
-        # Specification Data
-        self.mldDataTable = []
-        self.specificationData = []
-        self.failCounter = 0
-        self.startingNGCableValidation = False
-        self.endingNGCableValidation = False
-        self.noOfValues = 0
-        # PLC functionality removed
-        self.process_status_index = 0  # Initialize process status index for tracking cycle position
-        
+
         # Initialize blinking jobs tracking
         self.blinking_jobs = {}
-        
+
         # Initialize timers
         self.alc_timer = None
         self.alcInput_TimeInterval = 200  # milliseconds
-        
-        # Track test result states to prevent duplicate saves
-        self.last_test_result_pass_state = False
-        self.last_test_result_ng_state = False
-        self.test_result_saved = False
-        
-        # Initialize continuous loop control variables
-        self.continuous_loop_active = False
-        self.current_cycle_number = 0
-        self.loop_start_time = None
-        self.cycle_start_time = None
-        self.auto_cycle_delay = 3.0  # Seconds between cycles
-        self.max_auto_cycles = 50   # Safety limit for auto cycling
-        self.cycle_completion_detected = False
-        self.loop_mode = "MANUAL"   # "MANUAL" or "MONITOR" 
-        self.step_duration = 3.0    # Duration for each step in manual mode
 
     def setup_window(self):
         """Set up the window after initialization"""
@@ -310,7 +131,7 @@ class EOLTesterGUI:
         self.root.state('zoomed')  # Replace fullscreen with maximized state
         self.root.lift()  # Bring window to front
         self.root.focus_force()  # Force focus
-        
+
         # Create the main_container first to ensure it exists before other operations
         # Create main container
         self.main_container = tk.Frame(self.root)
@@ -319,27 +140,10 @@ class EOLTesterGUI:
         # Add message label for status updates
         self.message_label = tk.Label(self.main_container, text="Initializing...", font=("Arial", 10))
         self.message_label.pack(fill="x", pady=2)
-        
-        # Ensure .env file exists and load environment variables
-        env_file = self.ensure_env_file_exists()
-        load_dotenv(dotenv_path=env_file, override=True)
-        
-        # Load data after environment variables are loaded
-        self.load_configuration_data()
-        
-        # Set up GUI components before connecting to devices
+
+        # Set up GUI components
         self.setup_gui()
-        self.setup_barcode_listener()
-        
-        # Connect to devices after GUI is set up
-        self.connect_to_devices()
-        
-        # Connect to PLC after GUI setup
-        self.root.after(2000, self.connect_to_plc)
-        
-        # Initialize employee validation after GUI setup
-        self.root.after(1000, self.initialize_employee_validation)
-        
+
         # Ensure window stays on top during initialization
         self.root.after(500, lambda: self.root.attributes('-topmost', False))
 
@@ -359,9 +163,12 @@ class EOLTesterGUI:
         
         # Create quadrants
         self.create_quadrants()
-        
+
         # Footer
         self.create_footer()
+
+        # Initialize employee validation after GUI is set up
+        self.initialize_employee_validation()
 
     def create_title_bar(self):
         title_frame = tk.Frame(self.main_container, bg="#FFB6C1", height=40)
@@ -376,23 +183,15 @@ class EOLTesterGUI:
         )
         logo_label.pack(side="left", padx=10)
         
-        # PLC Process Control Button
-        self.create_plc_control_section(title_frame)
+        # PLC Process Control Bu        s
         
         # Process Status Indicator
-        self.create_process_status_indicator(title_frame)
+    
         
 
         
-        # Add status indicator
-        self.status_label = tk.Label(
-            title_frame,
-            text="●",  # Dot indicator
-            font=("Arial", 16, "bold"),
-            bg="#FFB6C1",
-            fg="gray"  # Initial color
-        )
-        self.status_label.pack(side="left")
+       
+    
         
         # Title (center)
         title_label = tk.Label(
@@ -416,42 +215,39 @@ class EOLTesterGUI:
 
 
     def create_plc_control_section(self, parent_frame):
-        """Create PLC process control section in the title frame"""
+        """Create process control section in the title frame"""
         try:
             # Control frame
             control_frame = tk.Frame(parent_frame, bg="#FFB6C1")
             control_frame.pack(side="left", padx=20)
-            
+
             # Control label
-            control_label = tk.Label(control_frame, text="Process Control", 
+            control_label = tk.Label(control_frame, text="Process Control",
                                    font=("Arial", 9, "bold"), bg="#FFB6C1")
             control_label.pack()
-            
-            # Initialize process status
-            self.process_status = "LOW"  # HIGH or LOW
-            
-            # Process control button
+
+            # Process control button (frontend only)
             self.process_control_btn = tk.Button(
                 control_frame,
-                text="START TESTING",
+                text="DEMO MODE",
                 font=("Arial", 10, "bold"),
                 bg="#4CAF50",
                 fg="white",
                 width=15,
-                command=self.toggle_process_status
+                command=lambda: messagebox.showinfo("Demo Mode", "This is a frontend-only demo. Backend functionality removed.")
             )
             self.process_control_btn.pack(pady=2)
-            
+
             # Add hover effects
-            self.process_control_btn.bind('<Enter>', 
-                lambda e: self.process_control_btn.config(bg="#45a049") 
+            self.process_control_btn.bind('<Enter>',
+                lambda e: self.process_control_btn.config(bg="#45a049")
                 if self.process_control_btn.cget('state') != 'disabled' else None)
-            self.process_control_btn.bind('<Leave>', 
-                lambda e: self.process_control_btn.config(bg="#4CAF50") 
+            self.process_control_btn.bind('<Leave>',
+                lambda e: self.process_control_btn.config(bg="#4CAF50")
                 if self.process_control_btn.cget('state') != 'disabled' else None)
-            
+
         except Exception as e:
-            print(f"Error creating PLC control section: {e}")
+            print(f"Error creating control section: {e}")
 
     def create_process_status_indicator(self, parent_frame):
         """Create process status indicator in the title frame"""
@@ -516,283 +312,41 @@ class EOLTesterGUI:
             self.safe_update_message(f"Error controlling process: {e}", "red")
 
     def start_eol_testing_process(self):
-        """Start the complete EOL testing process with all validations"""
+        """Frontend demo - testing process simulation"""
         try:
-            print("🚀 Starting EOL Testing Process")
-            
-            # STEP 1: Ensure PLC is in clean initial state before starting
-            print("🔄 Ensuring PLC is in clean initial state...")
-            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
-                # Perform initial PLC reset to ensure clean state
-                initial_reset_success = self.reset_plc_registers()
-                if not initial_reset_success:
-                    print("⚠️ Initial PLC reset failed, but continuing with process start")
-                else:
-                    print("✅ Initial PLC reset completed - clean state ensured")
-            else:
-                print("📺 PLC not connected - skipping initial reset")
-            
-            # STEP 2: Update status variables
+            print("🚀 Starting EOL Testing Process (Frontend Demo)")
+
+            # Update UI to show testing started
             self.process_status = "HIGH"
             self.process_control_btn.config(text="STOP TESTING", bg="#f44336")
-            
-            # Generate initial lot number if not exists
-            if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
-                self.current_lot_number = self.generate_lot_number()
-                print(f"Generated lot number for testing: {self.current_lot_number}")
-            
-            # Send PLC command to start testing
-            success = self.write_plc_command("P0000", True)
-            if success:
-                self.update_process_indicator("RUNNING")
-                self.safe_update_message(f"EOL Testing Started - LOT: {self.current_lot_number}", "green")
-                print(f"PLC Command: Set P0000 HIGH - EOL Testing Started for LOT {self.current_lot_number}")
-                
-                # Log the testing start
-                self.log_plc_command("WRITE", "P0000", "HIGH", f"EOL Testing Start - LOT: {self.current_lot_number}")
-                self.log_operator_action("TEST_START", f"Started testing for Part: {self.current_part_number}, LOT: {self.current_lot_number}", 
-                                       getattr(self, 'current_employee_id', 'UNKNOWN'))
-                
-                # Start automated monitoring and cycle management
-                self.start_automated_testing_cycle()
-                
-                # Enable continuous monitoring
-                if not getattr(self, 'status_monitoring_active', False):
-                    self.status_monitoring_active = True
-                    self.start_plc_monitoring()
-                
-            else:
-                self.safe_update_message("Failed to send start command to PLC", "red")
-                print("❌ Failed to send PLC start command")
-                
+            self.update_process_indicator("RUNNING")
+            self.safe_update_message("EOL Testing Started (Demo Mode)", "green")
+            print("Demo: EOL Testing Started")
+
         except Exception as e:
-            print(f"Error starting EOL testing process: {e}")
-            self.safe_update_message(f"Error starting testing: {e}", "red")
+            print(f"Error starting testing demo: {e}")
+            self.safe_update_message(f"Error starting demo: {e}", "red")
 
     def stop_eol_testing_process(self):
-        """Stop the EOL testing process"""
+        """Stop the EOL testing process (frontend demo)"""
         try:
-            print("🛑 Stopping EOL Testing Process")
-            
-            # Update status variables
+            print("🛑 Stopping EOL Testing Process (Demo)")
+
+            # Update UI to show testing stopped
             self.process_status = "LOW"
             self.process_control_btn.config(text="START TESTING", bg="#4CAF50")
-                
-            # Send PLC command to stop testing
-            success = self.write_plc_command("P0000", False)
-            if success:
-                self.update_process_indicator("IDLE")
-                self.safe_update_message("EOL Testing Stopped by operator", "orange")
-                print("PLC Command: Set P0000 LOW - EOL Testing Stopped")
-                
-                # Log the testing stop
-                self.log_plc_command("WRITE", "P0000", "LOW", "EOL Testing Stop Command")
-                self.log_operator_action("TEST_STOP", "Testing stopped by operator", 
-                                       getattr(self, 'current_employee_id', 'UNKNOWN'))
-                
-                # Stop automated monitoring
-                self.status_monitoring_active = False
-                
-            else:
-                self.safe_update_message("Failed to send stop command to PLC", "red")
-                print("❌ Failed to send PLC stop command")
-                
-        except Exception as e:
-            print(f"Error stopping EOL testing process: {e}")
-            self.safe_update_message(f"Error stopping testing: {e}", "red")
+            self.update_process_indicator("IDLE")
+            self.safe_update_message("EOL Testing Stopped (Demo Mode)", "orange")
+            print("Demo: EOL Testing Stopped")
 
-    def start_automated_testing_cycle(self):
-        """Start the automated testing cycle with continuous monitoring"""
-        try:
-            print("🔄 Starting Automated Testing Cycle")
-            
-            # Set continuous testing flag
-            self.continuous_testing_active = True
-            
-            # Start monitoring for test completion
-            self.monitor_automated_cycle()
-            
         except Exception as e:
-            print(f"Error starting automated testing cycle: {e}")
+            print(f"Error stopping testing demo: {e}")
+            self.safe_update_message(f"Error stopping demo: {e}", "red")
 
-    def monitor_automated_cycle(self):
-        """Monitor the automated testing cycle"""
-        try:
-            # Check if continuous testing is still active
-            if not getattr(self, 'continuous_testing_active', False):
-                return
-                
-            # Check PLC status
-            if self.process_status == "LOW":
-                print("PLC signal went LOW - stopping automated cycle")
-                self.continuous_testing_active = False
-                return
-            
-            # Monitor test completion and data collection
-            self.monitor_test_completion()
-            
-            # Schedule next monitoring cycle
-            self.root.after(1000, self.monitor_automated_cycle)
-            
-        except Exception as e:
-            print(f"Error in automated cycle monitoring: {e}")
-            # Continue monitoring despite errors
-            if getattr(self, 'continuous_testing_active', False):
-                self.root.after(2000, self.monitor_automated_cycle)
 
-    def connect_to_plc(self):
-        """Connect to PLC using configuration from .env file"""
-        try:
-            if self.plc_connected:
-                print("PLC already connected")
-                return True
-                
-            print("🔌 Attempting to connect to PLC...")
-            
-            # Try TCP connection first if IP is configured
-            if self.plc_tcp_ip:
-                try:
-                    self.plc_client = ModbusTcpClient(
-                        host=self.plc_tcp_ip,
-                        port=self.plc_tcp_port,
-                        timeout=5
-                    )
-                    connection_result = self.plc_client.connect()
-                    if connection_result:
-                        self.plc_connected = True
-                        print(f"✅ PLC connected via TCP - {self.plc_tcp_ip}:{self.plc_tcp_port}")
-                        self.safe_update_message(f"PLC Connected via TCP: {self.plc_tcp_ip}", "green")
-                        self.start_plc_monitoring()
-                        return True
-                    else:
-                        print("❌ TCP connection failed, trying serial...")
-                except Exception as e:
-                    print(f"TCP connection error: {e}")
-            
-            # Try serial connection
-            try:
-                self.plc_client = ModbusSerialClient(
-                    port=self.plc_com_port,
-                    baudrate=self.plc_baud_rate,
-                    bytesize=8,
-                    parity='N',
-                    stopbits=1,
-                    timeout=5
-                )
-                connection_result = self.plc_client.connect()
-                if connection_result:
-                    self.plc_connected = True
-                    print(f"✅ PLC connected via Serial - {self.plc_com_port}")
-                    self.safe_update_message(f"PLC Connected via Serial: {self.plc_com_port}", "green")
-                    self.start_plc_monitoring()
-                    return True
-                else:
-                    print("❌ Serial connection failed")
-                    self.safe_update_message("PLC connection failed - check configuration", "red")
-                    return False
-            except Exception as e:
-                print(f"Serial connection error: {e}")
-                self.safe_update_message(f"PLC connection error: {e}", "red")
-                return False
-                
-        except Exception as e:
-            print(f"Error connecting to PLC: {e}")
-            self.safe_update_message(f"PLC connection error: {e}", "red")
-            return False
 
-    def disconnect_plc(self):
-        """Disconnect from PLC"""
-        try:
-            if self.plc_client and self.plc_connected:
-                self.plc_monitoring = False
-                self.plc_client.close()
-                self.plc_connected = False
-                print("PLC disconnected")
-                self.safe_update_message("PLC Disconnected", "orange")
-        except Exception as e:
-            print(f"Error disconnecting PLC: {e}")
 
-    def start_plc_monitoring(self):
-        """Start monitoring PLC status for HIGH signal"""
-        if not self.plc_connected:
-            return
-            
-        self.plc_monitoring = True
-        print("🔍 Started PLC monitoring - waiting for HIGH signal...")
-        self.safe_update_message("PLC Monitoring: Waiting for HIGH signal...", "blue")
-        
-        # Start monitoring thread
-        monitoring_thread = threading.Thread(target=self.plc_monitor_loop, daemon=True)
-        monitoring_thread.start()
 
-    def plc_monitor_loop(self):
-        """Monitor PLC registers for status changes"""
-        try:
-            while self.plc_monitoring and self.plc_connected:
-                try:
-                    # Read P0000 register (convert to appropriate register number)
-                    register_address = 0  # P0000 = register 0
-                    
-                    if self.plc_client:
-                        result = self.plc_client.read_holding_registers(
-                            address=register_address,
-                            count=1
-                        )
-                        
-                        if not result.isError():
-                            register_value = result.registers[0]
-                            
-                            # Check if register is HIGH (non-zero)
-                            if register_value > 0:
-                                print(f"🚨 HIGH signal detected! P0000 = {register_value}")
-                                self.root.after(0, lambda: self.safe_update_message(f"HIGH signal detected! P0000 = {register_value}", "green"))
-                                # You can add specific actions here when HIGH is detected
-                                
-                            # Update GUI with current status
-                            status_text = f"PLC Monitor: P0000 = {register_value}"
-                            self.root.after(0, lambda: self.safe_update_message(status_text, "blue"))
-                        else:
-                            print(f"Error reading PLC register: {result}")
-                            
-                except Exception as e:
-                    print(f"Error in PLC monitoring: {e}")
-                    
-                # Wait before next read
-                time.sleep(1)  # Monitor every second
-                
-        except Exception as e:
-            print(f"Error in PLC monitor loop: {e}")
-
-    def write_plc_command(self, address, value):
-        """Write command to PLC using actual Modbus communication"""
-        try:
-            if not self.plc_connected or not self.plc_client:
-                print(f"PLC not connected - simulating: Address {address} = {'HIGH' if value else 'LOW'}")
-                return False
-            
-            # Convert P0000 style address to register number
-            if address.startswith('P'):
-                register_address = int(address[1:])  # P0000 -> 0, P0001 -> 1, etc.
-            else:
-                register_address = 0
-            
-            # Write to holding register
-            register_value = 1 if value else 0
-            result = self.plc_client.write_register(
-                address=register_address,
-                value=register_value
-            )
-            
-            if not result.isError():
-                print(f"✅ PLC WRITE SUCCESS: {address} = {'HIGH' if value else 'LOW'}")
-                return True
-            else:
-                print(f"❌ PLC WRITE FAILED: {address} - {result}")
-                return False
-            
-        except Exception as e:
-            print(f"Error writing PLC command: {e}")
-            return False
 
     def update_process_indicator(self, status):
         """Update the process status indicator"""
@@ -815,31 +369,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error updating process indicator: {e}")
 
-    def log_plc_command(self, command_type, address, value, description=""):
-        """Log PLC commands for audit trail"""
-        try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            employee_id = getattr(self, 'current_employee_id', 'UNKNOWN')
-            
-            log_entry = {
-                'timestamp': timestamp,
-                'employee_id': employee_id,
-                'command_type': command_type,
-                'address': address,
-                'value': value,
-                'description': description
-            }
-            
-            # Log to console
-            print(f"PLC LOG: {timestamp} | {employee_id} | {command_type} {address}={value} | {description}")
-            
-            # In a real implementation, this would also:
-            # 1. Write to log file
-            # 2. Store in database
-            # 3. Send to monitoring system
-            
-        except Exception as e:
-            print(f"Error logging PLC command: {e}")
 
     def log_operator_action(self, action_type, description, employee_id=None):
         """Log operator actions for audit trail"""
@@ -1238,10 +767,12 @@ class EOLTesterGUI:
         input_frame = tk.Frame(entry_frame, bg="#f5f5f5") 
         input_frame.pack(fill="both", expand=True, pady=5)
         
-        # Configure equal column weights
+        # Configure equal column weights for 5 columns
         input_frame.columnconfigure(0, weight=1)  # EMP CODE
         input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
         input_frame.columnconfigure(2, weight=1)  # ALC CODE
+        input_frame.columnconfigure(3, weight=1)  # Additional textbox 1
+        input_frame.columnconfigure(4, weight=1)  # Additional textbox 2
         
         # Employee Code Entry
         self.emp_entry = tk.Entry(input_frame,
@@ -1267,7 +798,7 @@ class EOLTesterGUI:
                             cursor="hand2",
                             command=self.next_label_command,
                             pady=2)
-        next_btn.grid(row=0, column=1, padx=5, sticky="ew")
+        next_btn.grid(row=0, column=4, padx=5, sticky="ew")
         
         # Add hover effect for next label button
         next_btn.bind('<Enter>', lambda e: next_btn.configure(bg="#ffeb3b"))
@@ -1282,7 +813,7 @@ class EOLTesterGUI:
                                  relief="flat",
                                  width=15,
                                  state='disabled')  # Initially disabled
-        self.alc_entry.grid(row=0, column=2, padx=5, sticky="ew")
+        self.alc_entry.grid(row=0, column=3, padx=5, sticky="ew")
         self.alc_entry.insert(0, "ALC CODE")
         self.alc_entry.configure(highlightthickness=1,
                                highlightbackground="#e0e0e0",
@@ -1296,7 +827,44 @@ class EOLTesterGUI:
         self.alc_entry.bind("<FocusIn>", lambda e: self.on_alc_entry_focus(True))
         self.alc_entry.bind("<FocusOut>", lambda e: self.on_alc_entry_focus(False))
         self.alc_entry.bind("<Return>", self.process_alc_code)
-        
+
+        # Additional Textbox 1 (initially disabled)
+        self.additional_entry1 = tk.Entry(input_frame,
+                                         bg="#f0f0f0",
+                                         fg="#424242",
+                                         font=("Arial", 9, "bold"),
+                                         justify="center",
+                                         relief="flat",
+                                         width=15,
+                                         state='disabled')  # Initially disabled
+        self.additional_entry1.grid(row=0, column=1, padx=5, sticky="ew")
+        self.additional_entry1.insert(0, "PART NUMBER SCAN")
+        self.additional_entry1.configure(highlightthickness=1,
+                                        highlightbackground="#e0e0e0",
+                                        highlightcolor="#ffd700")
+
+        # Additional Textbox 2 (initially disabled)
+        self.additional_entry2 = tk.Entry(input_frame,
+                                         bg="#f0f0f0",
+                                         fg="#424242",
+                                         font=("Arial", 9, "bold"),
+                                         justify="center",
+                                         relief="flat",
+                                         width=15,
+                                         state='disabled')  # Initially disabled
+        self.additional_entry2.grid(row=0, column=2, padx=5, sticky="ew")
+        self.additional_entry2.insert(0, "ZIG SCAN")
+        self.additional_entry2.configure(highlightthickness=1,
+                                        highlightbackground="#e0e0e0",
+                                        highlightcolor="#ffd700")
+
+        # Bind focus events for additional textboxes
+        self.additional_entry1.bind("<FocusIn>", lambda e: self.on_additional_entry_focus(e, self.additional_entry1, "PART NUMBER SCAN"))
+        self.additional_entry1.bind("<FocusOut>", lambda e: self.on_additional_entry_focus_out(e, self.additional_entry1, "PART NUMBER SCAN"))
+        self.additional_entry2.bind("<FocusIn>", lambda e: self.on_additional_entry_focus(e, self.additional_entry2, "ZIG SCAN"))
+        self.additional_entry2.bind("<FocusOut>", lambda e: self.on_additional_entry_focus_out(e, self.additional_entry2, "ZIG SCAN"))
+        self.additional_entry2.bind("<Return>", self.process_jig_scan)
+
         return q4
         
     def create_lot_tree(self, parent_frame, columns):
@@ -1647,10 +1215,39 @@ class EOLTesterGUI:
             legend_y += 20
 
     def create_footer(self):
-        footer = tk.Label(self.main_container,
-                        text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
-                        bg="#FFB6C1", height=2)
-        footer.pack(fill="x", side="bottom")
+        """Create footer with text boxes for part number scan and zig scan"""
+        # Create footer frame
+        footer_frame = tk.Frame(self.main_container, bg="#FFB6C1", height=60)
+        footer_frame.pack(fill="x", side="bottom")
+        footer_frame.pack_propagate(False)
+
+        # Create input frame for text boxes
+        input_frame = tk.Frame(footer_frame, bg="#FFB6C1")
+        input_frame.pack(fill="x", padx=10, pady=5)
+
+        # Part Number Scan text box
+        tk.Label(input_frame, text="Part Number Scan:", bg="#FFB6C1", font=("Arial", 10, "bold")).pack(side="left", padx=(0,5))
+        self.part_number_scan_entry = tk.Entry(input_frame, width=30, font=("Arial", 10))
+        self.part_number_scan_entry.pack(side="left", padx=(0,20))
+        self.part_number_scan_entry.insert(0, "Scan part number barcode...")
+        self.part_number_scan_entry.config(fg='gray')
+        self.part_number_scan_entry.bind('<FocusIn>', lambda e: self.on_scan_entry_focus(e, self.part_number_scan_entry, "Scan part number barcode..."))
+        self.part_number_scan_entry.bind('<FocusOut>', lambda e: self.on_scan_entry_focus_out(e, self.part_number_scan_entry, "Scan part number barcode..."))
+
+        # Zig Scan text box
+        tk.Label(input_frame, text="Zig Scan:", bg="#FFB6C1", font=("Arial", 10, "bold")).pack(side="left", padx=(0,5))
+        self.zig_scan_entry = tk.Entry(input_frame, width=30, font=("Arial", 10))
+        self.zig_scan_entry.pack(side="left", padx=(0,20))
+        self.zig_scan_entry.insert(0, "Scan zig barcode...")
+        self.zig_scan_entry.config(fg='gray')
+        self.zig_scan_entry.bind('<FocusIn>', lambda e: self.on_scan_entry_focus(e, self.zig_scan_entry, "Scan zig barcode..."))
+        self.zig_scan_entry.bind('<FocusOut>', lambda e: self.on_scan_entry_focus_out(e, self.zig_scan_entry, "Scan zig barcode..."))
+
+        # Footer text
+        footer_label = tk.Label(footer_frame,
+                              text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
+                              bg="#FFB6C1", font=("Arial", 8))
+        footer_label.pack(fill="x", pady=(0,5))
 
     # Label drag and drop functionality
     def enable_label_dragging(self):
@@ -2128,133 +1725,7 @@ class EOLTesterGUI:
             print(f"Error loading configuration files: {e}")
             messagebox.showerror("Configuration Error", f"Error loading configuration files: {e}")
 
-    def get_database_connection(self):
-        """Get MySQL database connection"""
-        try:
-            connection = mysql.connector.connect(**self.db_config)
-            return connection
-        except mysql.connector.Error as e:
-            print(f"Database connection error: {e}")
-            messagebox.showerror("Database Error", f"Failed to connect to database: {e}")
-            return None
 
-    def test_database_connection(self):
-        """Test database connectivity and create tables if needed"""
-        try:
-            connection = self.get_database_connection()
-            if connection and connection.is_connected():
-                cursor = connection.cursor()
-                
-                # Create necessary tables
-                self.create_database_tables(cursor)
-                
-                connection.commit()
-                cursor.close()
-                connection.close()
-                return True
-                
-        except mysql.connector.Error as e:
-            print(f"Database test failed: {e}")
-            messagebox.showerror("Database Error", f"Database test failed: {e}")
-            return False
-
-    def create_database_tables(self, cursor):
-        """Create necessary database tables for EOL testing"""
-        try:
-            # Create TBL_MODEL_MASTER table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (
-                    MM_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MM_ALC_CODE VARCHAR(50) NOT NULL,
-                    MM_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MM_MODEL_NAME VARCHAR(200),
-                    MM_VENDOR_CODE VARCHAR(50),
-                    MM_EO_NUMBER VARCHAR(50),
-                    MM_SPECIAL_DATA VARCHAR(200),
-                    MM_INITIAL_ID VARCHAR(50),
-                    MM_SUPPLIER_SECTION VARCHAR(100),
-                    MM_IMAGE_PATH VARCHAR(500),
-                    MM_BARCODE_PRN_FILE_NAME VARCHAR(200),
-                    MM_PLC_ADDRESS VARCHAR(20),
-                    MM_STATUS BOOLEAN DEFAULT TRUE,
-                    MM_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_MODEL_SPECIFICATION table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_SPECIFICATION (
-                    MS_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MS_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MS_DESCRIPTION VARCHAR(200),
-                    MS_DEVICE VARCHAR(10) NOT NULL,
-                    MS_NORMAL_MIN DECIMAL(10,3),
-                    MS_NORMAL_MAX DECIMAL(10,3),
-                    MS_UNIT VARCHAR(20),
-                    MS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_MODEL_LABEL_DETAILS table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_LABEL_DETAILS (
-                    MLD_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MLD_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MLD_LABEL_ID VARCHAR(50) NOT NULL,
-                    MLD_ON_STATUS VARCHAR(100),
-                    MLD_OFF_STATUS VARCHAR(100),
-                    MLD_X INT DEFAULT 0,
-                    MLD_Y INT DEFAULT 0,
-                    MLD_FONT VARCHAR(100) DEFAULT 'Arial, 12pt',
-                    MLD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_TEST_DATA table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_TEST_DATA (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    TD_MACHINE_ID VARCHAR(50),
-                    TD_PART_NUMBER VARCHAR(100),
-                    TD_LOT_NUMBER VARCHAR(50),
-                    TD_TRACEABILITY_CODE VARCHAR(100),
-                    TD_RECORD_DATE DATE,
-                    TD_DATETIME DATETIME,
-                    L1 DECIMAL(10,3),
-                    L2 DECIMAL(10,3),
-                    L3 DECIMAL(10,3),
-                    L4 DECIMAL(10,3),
-                    P1 DECIMAL(10,3),
-                    P2 DECIMAL(10,3),
-                    P3 DECIMAL(10,3),
-                    P4 DECIMAL(10,3),
-                    CAM1 VARCHAR(20),
-                    TD_OVERALL_STATUS VARCHAR(10),
-                    TD_EMPLOYEE_CODE VARCHAR(50),
-                    TD_BARCODE_SCAN_RESULT VARCHAR(10),
-                    TD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_PART_RUNNING_SERIAL table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_PART_RUNNING_SERIAL (
-                    PRS_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    PART_NUMBER VARCHAR(100) NOT NULL,
-                    TEST_DAY_DATE DATE NOT NULL,
-                    TEST_DAY_LAST_DATE_TIME DATETIME,
-                    TRACEABILITY_CODE VARCHAR(100),
-                    RUNNING_LOT_NUMBER VARCHAR(50),
-                    PRS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_part_date (PART_NUMBER, TEST_DAY_DATE)
-                )
-            """)
-            
-            print("Database tables created/verified successfully")
-            
-        except mysql.connector.Error as e:
-            print(f"Error creating database tables: {e}")
-            raise e
 
     def load_configuration_data(self):
         """Load configuration data from txt_files subdirectory"""
@@ -2486,13 +1957,33 @@ class EOLTesterGUI:
             if hasattr(self, 'alc_entry'):
                 self.alc_entry.config(state='normal')
                 self.alc_entry.config(bg='white')
-            
+
+            # Enable additional textboxes
+            if hasattr(self, 'additional_entry1'):
+                self.additional_entry1.config(state='normal')
+                self.additional_entry1.config(bg='white')
+                self.additional_entry1.config(fg='black')
+
+            if hasattr(self, 'additional_entry2'):
+                self.additional_entry2.config(state='normal')
+                self.additional_entry2.config(bg='white')
+                self.additional_entry2.config(fg='black')
+
+            # Enable footer scan textboxes
+            if hasattr(self, 'part_number_scan_entry'):
+                self.part_number_scan_entry.config(state='normal')
+                self.part_number_scan_entry.config(bg='white')
+
+            if hasattr(self, 'zig_scan_entry'):
+                self.zig_scan_entry.config(state='normal')
+                self.zig_scan_entry.config(bg='white')
+
             # Enable other essential controls
             if hasattr(self, 'cam_textbox'):
                 self.cam_textbox.config(state='normal')
-            
-            print("Controls enabled after employee validation")
-            
+
+            print("All controls enabled after employee validation")
+
         except Exception as e:
             print(f"Error enabling controls: {e}")
 
@@ -2503,13 +1994,31 @@ class EOLTesterGUI:
             if hasattr(self, 'alc_entry'):
                 self.alc_entry.config(state='disabled')
                 self.alc_entry.config(bg='#f0f0f0')
-            
+
+            # Disable additional textboxes
+            if hasattr(self, 'additional_entry1'):
+                self.additional_entry1.config(state='disabled')
+                self.additional_entry1.config(bg='#f0f0f0')
+
+            if hasattr(self, 'additional_entry2'):
+                self.additional_entry2.config(state='disabled')
+                self.additional_entry2.config(bg='#f0f0f0')
+
+            # Disable footer scan textboxes
+            if hasattr(self, 'part_number_scan_entry'):
+                self.part_number_scan_entry.config(state='disabled')
+                self.part_number_scan_entry.config(bg='#f0f0f0')
+
+            if hasattr(self, 'zig_scan_entry'):
+                self.zig_scan_entry.config(state='disabled')
+                self.zig_scan_entry.config(bg='#f0f0f0')
+
             # Disable camera textbox
             if hasattr(self, 'cam_textbox'):
                 self.cam_textbox.config(state='disabled')
-            
-            print("Controls disabled pending employee validation")
-            
+
+            print("All controls disabled pending employee validation")
+
         except Exception as e:
             print(f"Error disabling controls: {e}")
 
@@ -2898,26 +2407,6 @@ class EOLTesterGUI:
             print(f"Error updating message: {e}")
             print(f"Original message was: {message}")
 
-    def connect_to_devices(self):
-        """Device connection functionality simplified - PLC removed"""
-        try:
-            # Check if main_container exists
-            if not hasattr(self, 'main_container'):
-                print("Error: main_container does not exist. Creating it now.")
-                self.main_container = tk.Frame(self.root)
-                self.main_container.pack(fill="both", expand=True)
-            
-            # Check if message_label exists
-            if not hasattr(self, 'message_label'):
-                print("Error: message_label does not exist. Creating it now.")
-                self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
-                self.message_label.pack(fill="x", pady=2)
-                
-            self.safe_update_message("System ready. PLC functionality removed.", "green")
-            
-        except Exception as e:
-            print(f"Error connecting to devices: {str(e)}")
-            self.safe_update_message(f"Error connecting to devices: {str(e)}", "red")
 
     # PLC functionality removed
 
@@ -2952,315 +2441,23 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error halting process: {e}")
 
-    def is_port_available(self, port):
-        """Check if a COM port is available for connection"""
-        if not port:
-            print("No port specified")
-            return False
-            
-        try:
-            # Check if port exists in the system
-            available_ports = [p.device for p in serial.tools.list_ports.comports()]
-            if port not in available_ports:
-                print(f"Port {port} does not exist on this system. Available ports: {available_ports}")
-                return False
-                
-            try:
-                # Try to open the port
-                ser = serial.Serial(port)
-                ser.close()
-                print(f"Port {port} is available")
-                return True
-            except serial.SerialException as e:
-                # Check if it's a permission error or port-in-use error
-                if "Access is denied" in str(e) or "Port is in use" in str(e) or "Permission" in str(e):
-                    print(f"Port {port} exists but may be in use by another application: {e}")
-                    # Force close any existing connections to this port
-                    try:
-                        # Try with different timeout
-                        test_ser = serial.Serial(port, timeout=0.1)
-                        test_ser.close()
-                        print(f"Successfully released {port}")
-                        return True
-                    except:
-                        print(f"Could not force release {port}")
-                        # Return True anyway to allow the connection attempt
-                        return True
-                else:
-                    print(f"Port {port} is not available: {e}")
-                    return False
-        except Exception as e:
-            print(f"Error checking port {port}: {e}")
-            return False
 
     # PLC functionality removed
 
-    def read_loadcell(self, loadcell_num):
-        """Read data from specified loadcell"""
-        try:
-            client = self.loadcell1_client if loadcell_num == 1 else self.loadcell2_client
-            
-            if not client or not client.is_open:
-                raise Exception(f"Loadcell {loadcell_num} not connected")
-            
-            # Clear buffers
-            client.reset_input_buffer()
-            client.reset_output_buffer()
-            
-            # Send command
-            command = f"ID{loadcell_num:02d}P".encode()
-            client.write(command)
-            
-            # Read response
-            response = client.readline()
-            if response:
-                decoded = response.decode('utf-8', errors='replace').strip()
-                parts = decoded.split(',')
-                if len(parts) > 1:
-                    return parts[1]  # Return the value part
-            
-            return None
-            
-        except Exception as e:
-            print(f"Error reading Loadcell {loadcell_num}: {str(e)}")
-            return None
 
     def cleanup(self):
-        """Enhanced cleanup method with forced resource release for PLC connection"""
+        """UI cleanup method"""
         try:
-            # Stop all monitoring first
-            self.keepWriting = False
-            self.breakLoop = True
-            
-            # Stop PLC status monitoring
-            if hasattr(self, 'status_monitoring_active'):
-                self.status_monitoring_active = False
-                print("Status monitoring stopped")
-            
             # Stop all blinking labels
             self.stop_all_label_blinking()
-            
-            # Clean up loadcell connections
-            if hasattr(self, 'loadcell1_client') and self.loadcell1_client:
-                try:
-                    if self.loadcell1_client.is_open:
-                        self.loadcell1_client.close()
-                    print("Loadcell 1 connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing Loadcell 1 connection: {e}")
-                finally:
-                    self.loadcell1_client = None
-            
-            if hasattr(self, 'loadcell2_client') and self.loadcell2_client:
-                try:
-                    if self.loadcell2_client.is_open:
-                        self.loadcell2_client.close()
-                    print("Loadcell 2 connection closed successfully")
-                except Exception as e:
-                    print(f"Error closing Loadcell 2 connection: {e}")
-                finally:
-                    self.loadcell2_client = None
-            
-            # PLC client cleanup
-            self.disconnect_plc()
-            
-            # Give time for ports to be released
-            # Non-blocking delay - operation will complete asynchronously
-            
-            # Additional force close to ensure COM ports are released
-            self.force_close_com_ports()
-            
-            print("All connections cleaned up successfully")
-                
+
+            print("UI cleanup completed")
+
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
     
-    def force_close_com_ports(self):
-        """Force close COM ports that might be in use with enhanced error handling"""
-        try:
-            # Get all available ports first
-            available_ports = [p.device for p in serial.tools.list_ports.comports()]
-            print(f"Available COM ports: {available_ports}")
-            
-            # PLC port handling removed
-                
-            # Also check if any loadcell ports need to be closed
-            loadcell1_port = os.getenv('LOADCELL_01_COM_PORT')
-            if loadcell1_port and loadcell1_port.strip():
-                if loadcell1_port not in available_ports:
-                    print(f"Warning: Configured Loadcell 1 port {loadcell1_port} is not available on this system")
-                else:
-                    self._force_close_port(loadcell1_port)
-                    
-            loadcell2_port = os.getenv('LOADCELL_02_COM_PORT')
-            if loadcell2_port and loadcell2_port.strip():
-                if loadcell2_port not in available_ports:
-                    print(f"Warning: Configured Loadcell 2 port {loadcell2_port} is not available on this system")
-                else:
-                    self._force_close_port(loadcell2_port)
-                    
-            # Force garbage collection to ensure any lingering port references are cleaned up
-            import gc
-            gc.collect()
-            
-        except Exception as e:
-            print(f"Error force-closing COM ports: {e}")
-            
-    def _force_close_port(self, port):
-        """Helper method to force close a single COM port with multiple attempts"""
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                # Try with different timeouts and settings
-                if attempt == 0:
-                    # First attempt - standard settings
-                    test_serial = serial.Serial(port, timeout=0.5)
-                elif attempt == 1:
-                    # Second attempt - shorter timeout
-                    test_serial = serial.Serial(port, timeout=0.1, baudrate=9600)
-                else:
-                    # Third attempt - different settings
-                    test_serial = serial.Serial(
-                        port, 
-                        baudrate=9600, 
-                        bytesize=8,
-                        parity='N',
-                        stopbits=1,
-                        timeout=0.1
-                    )
-                    
-                # Successfully opened, now close it
-                test_serial.close()
-                print(f"Successfully force-closed {port} on attempt {attempt+1}")
-                return True
-                
-            except serial.SerialException as e:
-                if "Access is denied" in str(e) or "Port is in use" in str(e):
-                    print(f"Attempt {attempt+1}: Port {port} is in use, trying different approach...")
-                    # Wait briefly before next attempt
-                    # Non-blocking delay - operation will complete asynchronously
-                else:
-                    print(f"Could not force-close {port} on attempt {attempt+1}: {e}")
-                    
-            except Exception as e:
-                print(f"Error on attempt {attempt+1} to force-close {port}: {e}")
-                
-        print(f"Failed to force-close {port} after {max_attempts} attempts")
-        return False
 
-    def retrieve_part_specifications(self, part_number):
-        """Retrieve specifications and label coordinates from database."""
-        try:
-            # Connect to database with error handling
-            try:
-                conn = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="12345",
-                    database="EOL"
-                )
-            except mysql.connector.Error as err:
-                print(f"Database connection failed: {err}")
-                messagebox.showerror("Database Error", "Failed to connect to database. Please check your database connection.")
-                return
 
-            cursor = conn.cursor(dictionary=True)  # Use dictionary cursor for clearer data access
-            
-            # Get image path and label coordinates
-            master_query = """
-            SELECT MM_IMAGE_PATH, MM_LABEL_COORDINATES, MM_MODEL_NAME, MM_PART_NUMBER
-            FROM TBL_MODEL_MASTER 
-            WHERE MM_PART_NUMBER = %s
-            """
-            cursor.execute(master_query, (part_number,))
-            result = cursor.fetchone()
-            
-            if not result:
-                messagebox.showwarning("Warning", f"No data found for part number: {part_number}")
-                return
-            
-            # Store current part number
-            self.current_part_number = result['MM_PART_NUMBER']
-            
-            # Update model header
-            if result['MM_MODEL_NAME']:
-                self.model_header.config(text=f"{result['MM_MODEL_NAME']} - {part_number}")
-            
-            # Load image if path exists
-            if result['MM_IMAGE_PATH']:
-                image_path = self.get_absolute_image_path(result['MM_IMAGE_PATH'])
-                if not image_path or not os.path.exists(image_path):
-                    messagebox.showwarning("Warning", f"Image file not found: {result['MM_IMAGE_PATH']}")
-                else:
-                    if self.load_image_with_path(image_path):
-                        # After successful image load, place labels if coordinates exist
-                        if result['MM_LABEL_COORDINATES']:
-                            try:
-                                coordinates_data = json.loads(result['MM_LABEL_COORDINATES'])
-                                self.place_labels_from_positions(coordinates_data)
-                            except json.JSONDecodeError as e:
-                                print(f"Warning: Invalid label coordinate data: {e}")
-                                messagebox.showwarning("Warning", "Invalid label coordinate data in database")
-            
-            # Get specifications
-            spec_query = """
-            SELECT 
-                MS_DESCRIPTION,
-                MS_DEVICE,
-                MS_UNIT,
-                CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as MIN_VAL,
-                CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as MAX_VAL
-            FROM TBL_MODEL_SPECIFICATION 
-            WHERE MS_PART_NUMBER = %s
-            ORDER BY MS_DEVICE
-            """
-            cursor.execute(spec_query, (part_number,))
-            specs = cursor.fetchall()
-            
-            # Update specifications tree
-            self.spec_tree.delete(*self.spec_tree.get_children())
-            for spec in specs:
-                values = (
-                    spec['MS_DESCRIPTION'],
-                    spec['MS_DEVICE'],
-                    spec['MS_UNIT'],
-                    f"{float(spec['MIN_VAL']):.2f}" if spec['MIN_VAL'] is not None else "N/A",
-                    f"{float(spec['MAX_VAL']):.2f}" if spec['MAX_VAL'] is not None else "N/A",
-                    "",  # Empty Actual column
-                    ""   # Empty Result column
-                )
-                self.spec_tree.insert('', 'end', values=values)
-            
-            # Update status message
-            self.message_label.config(
-                text=f"Loaded specifications for {result['MM_MODEL_NAME']} - {part_number}",
-                fg="green"
-            )
-            
-        except mysql.connector.Error as err:
-            print(f"Database Error: {err}")
-            messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
-        except Exception as e:
-            print(f"Error: {e}")
-            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
-
-    def get_absolute_image_path(self, db_image_path):
-        """Convert database image path to absolute path if needed"""
-        if not db_image_path:
-            return None
-        
-        # If path is already absolute, return it
-        if os.path.isabs(db_image_path):
-            return db_image_path
-        
-        # Otherwise, assume it's relative to the application directory
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base_dir, db_image_path)
 
     def load_image_with_path(self, image_path):
         """Load and fit image to match the exact dimensions of model_settings.py"""
@@ -3581,21 +2778,20 @@ class EOLTesterGUI:
                 self.current_employee_id = emp_code
                 self.employee_validation_complete = True
                 self.employee_validated = True
-                
+
                 # Make employee entry read-only (C# behavior)
                 self.emp_entry.configure(state='readonly', bg="lightgreen")
-                
-                # Enable ALC entry and set focus (C# behavior)
-                self.alc_entry.configure(state='normal')
+
+                # Enable all other controls after validation
+                self.enable_controls_after_employee_validation()
+
+                # Set focus to ALC CODE textbox
                 self.alc_entry.focus_set()
-                
+
                 self.safe_update_message("Employee code validated - Enter ALC code", "green")
-                
+
                 print(f"Employee {emp_code} validated successfully")
-                
-                # Initialize database connection test
-                self.test_database_connection()
-                
+
             else:
                 # Exact error message from C# code
                 messagebox.showerror(
@@ -3683,12 +2879,9 @@ class EOLTesterGUI:
                 
                 # Get PLC program selection address
                 self.programSelectionPLCAddress = model_result['MM_PLC_ADDRESS']
-                if self.programSelectionPLCAddress:
-                    # Write to PLC for program selection (C# logic)
-                    self.write_program_selection_to_plc()
-                
-                # Write Machine On signal to PLC
-                self.write_machine_on_to_plc()
+                # PLC communication removed - frontend only
+
+                # Machine On signal removed - frontend only
                 
                 part_exists = True
             
@@ -3822,37 +3015,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error loading model label details: {e}")
 
-    def write_program_selection_to_plc(self):
-        """Write program selection to PLC (C# implementation)"""
-        try:
-            if self.programSelectionPLCAddress and self.plc_client:
-                # Convert hex address to int (remove 'M' prefix)
-                if self.programSelectionPLCAddress.startswith('M'):
-                    coil_address = int(self.programSelectionPLCAddress[1:], 16)
-                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
-                    if result.isError():
-                        print(f"Error writing program selection to PLC: {result}")
-                    else:
-                        print(f"Program selection written to PLC address {self.programSelectionPLCAddress}")
-        except Exception as e:
-            print(f"Error writing program selection to PLC: {e}")
-
-    def write_machine_on_to_plc(self):
-        """Write Machine On signal to PLC (C# implementation)"""
-        try:
-            if self.machineOnPLCCoilAddress and self.plc_client:
-                # Convert hex address to int (remove 'M' prefix)  
-                if self.machineOnPLCCoilAddress.startswith('M'):
-                    coil_address = int(self.machineOnPLCCoilAddress[1:], 16)
-                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
-                    if result.isError():
-                        print(f"Error writing machine on signal to PLC: {result}")
-                    else:
-                        print(f"Machine On signal written to PLC address {self.machineOnPLCCoilAddress}")
-                else:
-                    messagebox.showerror("Error", "Machine On PLC Coil Address text file is either missing or empty!!")
-        except Exception as e:
-            print(f"Error writing machine on signal to PLC: {e}")
 
     def display_data(self):
         """Display test data (C# implementation placeholder)"""
@@ -4147,115 +3309,7 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error updating charts: {e}")
 
-    def save_testing_data(self, status):
-        """Save testing data to database (C# implementation)"""
-        try:
-            connection = self.get_database_connection()
-            if not connection:
-                messagebox.showerror("Database Error", "Failed to connect to database for saving results")
-                return
-                
-            cursor = connection.cursor()
-            
-            # Build dynamic INSERT query based on available columns
-            base_columns = [
-                'TD_MACHINE_ID', 'TD_PART_NUMBER', 'TD_LOT_NUMBER', 
-                'TD_TRACEABILITY_CODE', 'TD_RECORD_DATE', 'TD_DATETIME', 
-                'L1', 'P1', 'P2', 'CAM1', 'TD_OVERALL_STATUS', 'TD_EMPLOYEE_CODE'
-            ]
-            
-            base_values = [
-                self.machineID, self.partNumber, self.lotNo,
-                self.traceabilityCode, datetime.today().date(), datetime.now(),
-                self.L1MaxValue, self.P01Value, self.P02Value,
-                self.cam1Result, status, self.current_employee_id
-            ]
-            
-            # Add optional columns based on part configuration
-            if self.columnL2:
-                base_columns.append('L2')
-                base_values.append(self.L2MaxValue)
-            if self.columnL3:
-                base_columns.append('L3')
-                base_values.append(self.L3MaxValue)
-            if self.columnL4:
-                base_columns.append('L4')
-                base_values.append(self.L4MaxValue)
-            if self.columnP3:
-                base_columns.append('P3')
-                base_values.append(self.P03Value)
-            if self.columnP4:
-                base_columns.append('P4')
-                base_values.append(self.P04Value)
-            
-            # Create INSERT query
-            columns_str = ', '.join(base_columns)
-            placeholders = ', '.join(['%s'] * len(base_values))
-            
-            insert_query = f"""
-            INSERT INTO TBL_TEST_DATA ({columns_str})
-            VALUES ({placeholders})
-            """
-            
-            cursor.execute(insert_query, base_values)
-            connection.commit()
-            
-            print(f"Test data saved: {status} - Lot: {self.lotNo}, Traceability: {self.traceabilityCode}")
-            
-            # Update or insert part running serial
-            if status == "OK":
-                self.update_part_running_serial(cursor)
-                connection.commit()
-            
-            cursor.close()
-            connection.close()
-            
-            # Update display
-            self.display_data()
-            
-        except Exception as e:
-            print(f"Error saving testing data: {e}")
-            messagebox.showerror("Database Error", f"Failed to save test data: {e}")
 
-    def update_part_running_serial(self, cursor):
-        """Update or insert part running serial record (C# implementation)"""
-        try:
-            if not self.partRunningSerialExists:
-                # Insert new record
-                insert_query = """
-                INSERT INTO TBL_PART_RUNNING_SERIAL 
-                (PART_NUMBER, TEST_DAY_DATE, TEST_DAY_LAST_DATE_TIME, TRACEABILITY_CODE, RUNNING_LOT_NUMBER)
-                VALUES (%s, %s, %s, %s, %s)
-                """
-                cursor.execute(insert_query, (
-                    self.partNumber,
-                    datetime.today().date(),
-                    datetime.now(),
-                    self.traceabilityCode,
-                    self.lotNo
-                ))
-                self.partRunningSerialExists = True
-                print("Inserted new part running serial record")
-            else:
-                # Update existing record
-                update_query = """
-                UPDATE TBL_PART_RUNNING_SERIAL 
-                SET TEST_DAY_LAST_DATE_TIME = %s,
-                    TRACEABILITY_CODE = %s,
-                    RUNNING_LOT_NUMBER = %s
-                WHERE PART_NUMBER = %s AND TEST_DAY_DATE = %s
-                """
-                cursor.execute(update_query, (
-                    datetime.now(),
-                    self.traceabilityCode,
-                    self.lotNo,
-                    self.partNumber,
-                    datetime.today().date()
-                ))
-                print("Updated existing part running serial record")
-                
-        except Exception as e:
-            print(f"Error updating part running serial: {e}")
 
     def print_barcode_label_async(self):
         """Print barcode label asynchronously (C# implementation)"""
@@ -4383,9 +3437,7 @@ class EOLTesterGUI:
                 self.update_scan_result("NG")
                 print("Barcode scan failed - marked as 'NG'")
                 
-                # Activate PLC alert if configured
-                if self.alertOnPLCCoilAddress:
-                    self.activate_plc_alert()
+                # PLC alert removed - frontend only
                 
                 messagebox.showwarning(
                     "Scan NG",
@@ -4420,40 +3472,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error updating scan result: {e}")
 
-    def activate_plc_alert(self):
-        """Activate PLC alert signal (C# implementation)"""
-        try:
-            if self.alertOnPLCCoilAddress and self.plc_client:
-                # Convert hex address to int (remove 'M' prefix)
-                if self.alertOnPLCCoilAddress.startswith('M'):
-                    coil_address = int(self.alertOnPLCCoilAddress[1:], 16)
-                    
-                    # Turn alert ON
-                    result = self.plc_client.write_coil(coil_address, True, slave=self.slaveAddress)
-                    if result.isError():
-                        print(f"Error activating PLC alert: {result}")
-                    else:
-                        print(f"PLC alert activated at address {self.alertOnPLCCoilAddress}")
-                        
-                        # Schedule alert OFF after timeout
-                        self.root.after(self.alertOn_TimeInterval, lambda: self.deactivate_plc_alert(coil_address))
-            else:
-                messagebox.showerror("Error", "Alert On PLC Coil Address text file is either missing or empty!!")
-                
-        except Exception as e:
-            print(f"Error activating PLC alert: {e}")
-
-    def deactivate_plc_alert(self, coil_address):
-        """Deactivate PLC alert signal"""
-        try:
-            if self.plc_client:
-                result = self.plc_client.write_coil(coil_address, False, slave=self.slaveAddress)
-                if result.isError():
-                    print(f"Error deactivating PLC alert: {result}")
-                else:
-                    print(f"PLC alert deactivated at address {coil_address}")
-        except Exception as e:
-            print(f"Error deactivating PLC alert: {e}")
 
     def on_alc_entry_focus(self, is_focused):
         """Handle ALC entry focus with visual feedback"""
@@ -4470,146 +3488,181 @@ class EOLTesterGUI:
                 self.alc_entry.configure(bg="#fff9c4")
 
     def process_alc_code(self, event=None):
-        """Process the entered ALC code and retrieve specifications"""
+        """Validate ALC code against database and enable JIG SCAN if valid"""
         # Check employee validation first
         if not self.employee_validation_complete or not self.current_employee_id:
-            self.safe_update_message("Employee validation required before Part Number entry", "red")
-            messagebox.showwarning("Employee Validation Required", 
-                                 "Please validate your Employee ID before entering Part Number")
+            self.safe_update_message("Employee validation required before ALC code entry", "red")
+            messagebox.showwarning("Employee Validation Required",
+                                 "Please validate your Employee ID before entering ALC code")
             return
-        
-        # Use the value from the entry field
+
+        # Get the ALC code from the entry field
         alc_code = self.alc_entry.get().strip()
-        
+
         if not alc_code or alc_code == "ALC CODE":
             messagebox.showwarning("Warning", "Please enter a valid ALC code")
             return
-            
-        # Log part number entry attempt
-        self.log_operator_action("PART_NUMBER_ENTRY", f"ALC Code: {alc_code}", self.current_employee_id)
-        
-        # Call the C# style implementation
-        threading.Thread(target=self.process_alc_code_cs_style, args=(alc_code,), daemon=True).start()
-        return
 
+        # Validate ALC code exists in database
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
-            cursor = conn.cursor(dictionary=True)
+            conn = mysql.connector.connect(**DB_CONFIG)
+            cursor = conn.cursor()
 
-            # Get model information using ALC code
-            model_query = """
-            SELECT 
-                MM_PART_NUMBER,
-                MM_MODEL_NAME,
-                MM_IMAGE_PATH,
-                MM_LABEL_COORDINATES
-            FROM TBL_MODEL_MASTER 
-            WHERE MM_ALC_CODE = %s
-            """
-            cursor.execute(model_query, (alc_code,))
-            model_result = cursor.fetchone()
-
-            if not model_result:
-                messagebox.showwarning("Warning", f"No data found for ALC code: {alc_code}")
-                cursor.close()
-                conn.close()
-                return
-
-            # Store current part number and update UI
-            self.current_part_number = model_result['MM_PART_NUMBER']
-            self.model_header.config(text=f"{model_result['MM_MODEL_NAME']} - {self.current_part_number}")
-            
-            # Get specifications using the part number
-            spec_query = """
-            SELECT 
-                MS_DESCRIPTION as Description,
-                MS_DEVICE as Device,
-                MS_UNIT as Unit,
-                CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
-                CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
-            FROM TBL_MODEL_SPECIFICATION 
-            WHERE MS_PART_NUMBER = %s
-            ORDER BY MS_DEVICE
-            """
-            cursor.execute(spec_query, (self.current_part_number,))
-            specs = cursor.fetchall()
-
-            # Clear and update specifications tree
-            self.spec_tree.delete(*self.spec_tree.get_children())
-            
-            # Collect all device names to update tree columns
-            available_devices = set()
-            
-            for spec in specs:
-                values = (
-                    spec['Description'],
-                    spec['Device'],
-                    spec['Unit'],
-                    f"{float(spec['Min']):.2f}" if spec['Min'] is not None else "N/A",
-                    f"{float(spec['Max']):.2f}" if spec['Max'] is not None else "N/A",
-                    "",  # Empty Actual column
-                    ""   # Empty Result column
-                )
-                self.spec_tree.insert('', 'end', values=values)
-                
-                # Add device to the set of available devices
-                if spec['Device']:
-                    available_devices.add(spec['Device'])
-
-            # Update tree columns based on available devices
-            self.update_tree_columns(available_devices)
-
-            # Handle image loading and label placement
-            if model_result['MM_IMAGE_PATH']:
-                abs_image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), model_result['MM_IMAGE_PATH']))
-                if os.path.exists(abs_image_path):
-                    if self.load_image_with_path(abs_image_path):
-                        # Force update to ensure image is loaded before placing labels
-                        self.root.update_idletasks()
-                        
-                        if model_result['MM_LABEL_COORDINATES']:
-                            try:
-                                coordinates_data = json.loads(model_result['MM_LABEL_COORDINATES'])
-                                # Ensure we place labels after the image is fully loaded
-                                self.root.after(100, lambda: self.place_labels_from_positions(coordinates_data))
-                            except json.JSONDecodeError:
-                                messagebox.showwarning("Warning", "Invalid label coordinate data")
-                else:
-                    messagebox.showwarning("Warning", f"Image not found: {abs_image_path}")
-
-            # Update status message
-            self.safe_update_message(
-                f"Model: {model_result['MM_MODEL_NAME']} | Part Number: {self.current_part_number}",
-                "green"
-            )
+            # Check if ALC code exists in TBL_MODEL_MASTER
+            query = "SELECT MM_ALC_CODE FROM TBL_MODEL_MASTER WHERE MM_ALC_CODE = %s AND MM_STATUS = 1"
+            cursor.execute(query, (alc_code,))
+            result = cursor.fetchone()
 
             cursor.close()
             conn.close()
-            
-            # Load lot history for this part number
-            self.load_history_to_treeview()
-            
-            # Log successful part number validation
-            self.log_operator_action("PART_NUMBER_VALIDATED", 
-                                    f"Part: {self.current_part_number}, Model: {model_result['MM_MODEL_NAME']}", 
-                                    self.current_employee_id)
-            
-            # Process monitoring started (PLC functionality removed)
-            print("Process monitoring started after ALC code entry")
-            self.safe_update_message(
-                f"Process monitoring started for Part: {self.current_part_number} - Scan LOT number to begin",
-                "green"
-            )
-            
-        except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Failed to retrieve data: {err}")
+
+            if result:
+                # ALC code exists - disable ALC textbox and focus on JIG SCAN
+                self.alc_entry.configure(state='readonly', bg='lightgreen')
+                self.additional_entry2.focus_set()  # Focus on JIG SCAN textbox
+                self.safe_update_message("ALC code validated - Enter JIG scan", "green")
+                print(f"ALC code {alc_code} validated successfully")
+
+                # Store the validated ALC code for later comparison
+                self.validated_alc_code = alc_code
+
+            else:
+                # ALC code not found
+                messagebox.showerror("Invalid ALC Code", f"ALC code '{alc_code}' not found in database")
+                self.alc_entry.delete(0, tk.END)
+                self.alc_entry.focus_set()
+
+        except Error as e:
+            error_msg = f"Database error validating ALC code: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("Database Error", error_msg)
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.focus_set()
         except Exception as e:
-            messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+            error_msg = f"Error validating ALC code: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("Error", error_msg)
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.focus_set()
+
+    def process_jig_scan(self, event=None):
+        """Process JIG SCAN entry and validate against ALC code"""
+        # Check if ALC code was validated first
+        if not hasattr(self, 'validated_alc_code') or not self.validated_alc_code:
+            messagebox.showwarning("ALC Code Required", "Please enter and validate ALC code first")
+            self.additional_entry2.delete(0, tk.END)
+            self.alc_entry.focus_set()
+            return
+
+        # Get the JIG SCAN value
+        jig_scan = self.additional_entry2.get().strip()
+
+        if not jig_scan or jig_scan == "ZIG SCAN":
+            messagebox.showwarning("Warning", "Please enter a valid JIG scan")
+            return
+
+        # Extract the ALC code part (remove 'J' prefix if present)
+        if jig_scan.startswith('J'):
+            extracted_alc = jig_scan[1:]  # Remove 'J' prefix
+        else:
+            extracted_alc = jig_scan
+
+        # Compare with validated ALC code
+        if extracted_alc == self.validated_alc_code:
+            # Match found - populate data from database
+            self.populate_part_data_from_database()
+        else:
+            # No match
+            messagebox.showerror("JIG Scan Mismatch", f"JIG scan '{jig_scan}' does not match ALC code '{self.validated_alc_code}'")
+            self.additional_entry2.delete(0, tk.END)
+            self.additional_entry2.focus_set()
+
+    def populate_part_data_from_database(self):
+        """Populate UI with part data from database after successful JIG scan validation"""
+        try:
+            conn = mysql.connector.connect(**DB_CONFIG)
+            cursor = conn.cursor(dictionary=True)
+
+            # Get model information
+            query = """
+            SELECT MM_PART_NUMBER, MM_MODEL_NAME, MM_IMAGE_PATH, MM_LABEL_COORDINATES
+            FROM TBL_MODEL_MASTER
+            WHERE MM_ALC_CODE = %s AND MM_STATUS = 1
+            """
+            cursor.execute(query, (self.validated_alc_code,))
+            model_result = cursor.fetchone()
+
+            if model_result:
+                # Store part information
+                self.current_part_number = model_result['MM_PART_NUMBER']
+
+                # Update model header
+                self.model_header.config(text=f"{model_result['MM_MODEL_NAME']} - {self.current_part_number}")
+
+                # Get specifications
+                spec_query = """
+                SELECT MS_DESCRIPTION, MS_DEVICE, MS_UNIT,
+                       CAST(MS_NORMAL_MIN AS DECIMAL(10,2)) as Min,
+                       CAST(MS_NORMAL_MAX AS DECIMAL(10,2)) as Max
+                FROM TBL_MODEL_SPECIFICATION
+                WHERE MS_PART_NUMBER = %s
+                ORDER BY MS_DEVICE
+                """
+                cursor.execute(spec_query, (self.current_part_number,))
+                specs = cursor.fetchall()
+
+                # Update specifications tree
+                self.spec_tree.delete(*self.spec_tree.get_children())
+                available_devices = set()
+
+                for spec in specs:
+                    values = (
+                        spec['MS_DESCRIPTION'] or '',
+                        spec['MS_DEVICE'] or '',
+                        spec['MS_UNIT'] or '',
+                        f"{float(spec['Min']):.2f}" if spec['Min'] is not None else "N/A",
+                        f"{float(spec['Max']):.2f}" if spec['Max'] is not None else "N/A",
+                        "",  # Empty Actual column
+                        ""   # Empty Result column
+                    )
+                    self.spec_tree.insert('', 'end', values=values)
+
+                    if spec['MS_DEVICE']:
+                        available_devices.add(spec['MS_DEVICE'])
+
+                # Update tree columns
+                self.update_tree_columns(available_devices)
+
+                # Handle image loading
+                if model_result['MM_IMAGE_PATH']:
+                    abs_image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), model_result['MM_IMAGE_PATH']))
+                    if os.path.exists(abs_image_path):
+                        self.load_image_with_path(abs_image_path)
+
+                        # Place labels if coordinates exist
+                        if model_result['MM_LABEL_COORDINATES']:
+                            try:
+                                coordinates_data = json.loads(model_result['MM_LABEL_COORDINATES'])
+                                self.root.after(100, lambda: self.place_labels_from_positions(coordinates_data))
+                            except json.JSONDecodeError:
+                                pass
+
+                # Disable JIG SCAN textbox and show success
+                self.additional_entry2.configure(state='readonly', bg='lightgreen')
+                self.safe_update_message(f"Part data loaded for: {model_result['MM_MODEL_NAME']} - {self.current_part_number}", "green")
+                print(f"JIG scan validated and part data loaded for ALC: {self.validated_alc_code}")
+
+            cursor.close()
+            conn.close()
+
+        except Error as e:
+            error_msg = f"Database error loading part data: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("Database Error", error_msg)
+        except Exception as e:
+            error_msg = f"Error loading part data: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("Error", error_msg)
 
     def load_and_monitor_sensors(self):
         """Load and monitor input sensors and process status"""
@@ -4682,25 +3735,6 @@ class EOLTesterGUI:
 
     # PLC functionality removed
 
-    def monitor_serial_ports(self):
-        """Continuous monitoring of serial ports"""
-        try:
-            if self.keepWriting and not self.breakLoop:
-                # Send commands to loadcells
-                if self.loadcell1_client and self.loadcell1_client.is_open:
-                    self.loadcell1_client.write(b"ID01P")
-                if self.loadcell2_client and self.loadcell2_client.is_open:
-                    self.loadcell2_client.write(b"ID02P")
-                
-                # Read responses
-                self.read_loadcell_data()
-                
-                # Schedule next check
-                if not self.breakLoop and self.noOfValues == 0:
-                    self.root.after(50, self.monitor_serial_ports)
-                
-        except Exception as e:
-            print(f"Error monitoring ports: {e}")
 
     def process_test_results(self):
         """Process and validate test results"""
@@ -4942,14 +3976,7 @@ class EOLTesterGUI:
         try:
             print("🔄 Resetting process status for new test cycle")
             
-            # Check if PLC is connected
-            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
-                # Reset PLC registers for new cycle
-                success = self.reset_plc_registers()
-                if not success:
-                    print("⚠️ PLC reset failed, continuing with simulation mode")
-            else:
-                print("📺 PLC not connected - using simulation mode")
+            # Frontend only - no PLC reset needed
             
             # Reset all internal flags and counters
             self.reset_internal_cycle_flags()
@@ -4965,122 +3992,6 @@ class EOLTesterGUI:
             traceback.print_exc()
             return False
 
-    def reset_plc_registers(self):
-        """Reset PLC registers to initial state for new test cycle"""
-        try:
-            if not hasattr(self, 'plc_client') or not self.plc_client:
-                return False
-                
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
-            reset_success = True
-            
-            print("🔄 Starting comprehensive PLC reset for new cycle...")
-            
-            # STEP 1: First, set P0000 to LOW to stop current process
-            try:
-                p0000_result = self.plc_client.write_coil(0, False, device_id=station_id)
-                if not p0000_result.isError():
-                    print("✅ Set P0000 to LOW - stopped current process")
-                    self.log_plc_command("WRITE", "P0000", "LOW", "Stop current process for cycle reset")
-                else:
-                    print("❌ Failed to set P0000 to LOW")
-                    reset_success = False
-            except Exception as e:
-                print(f"Error setting P0000 to LOW: {e}")
-                reset_success = False
-            
-            # STEP 2: Reset ALL process status coils to FALSE (including AUTO)
-            if hasattr(self, 'process_addresses') and self.process_addresses:
-                print("🔄 Resetting all process status coils to FALSE...")
-                for address in self.process_addresses:
-                    if address.strip():
-                        try:
-                            addr_num = int(address[1:]) if len(address) > 1 else 0
-                            
-                            # Reset ALL coils to FALSE initially
-                            reset_value = False
-                            
-                            if address.startswith('M'):
-                                result = self.plc_client.write_coil(addr_num, reset_value, device_id=station_id)
-                                if result.isError():
-                                    print(f"❌ Failed to reset coil {address}")
-                                    reset_success = False
-                                else:
-                                    print(f"✅ Reset coil {address} to FALSE")
-                                    
-                        except Exception as e:
-                            print(f"Error resetting address {address}: {e}")
-                            reset_success = False
-            
-            # STEP 3: Reset test result and data registers to 0
-            try:
-                print("🔄 Resetting test result registers to 0...")
-                # Reset load cell result registers
-                for reg_addr in range(100, 108):  # D100-D107 for test results
-                    result = self.plc_client.write_register(reg_addr, 0, device_id=station_id)
-                    if result.isError():
-                        print(f"⚠️ Failed to reset register D{reg_addr}")
-                    else:
-                        print(f"✅ Reset register D{reg_addr} to 0")
-                
-                # Reset any other relevant registers
-                for reg_addr in range(200, 210):  # D200-D209 for additional data
-                    result = self.plc_client.write_register(reg_addr, 0, device_id=station_id)
-                    if result.isError():
-                        print(f"⚠️ Failed to reset register D{reg_addr}")
-                    else:
-                        print(f"✅ Reset register D{reg_addr} to 0")
-                        
-            except Exception as e:
-                print(f"Error resetting holding registers: {e}")
-            
-            # STEP 4: Wait briefly for PLC to process reset commands
-            import time
-            time.sleep(0.5)
-            
-            # STEP 5: Now set only AUTO coil to TRUE (first process step)
-            try:
-                if hasattr(self, 'process_addresses') and self.process_addresses:
-                    auto_address = self.process_addresses[0]  # First address should be AUTO
-                    if auto_address.strip():
-                        addr_num = int(auto_address[1:]) if len(auto_address) > 1 else 0
-                        auto_result = self.plc_client.write_coil(addr_num, True, device_id=station_id)
-                        if not auto_result.isError():
-                            print(f"✅ Set {auto_address} to TRUE - AUTO state activated")
-                            self.log_plc_command("WRITE", auto_address, "TRUE", "AUTO state activated for new cycle")
-                        else:
-                            print(f"❌ Failed to set {auto_address} to TRUE")
-                            reset_success = False
-            except Exception as e:
-                print(f"Error setting AUTO coil: {e}")
-                reset_success = False
-            
-            # STEP 6: Finally, set P0000 back to HIGH to start new cycle
-            try:
-                final_p0000_result = self.plc_client.write_coil(0, True, device_id=station_id)
-                if not final_p0000_result.isError():
-                    print("✅ Set P0000 to HIGH - new cycle started")
-                    self.log_plc_command("WRITE", "P0000", "HIGH", "New cycle started after complete reset")
-                else:
-                    print("❌ Failed to set P0000 to HIGH for new cycle")
-                    reset_success = False
-                    
-            except Exception as e:
-                print(f"Error setting P0000 to HIGH: {e}")
-                reset_success = False
-            
-            if reset_success:
-                print("✅ Complete PLC reset successful - all registers reset to initial state")
-                self.log_plc_command("RESET", "CYCLE_RESET", "COMPLETE", "Complete PLC reset for new cycle")
-            else:
-                print("⚠️ PLC reset completed with some errors")
-            
-            return reset_success
-            
-        except Exception as e:
-            print(f"Error in reset_plc_registers: {e}")
-            traceback.print_exc()
-            return False
 
     def reset_internal_cycle_flags(self):
         """Reset all internal flags and counters for new cycle"""
@@ -5197,20 +4108,6 @@ class EOLTesterGUI:
             print(error_msg)
             return False, error_msg
 
-    def test_database_connectivity(self):
-        """Test database connectivity for workflow validation"""
-        try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root", 
-                password="12345",
-                database="EOL",
-                connection_timeout=5
-            )
-            conn.close()
-            return True
-        except Exception as e:
-            raise Exception(f"Database connection failed: {e}")
 
     def execute_complete_eol_workflow(self):
         """Execute the complete EOL testing workflow as specified in requirements"""
@@ -5461,13 +4358,7 @@ class EOLTesterGUI:
             # STEP 1: Complete reset of PLC status and internal state
             print("🔄 Performing complete reset for new cycle...")
             
-            # Reset PLC registers to initial state
-            if hasattr(self, 'plc_client') and self.plc_client and self.plc_client.is_socket_open():
-                plc_reset_success = self.reset_plc_registers()
-                if not plc_reset_success:
-                    print("⚠️ PLC reset failed, but continuing with internal reset")
-            else:
-                print("📺 PLC not connected - skipping PLC reset")
+            # Frontend only - no PLC reset needed
             
             # Reset all internal flags and counters
             self.reset_internal_cycle_flags()
@@ -5506,37 +4397,6 @@ class EOLTesterGUI:
             print(f"Error starting next automated cycle: {e}")
             traceback.print_exc()
 
-    def read_loadcell_data(self):
-        """Read and process loadcell data"""
-        try:
-            # Initialize data_collected dictionary if it doesn't exist
-            if not hasattr(self, 'data_collected'):
-                self.data_collected = {}
-                
-            for i, client in enumerate([self.loadcell1_client, self.loadcell2_client], 1):
-                device_key = f"L{i}"
-                
-                # Skip if we've already collected data for this device
-                if device_key in self.data_collected:
-                    continue
-                    
-                if client and client.is_open:
-                    response = client.readline()
-                    if response:
-                        decoded = response.decode('utf-8', errors='replace').strip()
-                        parts = decoded.split(',')
-                        if len(parts) > 1:
-                            value = float(parts[1])
-                            # Update specification tree with actual value
-                            self.update_specification_result(f"L{i}", value, "")
-                            self.noOfValues += 1
-                            
-                            # Mark this device as processed for this iteration
-                            self.data_collected[device_key] = True
-                            print(f"Collected data for {device_key}: {value}")
-                            
-        except Exception as e:
-            print(f"Error reading loadcell data: {e}")
 
     # PLC functionality removed
 
@@ -5548,6 +4408,30 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error reading sensor inputs: {str(e)}")
             return False
+
+    def on_scan_entry_focus(self, event, entry, placeholder):
+        """Handle focus in for scan entry fields"""
+        if entry.get() == placeholder:
+            entry.delete(0, tk.END)
+            entry.config(fg='black')
+
+    def on_scan_entry_focus_out(self, event, entry, placeholder):
+        """Handle focus out for scan entry fields"""
+        if entry.get().strip() == "":
+            entry.insert(0, placeholder)
+            entry.config(fg='gray')
+
+    def on_additional_entry_focus(self, event, entry, placeholder):
+        """Handle focus in for additional entry fields"""
+        if entry.get() == placeholder:
+            entry.delete(0, tk.END)
+            entry.config(fg='black')
+
+    def on_additional_entry_focus_out(self, event, entry, placeholder):
+        """Handle focus out for additional entry fields"""
+        if entry.get().strip() == "":
+            entry.insert(0, placeholder)
+            entry.config(fg='black')
 
     def on_closing(self):
         """Handle window closing event"""
@@ -5997,202 +4881,6 @@ class EOLTesterGUI:
                 
         return None
 
-    def save_lot_data_to_database(self, values_dict):
-        """Save lot number data to database and return success status"""
-        conn = None
-        cursor = None
-        
-        print(f"=== DATABASE SAVE FUNCTION CALLED ===")
-        print(f"Input data: {values_dict}")
-        try:
-            # Validate values
-            if not values_dict or "LOT NUMBER" not in values_dict:
-                print("ERROR: Invalid values provided for database save")
-                return False
-                
-            # Database connection config
-            print("Attempting database connection...")
-            db_config = {
-                'host': os.getenv('DB_HOST', 'localhost'),
-                'user': os.getenv('DB_USER', 'root'),
-                'password': os.getenv('DB_PASSWORD', ''),
-                'database': os.getenv('DB_NAME', 'eol_test_data'),
-                'port': int(os.getenv('DB_PORT', 3306))
-            }
-            print(f"DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}")
-                
-            # Test database connection first with improved settings
-            print("Attempting database connection...")
-            try:
-                conn = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="12345",
-                    database="EOL",
-                    autocommit=False,
-                    connection_timeout=10,
-                    charset='utf8mb4',
-                    use_unicode=True,
-                    raise_on_warnings=True,
-                    sql_mode='STRICT_TRANS_TABLES',
-                    pool_reset_session=True
-                )
-                print("Database connection successful with enhanced settings")
-            except mysql.connector.Error as db_err:
-                print(f"Database connection failed: {db_err}")
-                self.safe_update_message(f"Database connection failed: {db_err}", "red")
-                return False
-            
-            cursor = conn.cursor()
-            
-            # Work with existing table structure - don't alter it
-            # The table already exists with columns: LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-            # RESULT, SCAN_RESULT, CREATED_BY, CREATED_DATE, SPEC_DATA, EMP_CODE
-            print("Using existing TBL_TEST_RESULTS table structure")
-            
-            # Get values for insertion
-            lot_number = values_dict.get("LOT NUMBER", "")
-            part_number = values_dict.get("PART NUMBER", "") or getattr(self, 'current_part_number', '')
-            
-            print(f"Database save for LOT: {lot_number}, PART: {part_number}")
-            
-            # Get employee code
-            emp_code = self.emp_entry.get() if (self.emp_entry.get() and self.emp_entry.get() != "EMP CODE") else ""
-            print(f"Employee code: {emp_code}")
-            
-            # Extract actual measurement values from spec tree and store in device columns (L1-P4)
-            device_values = {}
-            
-            print("Extracting actual values from spec tree...")
-            for item in self.spec_tree.get_children():
-                spec_values = self.spec_tree.item(item, "values")
-                if len(spec_values) > 1:
-                    device = spec_values[1]  # Device column
-                    actual_value = spec_values[-2] if len(spec_values) > 5 else None  # Actual column
-                    
-                    if device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-                        # Store actual measurement values directly in device columns
-                        if actual_value and actual_value.strip() and actual_value != "N/A" and actual_value != "":
-                            try:
-                                # Store the actual numeric value in the device column
-                                device_values[device] = float(actual_value)
-                                print(f"Extracted {device} actual value: {device_values[device]}")
-                            except (ValueError, TypeError):
-                                # If not numeric, store as empty/NULL
-                                device_values[device] = None
-                                print(f"Could not parse {device} value '{actual_value}' as number, storing as NULL")
-                        else:
-                            device_values[device] = None
-                            print(f"No actual value for {device}, storing as NULL")
-            
-            # Get individual device values (store actual measurements in L1-P4 columns)
-            l1_value = device_values.get("L1", None)
-            l2_value = device_values.get("L2", None)
-            l3_value = device_values.get("L3", None)
-            l4_value = device_values.get("L4", None)
-            p1_value = device_values.get("P1", None)
-            p2_value = device_values.get("P2", None)
-            p3_value = device_values.get("P3", None)
-            p4_value = device_values.get("P4", None)
-            
-            # Validate that the number of L values equals the number of P values
-            if not self.validate_l_p_equality(l1_value, l2_value, l3_value, l4_value, 
-                                             p1_value, p2_value, p3_value, p4_value):
-                print("ERROR: Number of L values does not equal number of P values")
-                self.safe_update_message("Data validation failed - L and P counts must match", "red")
-                return False
-            
-            # Determine overall result based on specifications vs actual values
-            overall_result = self.determine_overall_result_from_specs(device_values)
-            print(f"Overall result determined: {overall_result}")
-            
-            # Create scan result and spec data
-            scan_result = f"LOT: {lot_number}"
-            spec_data = self.get_spec_data_summary(device_values)
-            
-            # Print debug info about what's being saved
-            print(f"Database Save - LOT: {lot_number}, Part: {part_number}, Employee: {emp_code}")
-            print(f"Device Values - L1:{l1_value}, L2:{l2_value}, L3:{l3_value}, L4:{l4_value}")
-            print(f"Device Values - P1:{p1_value}, P2:{p2_value}, P3:{p3_value}, P4:{p4_value}")
-            print(f"Overall Result: {overall_result}")
-            print(f"Scan Result: {scan_result}")
-            
-            # Check if record already exists for this specific lot number and part number
-            # Use LOT_NUMBER + PART_NUMBER + EMP_CODE to prevent duplicates
-            cursor.execute(
-                "SELECT ID, L1, L2, L3, L4, P1, P2, P3, P4 FROM TBL_TEST_RESULTS WHERE LOT_NUMBER = %s AND PART_NUMBER = %s AND EMP_CODE = %s",
-                (lot_number, part_number, emp_code)
-            )
-            existing_record = cursor.fetchone()
-            
-            if existing_record:
-                # Check if the existing record has actual data values
-                existing_data = existing_record[1:9]  # L1-P4 values
-                has_existing_data = any(val is not None and val != 0 for val in existing_data)
-                
-                if has_existing_data:
-                    print(f"Record with data already exists for LOT {lot_number}, PART {part_number}, EMP {emp_code} - skipping duplicate save")
-                    return True  # Return success to prevent error messages
-                else:
-                    # Update existing record with new data instead of creating duplicate
-                    print(f"Updating existing empty record for LOT {lot_number}, PART {part_number}, EMP {emp_code}")
-                    update_query = """
-                    UPDATE TBL_TEST_RESULTS 
-                    SET L1 = %s, L2 = %s, L3 = %s, L4 = %s, P1 = %s, P2 = %s, P3 = %s, P4 = %s, 
-                        RESULT = %s, SCAN_RESULT = %s, SPEC_DATA = %s
-                    WHERE ID = %s
-                    """
-                    cursor.execute(update_query, (
-                        l1_value, l2_value, l3_value, l4_value,
-                        p1_value, p2_value, p3_value, p4_value,
-                        overall_result, scan_result, spec_data,
-                        existing_record[0]  # ID
-                    ))
-                    print(f"Updated existing database record for LOT {lot_number}")
-            else:
-                # Insert new record using exact column names from database
-                print(f"Creating new record for LOT {lot_number}, PART {part_number}, EMP {emp_code}")
-                query = """
-                INSERT INTO TBL_TEST_RESULTS 
-                (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                 RESULT, SCAN_RESULT, CREATED_BY, EMP_CODE, SPEC_DATA) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(query, (
-                    lot_number, 
-                    part_number, 
-                    l1_value, l2_value, l3_value, l4_value,
-                    p1_value, p2_value, p3_value, p4_value,
-                    overall_result,
-                    scan_result,
-                    emp_code,  # CREATED_BY
-                    emp_code,  # EMP_CODE
-                    spec_data
-                ))
-                print(f"Inserted new database record for LOT {lot_number}")
-            
-            # Commit changes
-            conn.commit()
-            print(f"*** 🎉 DATABASE SAVE SUCCESSFUL for LOT {lot_number} ***")
-            print(f"*** 📊 RECORD SAVED TO TBL_TEST_RESULTS TABLE ***")
-            
-            # Update tree columns to include any new devices with data
-            self.update_tree_columns()
-            
-            return True
-            
-        except mysql.connector.Error as e:
-            print(f"Database error: {str(e)}")
-            return False
-        except Exception as e:
-            print(f"Error saving to database: {str(e)}")
-            return False
-        finally:
-            # Ensure cleanup
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
 
     def determine_overall_result_from_specs(self, device_values):
         """Determine overall result by comparing actual values with specifications"""

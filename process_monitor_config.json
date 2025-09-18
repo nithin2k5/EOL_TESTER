@@ -1,0 +1,26 @@
+{
+    "monitor_interval": 1.0,
+    "cycle_timeout": 300,
+    "restart_delay": 3.0,
+    "max_consecutive_failures": 5,
+    "process_status_addresses": {
+        "AUTO": "M0067",
+        "HOME": "M0068", 
+        "PULL1_OK": "M0076",
+        "PULL1_NG": "M0085",
+        "PULL2_OK": "M0078",
+        "PULL2_NG": "M0087",
+        "TESTRESULT_OK": "M0075",
+        "TESTRESULT_NG": "M0079"
+    },
+    "cycle_completion_indicators": [
+        "TESTRESULT_OK",
+        "TESTRESULT_NG"
+    ],
+    "logging": {
+        "level": "INFO",
+        "file": "process_monitor.log",
+        "max_size_mb": 10,
+        "backup_count": 5
+    }
+}
