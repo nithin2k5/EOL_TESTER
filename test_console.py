@@ -174,18 +174,75 @@ class EOLTesterGUI:
         self.current_lot_number = None
         self.specifications = {}
         
-        # Initialize additional variables
+        # Initialize additional variables  
         self.keepWriting = False
         self.breakLoop = False
         
-        # Database configuration
+        # Initialize C# style variables
+        self.rcvdTestRslt = False
+        self.loadcell01Value = 0.0
+        self.loadcell02Value = 0.0
+        self.loadcell03Value = 0.0
+        self.loadcell04Value = 0.0
+        self.L1MaxValue = 0.0
+        self.L2MaxValue = 0.0
+        self.L3MaxValue = 0.0
+        self.L4MaxValue = 0.0
+        self.P01Value = 0.0
+        self.P02Value = 0.0
+        self.P03Value = 0.0
+        self.P04Value = 0.0
+        self.failCounter = 0
+        self.passCounter = 0
+        self.columnL2 = False
+        self.columnL3 = False
+        self.columnL4 = False
+        self.columnP3 = False
+        self.columnP4 = False
+        self.cam1Result = ""
+        self.deviceToRead = []
+        self.inputSensorsToReadList = []
+        self.mldDataTable = []
+        
+        # Database configuration for C# style implementation
         self.db_config = {
             'host': 'localhost',
             'port': 3306,
             'user': 'root',
-            'password': '#nk446420',
+            'password': 'nk446420',
             'database': 'EOL'
         }
+        
+        # Part information variables
+        self.partNumber = ""
+        self.modelName = ""
+        self.vendorCode = ""
+        self.eoNumber = ""
+        self.specialData = ""
+        self.initialID = ""
+        self.supplierSection = ""
+        self.lotNo = ""
+        self.traceabilityCode = ""
+        self.today = datetime.today().date()
+        self.dataPointX = 0
+        self.barcodePrintFileName = ""
+        self.prnFileContent = ""
+        self.programSelectionPLCAddress = ""
+        self.machineOnPLCCoilAddress = ""
+        self.alertOnPLCCoilAddress = ""
+        self.partRunningSerialExists = False
+        
+        # NG Cable validation flags
+        self.startingNGCableValidation = False
+        self.endingNGCableValidation = False
+        self.endingNGCableValidated = False
+        
+        # Barcode scanning variables
+        self.printedLabelScanDataInput_Received = False
+        self.alcInput_TimeInterval = 3000
+        self.printedLabelScanDataInput_TimeInterval = 4000
+        self.printedLabelScanDataInput_WaitTime = 6000
+        self.alertOn_TimeInterval = 5000
         
         # EOL Testing Variables (from C# implementation)
         self.alcInput_TimeInterval = 3000  # 3000ms for manual entry
@@ -736,7 +793,8 @@ class EOLTesterGUI:
                     if self.plc_client:
                         result = self.plc_client.read_holding_registers(
                             address=register_address,
-                            count=1
+                            count=1,
+                            unit=self.plc_station_id
                         )
                         
                         if not result.isError():
@@ -780,7 +838,8 @@ class EOLTesterGUI:
             register_value = 1 if value else 0
             result = self.plc_client.write_register(
                 address=register_address,
-                value=register_value
+                value=register_value,
+                unit=self.plc_station_id
             )
             
             if not result.isError():
@@ -3610,8 +3669,8 @@ class EOLTesterGUI:
             print(f"Error validating employee code: {e}")
             messagebox.showerror("Error", f"Error reading employee codes: {e}")
             # Reset validation flags on error
-            self.current_employee_id = None
-            self.employee_validation_complete = False
+                self.current_employee_id = None
+                self.employee_validation_complete = False
             return
 
     def process_alc_code_cs_style(self, alc_code):
@@ -5031,7 +5090,7 @@ class EOLTesterGUI:
                     else:
                         print(f"✅ Reset register D{reg_addr} to 0")
                         
-            except Exception as e:
+                        except Exception as e:
                 print(f"Error resetting holding registers: {e}")
             
             # STEP 4: Wait briefly for PLC to process reset commands
@@ -5324,7 +5383,7 @@ class EOLTesterGUI:
                         
                         print(f"🎮 MANUAL: Moving to step {self.current_process_step}")
             
-        except Exception as e:
+                        except Exception as e:
             print(f"Error in manual process control: {e}")
             
     def monitor_test_completion(self):
@@ -5439,7 +5498,7 @@ class EOLTesterGUI:
                 print("🛑 PLC went LOW or testing stopped - ending automated cycle")
                 self.continuous_testing_active = False
                 
-        except Exception as e:
+                                except Exception as e:
             print(f"Error handling test completion: {e}")
             traceback.print_exc()
 
@@ -5772,14 +5831,14 @@ class EOLTesterGUI:
             print("STEP 5: Resetting for next cycle...")
             self.safe_update_message("Resetting for next cycle...", "blue")
                 
-            # Reset everything for next cycle
-            self.reset_for_next_cycle()
-            
-            # Restart monitoring from index 0
-            self.status_monitoring_active = True
+                # Reset everything for next cycle
+                self.reset_for_next_cycle()
+                
+                # Restart monitoring from index 0
+                self.status_monitoring_active = True
             # PLC monitoring removed
                 
-            print("=== CYCLE RESET COMPLETE - READY FOR NEXT TEST ===")
+                print("=== CYCLE RESET COMPLETE - READY FOR NEXT TEST ===")
                 
         except Exception as e:
             print(f"Error in reset: {e}")
@@ -6627,7 +6686,7 @@ class EOLTesterGUI:
         """Read a range of hold registers (PLC functionality removed)"""
         try:
             print("PLC functionality removed - register reading not available")
-            return None
+                return None
                 
         except Exception as e:
             print(f"Error reading hold registers: {e}")

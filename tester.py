@@ -58,7 +58,7 @@ def read_plc_data():
         d_response = client.read_holding_registers(
             address=100,
             count=5,
-            device_id=slave_id
+            slave=slave_id
         )
         d_values = d_response.registers if not getattr(d_response, 'isError', lambda: True)() else "Error"
 
@@ -66,7 +66,7 @@ def read_plc_data():
         m_response = client.read_coils(
             address=10,
             count=5,
-            device_id=slave_id
+            slave=slave_id
         )
         m_values = m_response.bits if not getattr(m_response, 'isError', lambda: True)() else "Error"
 
@@ -74,7 +74,7 @@ def read_plc_data():
         x_response = client.read_discrete_inputs(
             address=5,
             count=5,
-            device_id=slave_id
+            slave=slave_id
         )
         x_values = x_response.bits if not getattr(x_response, 'isError', lambda: True)() else "Error"
 
@@ -82,7 +82,7 @@ def read_plc_data():
         w_response = client.read_input_registers(
             address=20,
             count=5,
-            device_id=slave_id
+            slave=slave_id
         )
         w_values = w_response.registers if not getattr(w_response, 'isError', lambda: True)() else "Error"
 

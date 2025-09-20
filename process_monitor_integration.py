@@ -447,3 +447,4 @@ def setup_process_monitoring(main_app_instance, config_file: str = None) -> Proc
     except Exception as e:
         print(f"❌ Error setting up process monitoring: {e}")
         return None
+

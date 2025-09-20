@@ -143,3 +143,4 @@ if __name__ == "__main__":
         print("❌ COM5 connection test FAILED")
         print("💡 Try closing other applications using COM5")
         print("💡 Check device manager for COM port configuration")
+
