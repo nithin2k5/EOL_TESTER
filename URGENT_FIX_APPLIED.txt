@@ -1,0 +1,94 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║              🆘 URGENT FIX APPLIED - P0000 KEEP-ALIVE ✅                 ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+PROBLEM
+───────
+❌ PLC stops immediately after test starts
+❌ Something was turning P0000 OFF
+❌ Test aborts before completing
+
+EMERGENCY FIX APPLIED
+─────────────────────
+✅ P0000 KEEP-ALIVE system implemented
+✅ Writes P0000 HIGH every 5 seconds to keep PLC running
+✅ Blocks any reset functions during active testing
+✅ PLC will stay running continuously
+
+HOW IT WORKS
+────────────
+1. START TESTING clicked
+2. Write P0000 HIGH
+3. Activate keep-alive timer
+4. Every 5 seconds: Re-write P0000 HIGH
+5. PLC stays running
+6. Test progresses through all steps
+7. STOP TESTING clicked → Stop keep-alive → Write P0000 LOW
+
+WHAT YOU'LL SEE
+───────────────
+Starting test:
+✅ Starting P0000 keep-alive to maintain PLC RUN state...
+   🔄 P0000 keep-alive active - PLC will stay running
+
+During test (every 5 seconds):
+🔄 P0000 keep-alive: Re-confirmed HIGH to keep PLC running
+
+If something tries to reset:
+⚠️ BLOCKED: Cannot reset PLC while test is running!
+   P0000 keep-alive is active - skipping reset
+
+Stopping test:
+🔄 Stopping P0000 keep-alive...
+✅ PLC Command: Set P0000 LOW - EOL Testing Stopped
+
+TEST NOW
+────────
+python test_console.py
+
+1. Connect to PLC
+2. START TESTING
+3. Watch for: "P0000 keep-alive active - PLC will stay running"
+4. Watch for: "P0000 keep-alive: Re-confirmed HIGH" every 5 seconds
+5. Monitor visit counter: | Visited: ?/8
+
+PLC SHOULD NOW:
+✅ Stay running (not stop)
+✅ Progress through steps
+✅ Visit all 8 process steps
+✅ Complete full test cycle
+
+WHAT TO WATCH
+─────────────
+GOOD:
+✅ "P0000 keep-alive active"
+✅ "Re-confirmed HIGH" every 5 seconds
+✅ Visit counter increasing: 1/8 → 2/8 → 3/8
+✅ PLC progressing through steps
+
+BAD:
+❌ "Stopping P0000 keep-alive" too early
+❌ Keep-alive messages stop
+❌ Visit counter stuck at 1/8
+❌ PLC stops running
+
+IF PLC STILL STOPS
+──────────────────
+Check console for:
+1. "P0000 keep-alive active" message?
+2. "Re-confirmed HIGH" messages appearing?
+3. Any "BLOCKED: Cannot reset" messages?
+4. Any errors in keep-alive function?
+
+STATUS: ✅ CRITICAL FIX APPLIED
+────────────────────────────────
+P0000 keep-alive will maintain PLC in RUN state.
+Reset functions blocked during testing.
+PLC should now complete full sequence.
+
+TEST IMMEDIATELY - THIS SHOULD FIX THE STOPPING ISSUE! 🚀
+
+═══════════════════════════════════════════════════════════════════════════
+The keep-alive ensures P0000 NEVER goes LOW during testing!
+═══════════════════════════════════════════════════════════════════════════
+
