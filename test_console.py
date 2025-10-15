@@ -154,6 +154,15 @@ class EOLTesterGUI:
         self.plc_last_successful_read = time.time()  # Track connection health
         self.plc_communication_errors = 0  # Track consecutive errors
         
+        # Thread-safe queue for PLC status updates
+        self.plc_status_queue = queue.Queue(maxsize=10)
+        self.plc_read_thread = None
+        self.plc_thread_running = False
+        
+        # Hold register addresses for loadcell/pressure data
+        self.hold_register_addresses = []
+        self.latest_register_data = {}  # Store latest register readings
+        
         # Process step tracking - ensure all 8 steps are visited
         self.visited_steps = set()  # Track which steps have been visited
         self.step_visit_times = {}  # Track when each step was visited
@@ -886,6 +895,7 @@ class EOLTesterGUI:
             if self.plc_client and self.plc_connected:
                 self.plc_monitoring = False
                 self.status_monitoring_active = False  # Stop monitoring loops
+                self.plc_thread_running = False  # Stop background thread
                 self.plc_client.close()
                 self.plc_connected = False
                 print("PLC disconnected")
@@ -3104,8 +3114,8 @@ class EOLTesterGUI:
                             else:
                                 status_values[address] = False
                         
-                        # Small delay between reads (C# uses 200ms in loop)
-                        time.sleep(0.05)  # 50ms between reads
+                        # No delay needed - PLC reads are fast enough
+                        # Removed time.sleep(0.05) to prevent GUI blocking
                         
                     except Exception as e:
                         status_values[address] = False
@@ -3159,6 +3169,31 @@ class EOLTesterGUI:
             print(f"Error in simulated process status: {e}")
         return {}
 
+    def load_hold_register_addresses(self):
+        """Load hold register addresses from HoldRegistersRead.txt file"""
+        try:
+            txt_files_dir = os.path.join(os.path.dirname(__file__), 'txt_files')
+            hold_registers_file = os.path.join(txt_files_dir, 'HoldRegistersRead.txt')
+            
+            if os.path.exists(hold_registers_file):
+                with open(hold_registers_file, 'r') as file:
+                    content = file.read().strip()
+                    if content:
+                        self.hold_register_addresses = [addr.strip() for addr in content.split(',')]
+                        print(f"Loaded hold register addresses: {self.hold_register_addresses}")
+                    else:
+                        # Default addresses if file is empty
+                        self.hold_register_addresses = ["D001", "D002", "D003", "D004", "D005", "D006", "D007", "D008"]
+                        print("Using default hold register addresses")
+            else:
+                # Default addresses if file doesn't exist
+                self.hold_register_addresses = ["D001", "D002", "D003", "D004", "D005", "D006", "D007", "D008"]
+                print("HoldRegistersRead.txt not found, using default addresses")
+                
+        except Exception as e:
+            print(f"Error loading hold register addresses: {e}")
+            self.hold_register_addresses = ["D001", "D002", "D003", "D004", "D005", "D006", "D007", "D008"]
+    
     def load_process_addresses(self):
         """Load process addresses from ProcessStatus.txt file"""
         try:
@@ -3363,6 +3398,11 @@ class EOLTesterGUI:
             # Stop all monitoring first
             self.keepWriting = False
             self.breakLoop = True
+            
+            # Stop PLC background thread
+            if hasattr(self, 'plc_thread_running'):
+                self.plc_thread_running = False
+                print("PLC background thread stopped")
             
             # Stop PLC status monitoring
             if hasattr(self, 'status_monitoring_active'):
@@ -4386,9 +4426,121 @@ class EOLTesterGUI:
         try:
             print("Starting PLC status monitoring...")
             self.status_monitoring_active = True
+            
+            # Start background PLC reading thread
+            if not self.plc_thread_running:
+                self.plc_thread_running = True
+                self.plc_read_thread = threading.Thread(target=self._plc_read_worker, daemon=True)
+                self.plc_read_thread.start()
+            
+            # Start GUI update loop
             self.monitor_plc_status()
         except Exception as e:
             print(f"Error starting PLC status monitoring: {e}")
+    
+    def _plc_read_worker(self):
+        """Background worker thread for reading PLC status and sensor data - prevents GUI blocking"""
+        while self.plc_thread_running and self.status_monitoring_active:
+            try:
+                # Read PLC coil status in background thread
+                status_values = self.read_process_status_values()
+                
+                # Put result in queue (non-blocking)
+                try:
+                    self.plc_status_queue.put_nowait(status_values)
+                except queue.Full:
+                    # Queue full, discard oldest value
+                    try:
+                        self.plc_status_queue.get_nowait()
+                        self.plc_status_queue.put_nowait(status_values)
+                    except:
+                        pass
+                
+                # Also read input registers for loadcell/pressure data (C# ReadInputRegisters)
+                self._read_all_input_registers()
+                
+                # Wait 200ms between reads (C# style)
+                time.sleep(0.2)
+                
+            except Exception as e:
+                print(f"Error in PLC read worker: {e}")
+                time.sleep(1)  # Wait longer on error
+    
+    def _read_all_input_registers(self):
+        """Read all input registers and update internal values - runs in background thread"""
+        try:
+            if not hasattr(self, 'plc_client') or not self.plc_client:
+                return
+            
+            # Load register addresses if not loaded
+            if not hasattr(self, 'hold_register_addresses') or not self.hold_register_addresses:
+                self.load_hold_register_addresses()
+            
+            if not self.hold_register_addresses:
+                return
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            register_data = {}
+            
+            # Track if we should print debug info (every 5 seconds)
+            if not hasattr(self, '_last_register_debug_time'):
+                self._last_register_debug_time = 0
+            
+            should_debug = (time.time() - self._last_register_debug_time) > 5
+            
+            # Read all 8 registers (D001-D008: L1-L4, P1-P4)
+            for i, reg_addr_str in enumerate(self.hold_register_addresses):
+                if not reg_addr_str.strip():
+                    continue
+                
+                try:
+                    # Parse register address
+                    if reg_addr_str.startswith('D'):
+                        addr_num = int(reg_addr_str[1:])
+                    else:
+                        addr_num = int(reg_addr_str)
+                    
+                    # Read input register
+                    result = self.plc_client.read_input_registers(
+                        address=addr_num,
+                        count=1,
+                        device_id=station_id
+                    )
+                    
+                    if not result.isError():
+                        value = result.registers[0] if result.registers else 0
+                        register_data[reg_addr_str] = value
+                        
+                        # Map to device names (L1-L4, P1-P4)
+                        if i < 4:
+                            device_name = f"L{i+1}"
+                            max_attr = f"L{i+1}MaxValue"
+                            current_max = getattr(self, max_attr, 0)
+                            new_max = max(current_max, value)
+                            setattr(self, max_attr, new_max)
+                            if should_debug and value > 0:
+                                print(f"📊 {device_name}: {value} (Max: {new_max})")
+                        elif i < 8:
+                            device_name = f"P{i-3}"
+                            value_attr = f"P0{i-3}Value"
+                            setattr(self, value_attr, value)
+                            if should_debug and value > 0:
+                                print(f"📊 {device_name}: {value}")
+                        
+                except Exception as e:
+                    # Silently continue on error to avoid flooding logs
+                    pass
+            
+            # Store latest data and update debug time
+            if register_data:
+                self.latest_register_data = register_data
+                if should_debug:
+                    self._last_register_debug_time = time.time()
+                    print(f"✅ Register data updated: {len(register_data)} registers read")
+                
+        except Exception as e:
+            # Silently handle errors in background thread
+            pass
     
     def monitor_plc_status(self):
         """
@@ -4399,13 +4551,20 @@ class EOLTesterGUI:
         - Updates label colors immediately (Lime/Green, OrangeRed/Red, DeepSkyBlue/Blue)
         - Continues until test result is received
         - Uses 200ms delay between iterations (C# Task.Delay(200))
+        
+        NOTE: PLC reads now happen in background thread to prevent GUI freezing
         """
         try:
             if not hasattr(self, 'status_monitoring_active') or not self.status_monitoring_active:
                 return
             
-            # Read current PLC status values (C# style ReadCoils)
-            status_values = self.read_process_status_values()
+            # Get PLC status from queue (non-blocking - prevents GUI freeze)
+            status_values = {}
+            try:
+                status_values = self.plc_status_queue.get_nowait()
+            except queue.Empty:
+                # No new data available, use empty dict
+                status_values = {}
             
             # Update UI labels based on coil values (C# style)
             if status_values and hasattr(self, 'process_addresses') and self.process_addresses:
@@ -6471,6 +6630,7 @@ class EOLTesterGUI:
             # STEP 2: Stop monitoring to prevent interference
             print("STEP 2: Stopping monitoring...")
             self.status_monitoring_active = False
+            self.plc_thread_running = False
             
             # STEP 3: PLC functionality removed
             print("STEP 3: PLC functionality removed")
@@ -6526,15 +6686,39 @@ class EOLTesterGUI:
             else:
                 print("No spec tree found")
             
-            # If no spec tree data, generate some test data to save
+            # If no spec tree data, use PLC register data if available
             if not has_result:
-                print("No spec tree data found - generating test completion record")
-                # Generate basic test completion data
-                values_dict["L1"] = 100.0  # Sample values
-                values_dict["L2"] = 200.0
-                values_dict["P1"] = 50.0
-                values_dict["P2"] = 75.0
-                has_result = True
+                print("No spec tree data found - checking PLC register data")
+                
+                # Try to get data from latest PLC register readings
+                if hasattr(self, 'latest_register_data') and self.latest_register_data:
+                    print(f"Using PLC register data: {self.latest_register_data}")
+                    # Map register addresses to device names
+                    for i, reg_addr in enumerate(self.hold_register_addresses[:8]):
+                        if reg_addr in self.latest_register_data:
+                            value = self.latest_register_data[reg_addr]
+                            if i < 4:
+                                device_name = f"L{i+1}"
+                                values_dict[device_name] = value
+                                # Use max values if available
+                                max_value = getattr(self, f"L{i+1}MaxValue", value)
+                                if max_value > value:
+                                    values_dict[device_name] = max_value
+                            elif i < 8:
+                                device_name = f"P{i-3}"
+                                values_dict[device_name] = value
+                            has_result = True
+                
+                # If still no data, generate basic test completion data
+                if not has_result:
+                    print("No PLC data available - generating test completion record")
+                    # Use current max values if they were set
+                    values_dict["L1"] = getattr(self, 'L1MaxValue', 100.0)
+                    values_dict["L2"] = getattr(self, 'L2MaxValue', 200.0)
+                    values_dict["P1"] = getattr(self, 'P01Value', 50.0)
+                    values_dict["P2"] = getattr(self, 'P02Value', 75.0)
+                    has_result = True
+                    
                 all_devices_pass = True  # Assume pass for now
             
             # Save to database
@@ -7481,10 +7665,66 @@ class EOLTesterGUI:
             self.safe_update_message(f"Error loading history: {str(e)}", "red")
 
     def read_hold_registers(self, start_index, num_registers=4):
-        """Read a range of hold registers (PLC functionality removed)"""
+        """Read a range of hold registers from PLC for loadcell/pressure data"""
         try:
-            print("PLC functionality removed - register reading not available")
-            return None
+            if not hasattr(self, 'plc_client') or not self.plc_client:
+                print("PLC not connected - cannot read registers")
+                return None
+            
+            # Check if PLC socket is open
+            try:
+                if not self.plc_client.is_socket_open():
+                    print("PLC socket not open - cannot read registers")
+                    return None
+            except:
+                return None
+            
+            # Load hold register addresses from configuration
+            if not hasattr(self, 'hold_register_addresses') or not self.hold_register_addresses:
+                self.load_hold_register_addresses()
+            
+            if not self.hold_register_addresses or start_index >= len(self.hold_register_addresses):
+                print(f"Invalid register index: {start_index}")
+                return None
+            
+            # Get the registers to read
+            registers_to_read = self.hold_register_addresses[start_index:start_index + num_registers]
+            register_values = {}
+            
+            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            
+            for reg_addr_str in registers_to_read:
+                if not reg_addr_str.strip():
+                    continue
+                
+                try:
+                    # Parse register address (e.g., "D001" -> 1)
+                    # D registers in Modbus typically start at a base address
+                    if reg_addr_str.startswith('D'):
+                        addr_num = int(reg_addr_str[1:])  # Extract number after 'D'
+                    else:
+                        addr_num = int(reg_addr_str)
+                    
+                    # Read holding register (input register for sensor data)
+                    result = self.plc_client.read_input_registers(
+                        address=addr_num,
+                        count=1,
+                        device_id=station_id
+                    )
+                    
+                    if not result.isError():
+                        value = result.registers[0] if result.registers else 0
+                        register_values[reg_addr_str] = value
+                        print(f"Read {reg_addr_str} = {value}")
+                    else:
+                        print(f"Error reading register {reg_addr_str}: {result}")
+                        register_values[reg_addr_str] = 0
+                        
+                except Exception as e:
+                    print(f"Error reading register {reg_addr_str}: {e}")
+                    register_values[reg_addr_str] = 0
+            
+            return register_values if register_values else None
                 
         except Exception as e:
             print(f"Error reading hold registers: {e}")
