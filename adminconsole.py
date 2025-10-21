@@ -13,7 +13,6 @@ from dotenv import find_dotenv, set_key
 class AdminConsole:
     def __init__(self, root):
         self.root = root
-        self.root.title("ADMIN CONSOLE")
         
         # Initialize backup paths and machine ID from environment variables
         self.backup_paths = {
@@ -22,25 +21,25 @@ class AdminConsole:
         }
         self.machine_id = os.getenv('MACHINE_ID', '')  # Get machine ID from env
         
+        # Set title with machine ID
+        title = "ADMIN CONSOLE"
+        if self.machine_id:
+            title += f" - Machine ID: {self.machine_id}"
+        self.root.title(title)
+        
         # Database configuration
         self.db_config = {
             'host': 'localhost',
             'user': 'root',
-            'password': 'nk446420',
+            'password': '12345',
             'database': 'EOL'
         }
         
         # Initialize database
         self.init_database()
         
-        # Make it full screen
-        self.root.attributes('-fullscreen', True)  # Changed to true fullscreen
-        
         # Configure the main background color
         self.root.configure(bg='pink')
-        
-        # Add escape key binding to exit fullscreen
-        self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
         
         # Create and setup the UI
         self.setup_ui()
@@ -134,8 +133,11 @@ class AdminConsole:
             values = {}
             for field, entry in self.entries.items():
                 value = entry.get().strip()
-                if value == self.get_placeholder(field):
-                    messagebox.showwarning("Warning", f"Please enter {field.lower().strip(':')}")
+                placeholder = self.get_placeholder(field)
+                # Check if value is empty or is placeholder text
+                if not value or value == placeholder:
+                    messagebox.showwarning("Warning", f"Please enter {field.lower().replace(':', '').strip()}")
+                    entry.focus_set()  # Set focus to the empty field
                     return
                 values[field] = value
             
@@ -205,7 +207,7 @@ class AdminConsole:
         for field, entry in self.entries.items():
             entry.delete(0, tk.END)
             entry.insert(0, default_values.get(field, ""))
-            entry.config(fg='gray')
+            entry.config(fg='#999999')  # Gray color for placeholder
             
             # Rebind placeholder events
             placeholder = default_values.get(field, "")
@@ -228,7 +230,7 @@ class AdminConsole:
         """Handle entry field focus out"""
         if not entry.get():
             entry.insert(0, placeholder)
-            entry.config(fg='gray')
+            entry.config(fg='#999999')  # Gray color for placeholder
 
     def delete_record(self):
         """Delete selected employee record"""
@@ -252,6 +254,7 @@ class AdminConsole:
                 
                 messagebox.showinfo("Success", "Record deleted successfully!")
                 self.load_records()
+                self.clear_entries()  # Clear entries after deletion
                 
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Failed to delete record: {err}")
@@ -264,7 +267,18 @@ class AdminConsole:
             return
         
         try:
-            values = {field: entry.get().strip() for field, entry in self.entries.items()}
+            # Get and validate values from entries
+            values = {}
+            for field, entry in self.entries.items():
+                value = entry.get().strip()
+                placeholder = self.get_placeholder(field)
+                # Check if value is empty or is placeholder text
+                if not value or value == placeholder:
+                    messagebox.showwarning("Warning", f"Please enter {field.lower().replace(':', '').strip()}")
+                    entry.focus_set()
+                    return
+                values[field] = value
+            
             item = self.tree.item(selected[0])
             emp_number = item['values'][2]  # Original employee number
             
@@ -310,17 +324,50 @@ class AdminConsole:
             messagebox.showwarning("Warning", "Please select a record to edit!")
             return
         
-        # Get values from selected item
-        item = self.tree.item(selected[0])
-        values = item['values']
-        
-        # Clear and populate entry fields
-        self.clear_entries()
-        fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "DESIGNATION :", 
-                 "DEPARTMENT :", "MOBILE NUMBER :"]
-        for field, value in zip(fields, values[1:]):  # Skip the NO column
-            if field in self.entries:
-                self.entries[field].insert(0, value)
+        try:
+            # Get values from selected item
+            item = self.tree.item(selected[0])
+            values = item['values']
+            emp_number = values[2]  # Employee number
+            
+            # Fetch full record including password from database
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD, 
+                       DESIGNATION, DEPARTMENT, MOBILE_NUMBER
+                FROM EMPLOYEE_INFO
+                WHERE EMPLOYEE_NUMBER = %s
+            """, (emp_number,))
+            
+            record = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not record:
+                messagebox.showerror("Error", "Could not load employee record")
+                return
+            
+            # Clear all entries first
+            for entry in self.entries.values():
+                entry.delete(0, tk.END)
+                entry.config(fg='black')
+                # Unbind placeholder events
+                entry.unbind('<FocusIn>')
+                entry.unbind('<FocusOut>')
+            
+            # Populate entry fields with actual data
+            fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "PASSWORD :",
+                     "DESIGNATION :", "DEPARTMENT :", "MOBILE NUMBER :"]
+            
+            for field, value in zip(fields, record):
+                if field in self.entries:
+                    self.entries[field].delete(0, tk.END)
+                    self.entries[field].insert(0, value)
+                    self.entries[field].config(fg='black')
+                    
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to load record: {err}")
 
     def setup_ui(self):
         # Load icons with fallback text
@@ -380,6 +427,15 @@ class AdminConsole:
         entries_frame.pack(anchor='w', padx=20)
 
         self.entries = {}
+        placeholders = {
+            "EMPLOYEE FULL NAME :": "Enter Full Name",
+            "EMPLOYEE NUMBER :": "Enter Employee Number",
+            "PASSWORD :": "Enter Password",
+            "DESIGNATION :": "Enter Designation",
+            "DEPARTMENT :": "Enter Department",
+            "MOBILE NUMBER :": "Enter Mobile Number"
+        }
+        
         for i, field in enumerate(fields):
             # Create frame for each row
             row_frame = tk.Frame(entries_frame, bg='white')
@@ -402,13 +458,24 @@ class AdminConsole:
                 row_frame,
                 font=('Arial', 10),
                 width=40,
-                bg='black',
-                fg='white',
+                bg='white',
+                fg='#999999',  # Start with gray placeholder color
                 relief='solid',
-                bd=1
+                bd=1,
+                insertbackground='black'
             )
             entry.pack(side=tk.LEFT, padx=5)
             self.entries[field] = entry
+            
+            # Insert placeholder text
+            placeholder = placeholders.get(field, "")
+            entry.insert(0, placeholder)
+            
+            # Bind focus events for placeholder behavior
+            entry.bind('<FocusIn>', lambda e, entry=entry, placeholder=placeholder: 
+                self.on_entry_focus_in(entry, placeholder))
+            entry.bind('<FocusOut>', lambda e, entry=entry, placeholder=placeholder: 
+                self.on_entry_focus_out(entry, placeholder))
 
         # Add Backup Path Selection frames after Machine ID
         self.create_backup_path_section(entries_frame)
@@ -547,24 +614,48 @@ class AdminConsole:
         """Handle treeview selection with improved entry handling"""
         selected = self.tree.selection()
         if selected:
-            item = self.tree.item(selected[0])
-            values = item['values']
-            
-            # Clear entries without setting placeholders
-            for entry in self.entries.values():
-                entry.delete(0, tk.END)
-                entry.config(fg='black')  # Set text color to black for actual data
-            
-            # Populate entries with selected record data
-            fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "DESIGNATION :", 
-                     "DEPARTMENT :", "MOBILE NUMBER :"]
-            for field, value in zip(fields, values[1:6]):  # Skip NO and STATUS
-                if field in self.entries:
-                    self.entries[field].insert(0, value)
-                    self.entries[field].config(fg='black')  # Ensure text is black
+            try:
+                item = self.tree.item(selected[0])
+                values = item['values']
+                emp_number = values[2]  # Employee number
+                
+                # Fetch full record including password from database
+                conn = mysql.connector.connect(**self.db_config)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD, 
+                           DESIGNATION, DEPARTMENT, MOBILE_NUMBER
+                    FROM EMPLOYEE_INFO
+                    WHERE EMPLOYEE_NUMBER = %s
+                """, (emp_number,))
+                
+                record = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                
+                if not record:
+                    return
+                
+                # Clear entries without setting placeholders
+                for entry in self.entries.values():
+                    entry.delete(0, tk.END)
+                    entry.config(fg='black')  # Set text color to black for actual data
                     # Unbind placeholder events temporarily
-                    self.entries[field].unbind('<FocusIn>')
-                    self.entries[field].unbind('<FocusOut>')
+                    entry.unbind('<FocusIn>')
+                    entry.unbind('<FocusOut>')
+                
+                # Populate entries with selected record data (including password)
+                fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "PASSWORD :",
+                         "DESIGNATION :", "DEPARTMENT :", "MOBILE NUMBER :"]
+                
+                for field, value in zip(fields, record):
+                    if field in self.entries:
+                        self.entries[field].delete(0, tk.END)
+                        self.entries[field].insert(0, value)
+                        self.entries[field].config(fg='black')
+                        
+            except mysql.connector.Error as err:
+                print(f"Error loading record: {err}")
 
     def add_image_to_frame(self, image_path):
         try:
@@ -648,14 +739,18 @@ class AdminConsole:
         label.pack(side=tk.LEFT, padx=5)
         
         # Text entry for primary path
-        self.primary_path_var = tk.StringVar(value=self.backup_paths.get('primary', 'Click to select primary backup path...'))
+        primary_default = self.backup_paths.get('primary', '')
+        if not primary_default or primary_default == '':
+            primary_default = 'Click to select primary backup path...'
+        self.primary_path_var = tk.StringVar(value=primary_default)
         self.primary_path_entry = tk.Entry(
             row_frame,
             textvariable=self.primary_path_var,
             width=40,
             bg='#f0f0f0',  # Light gray background
-            fg='#333333',  # Dark text color
-            font=('Arial', 9)
+            fg='#666666' if primary_default.startswith('Click') else '#000000',  # Gray for placeholder, black for path
+            font=('Arial', 9),
+            state='readonly'  # Make read-only, only clickable
         )
         self.primary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
@@ -678,14 +773,18 @@ class AdminConsole:
         label.pack(side=tk.LEFT, padx=5)
         
         # Text entry for secondary path
-        self.secondary_path_var = tk.StringVar(value=self.backup_paths.get('secondary', 'Click to select secondary backup path...'))
+        secondary_default = self.backup_paths.get('secondary', '')
+        if not secondary_default or secondary_default == '':
+            secondary_default = 'Click to select secondary backup path...'
+        self.secondary_path_var = tk.StringVar(value=secondary_default)
         self.secondary_path_entry = tk.Entry(
             row_frame,
             textvariable=self.secondary_path_var,
             width=40,
             bg='#f0f0f0',  # Light gray background
-            fg='#333333',  # Dark text color
-            font=('Arial', 9)
+            fg='#666666' if secondary_default.startswith('Click') else '#000000',  # Gray for placeholder, black for path
+            font=('Arial', 9),
+            state='readonly'  # Make read-only, only clickable
         )
         self.secondary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
@@ -725,8 +824,14 @@ class AdminConsole:
     def browse_backup_path(self, path_type):
         """Open folder selection dialog and update backup path"""
         try:
+            # Get current path or default to home directory
+            current_path = self.backup_paths.get(path_type, '')
+            if not current_path or current_path.startswith('Click to select'):
+                initial_dir = os.path.expanduser('~')
+            else:
+                initial_dir = current_path
+                
             # Open folder selection dialog
-            initial_dir = self.backup_paths.get(path_type, os.path.expanduser('~'))
             folder_path = filedialog.askdirectory(
                 title=f"Select {path_type.title()} Backup Location",
                 initialdir=initial_dir
@@ -735,17 +840,24 @@ class AdminConsole:
             if folder_path:
                 # Update the path in the interface and storage
                 if path_type == 'primary':
+                    self.primary_path_entry.config(state='normal')  # Temporarily enable
                     self.primary_path_var.set(folder_path)
-                    self.primary_path_entry.config(fg='#000000')  # Black text for selected path
+                    self.primary_path_entry.config(fg='#000000', state='readonly')  # Black text for selected path
                 else:
+                    self.secondary_path_entry.config(state='normal')  # Temporarily enable
                     self.secondary_path_var.set(folder_path)
-                    self.secondary_path_entry.config(fg='#000000')  # Black text for selected path
+                    self.secondary_path_entry.config(fg='#000000', state='readonly')  # Black text for selected path
                 
                 # Store in backup_paths dictionary
                 self.backup_paths[path_type] = folder_path
                 
-                # Save to environment variable
-                os.environ[f'{path_type.upper()}_BACKUP_PATH'] = folder_path
+                # Save to .env file
+                env_path = find_dotenv()
+                if not env_path:
+                    env_path = '.env'
+                set_key(env_path, f'{path_type.upper()}_BACKUP_PATH', folder_path)
+                
+                messagebox.showinfo("Success", f"{path_type.title()} backup path set successfully!")
                 
         except Exception as e:
             messagebox.showerror(
@@ -760,8 +872,22 @@ class AdminConsole:
             primary_path = self.primary_path_var.get()
             secondary_path = self.secondary_path_var.get()
             
+            # Check for placeholder text or empty paths
+            if primary_path.startswith('Click to select') or not primary_path.strip():
+                primary_path = None
+            if secondary_path.startswith('Click to select') or not secondary_path.strip():
+                secondary_path = None
+            
             if not primary_path and not secondary_path:
-                messagebox.showerror("Error", "Please select at least one backup location!")
+                messagebox.showerror("Error", "Please select at least one valid backup location!")
+                return
+            
+            # Validate that paths exist
+            if primary_path and not os.path.exists(primary_path):
+                messagebox.showerror("Error", f"Primary backup path does not exist: {primary_path}")
+                return
+            if secondary_path and not os.path.exists(secondary_path):
+                messagebox.showerror("Error", f"Secondary backup path does not exist: {secondary_path}")
                 return
             
             # Calculate date range
@@ -890,6 +1016,12 @@ class AdminConsole:
             
             messagebox.showinfo("Success", f"Machine ID saved: {machine_id}")
             
+            # Update window title with new machine ID
+            title = "ADMIN CONSOLE"
+            if self.machine_id:
+                title += f" - Machine ID: {self.machine_id}"
+            self.root.title(title)
+            
             # Refresh the display
             self.load_records()
             
@@ -900,15 +1032,12 @@ class AdminConsole:
         """Cleanup function called when closing the application"""
         try:
             # Save backup paths and machine ID to environment variables
-            if self.backup_paths['primary']:
+            if self.backup_paths.get('primary') and not self.backup_paths['primary'].startswith('Click to select'):
                 os.environ['PRIMARY_BACKUP_PATH'] = self.backup_paths['primary']
-            if self.backup_paths['secondary']:
+            if self.backup_paths.get('secondary') and not self.backup_paths['secondary'].startswith('Click to select'):
                 os.environ['SECONDARY_BACKUP_PATH'] = self.backup_paths['secondary']
             if self.machine_id_var.get().strip():
                 os.environ['MACHINE_ID'] = self.machine_id_var.get().strip()
-            
-            # Create final backup before closing
-            self.create_backup()
             
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")

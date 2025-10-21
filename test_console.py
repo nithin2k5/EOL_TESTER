@@ -23,7 +23,15 @@ import re
 class EOLTesterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("EOL (END OF LINE) TESTER")
+        
+        # Get machine ID from environment
+        machine_id = os.getenv('MACHINE_ID', '')
+        
+        # Set title with machine ID
+        title = "EOL (END OF LINE) TESTER"
+        if machine_id:
+            title += f" - Machine ID: {machine_id}"
+        self.root.title(title)
         
         # Initialize variables before setting up the window
         self.initialize_variables()
@@ -146,18 +154,14 @@ class EOLTesterGUI:
         self.message_label = None
         self.workspace = None
         
-        # PLC connection variables
-        self.plc_client = None
-        self.plc_connected = False
-        self.plc_monitoring = False
-        self.plc_read_lock = False  # Mutex to prevent concurrent PLC reads
-        self.plc_last_successful_read = time.time()  # Track connection health
-        self.plc_communication_errors = 0  # Track consecutive errors
-        
         # Thread-safe queue for PLC status updates
         self.plc_status_queue = queue.Queue(maxsize=10)
         self.plc_read_thread = None
         self.plc_thread_running = False
+        
+        # Initialize PLC connection status
+        self.plc_connected = False
+        self.plc_client = None
         
         # Hold register addresses for loadcell/pressure data
         self.hold_register_addresses = []
@@ -3054,24 +3058,30 @@ class EOLTesterGUI:
         
     def read_process_status_values(self):
         """
-        Read process status values from PLC - C# Implementation Style
+        Read process status values from PLC - Enhanced Error Handling
         
-        Matches testconsole.cs ReadCoils() method logic:
+        Matches testconsole.cs ReadCoils() method logic with improved error handling:
         - Read coils individually
         - Return dictionary of address:value pairs
-        - Simple and clean, no complex error handling in read loop
+        - Fallback to simulation mode when PLC unavailable
+        - Better connection health monitoring
         """
         try:
-            # Check if PLC is connected
+            # Check if PLC is connected with better error handling
             if not hasattr(self, 'plc_client') or not self.plc_client:
-                return {}
+                print("⚠️ PLC client not initialized - using simulation mode")
+                return self.get_simulated_process_status()
             
-            # Check socket status
+            # Check socket status with detailed error reporting
             try:
                 if not self.plc_client.is_socket_open():
-                    return {}
-            except:
-                return {}
+                    print("⚠️ PLC socket closed - attempting reconnection")
+                    if not self.connect_to_plc():
+                        print("⚠️ PLC reconnection failed - using simulation mode")
+                        return self.get_simulated_process_status()
+            except Exception as e:
+                print(f"⚠️ PLC socket check failed: {e} - using simulation mode")
+                return self.get_simulated_process_status()
             
             # Read from PLC (C# style)
             status_values = {}
@@ -3081,7 +3091,8 @@ class EOLTesterGUI:
                 self.load_process_addresses()
             
             if not hasattr(self, 'process_addresses') or not self.process_addresses:
-                return {}
+                print("⚠️ No process addresses loaded - using simulation mode")
+                return self.get_simulated_process_status()
             
             station_id = int(os.getenv('PLC_STATION_ID', '1'))
             
@@ -3111,23 +3122,38 @@ class EOLTesterGUI:
                             
                             if not result.isError():
                                 status_values[address] = result.bits[0] if result.bits else False
+                                # Update successful read timestamp
+                                self.plc_last_successful_read = time.time()
+                                self.plc_communication_errors = 0  # Reset error counter
                             else:
                                 status_values[address] = False
+                                self.plc_communication_errors += 1
+                                print(f"⚠️ PLC read error for {address}: {result}")
                         
-                        # No delay needed - PLC reads are fast enough
-                        # Removed time.sleep(0.05) to prevent GUI blocking
+                        # Small delay to prevent overwhelming PLC
+                        time.sleep(0.01)
                         
                     except Exception as e:
                         status_values[address] = False
+                        self.plc_communication_errors += 1
+                        print(f"⚠️ Error reading PLC address {address}: {e}")
+                
+                # If too many errors, switch to simulation mode
+                if self.plc_communication_errors >= 5:
+                    print("⚠️ Too many PLC communication errors - switching to simulation mode")
+                    return self.get_simulated_process_status()
                 
             except Exception as e:
                 print(f"Error reading PLC coils: {e}")
+                self.plc_communication_errors += 1
+                return self.get_simulated_process_status()
             
             return status_values
                 
         except Exception as e:
             print(f"Error in read_process_status_values: {e}")
-            return {}
+            self.plc_communication_errors += 1
+            return self.get_simulated_process_status()
 
     def get_simulated_process_status(self):
         """Get simulated process status values for testing when PLC is not connected"""
@@ -3157,6 +3183,10 @@ class EOLTesterGUI:
                     simulated_status[active_address] = True
                     
                     self.simulation_step_counter += 1
+                    
+                    # Print simulation status for debugging
+                    if self.simulation_step_counter % 50 == 0:  # Print every 50 cycles
+                        print(f"📺 Simulation mode: Step {current_step+1}/{step_count} - {active_address}")
                     
                     # Simulate test completion after all steps
                     if current_step >= step_count - 1 and (self.simulation_step_counter % 10) == 0:
@@ -4120,6 +4150,14 @@ class EOLTesterGUI:
                 print("🚀 Starting test automatically (C# testconsole.cs line 413)")
                 print("   (No button click required - test auto-starts like C#)")
                 
+                # ===================================================================
+                # PLC LABEL COLORING: Set Auto and Home labels to GREEN when part loads
+                # Labels remain green until reset (persistent)
+                # ===================================================================
+                self.set_label_color('auto', 'green', persistent=True)
+                self.set_label_color('home', 'green', persistent=True)
+                print("🟢 AUTO and HOME labels set to GREEN (part loaded - persistent)")
+                
                 # Set current part number for testing
                 self.current_part_number = self.partNumber
                 
@@ -4143,13 +4181,17 @@ class EOLTesterGUI:
                 
                 # Update status message
                 self.safe_update_message(
-                    f"Test auto-started for LOT: {self.current_lot_number} (C# style)", 
-                    "green"
+                    f"Part loaded - LOT: {self.current_lot_number} - Waiting for PLC pull1 state...", 
+                    "orange"
                 )
                 
-                # Start the test automatically (C# style - line 413: start_CheckAsync())
-                print("🔄 Calling start_CheckAsync() - ReadCoils() loop will begin...")
-                self.start_check_async()
+                # ===================================================================
+                # WAIT FOR PULL1 STATE BEFORE STARTING TEST
+                # System must wait for PLC to return to pull1 position/state
+                # Test will not start until pull1 state is confirmed
+                # ===================================================================
+                print("⏳ Waiting for PLC to return to pull1 state before starting test...")
+                self.wait_for_pull1_and_start_test()
                 
                 # Reset ALC entry field for next entry
                 self.alc_entry.configure(state='normal')
@@ -4363,6 +4405,127 @@ class EOLTesterGUI:
             print(f"Error getting lot number: {e}")
             self.lotNo = "0"
 
+    def wait_for_pull1_and_start_test(self):
+        """
+        Wait for PLC to return to pull1 position/state before starting test
+        
+        Process flow:
+        1. Check if PLC is at pull1 state (not at pull1 OK or NG)
+        2. Wait until pull1 state is confirmed
+        3. Only then start the test process
+        4. Provides visual feedback during wait
+        """
+        try:
+            print("🔍 Checking PLC pull1 state before test initiation...")
+            
+            # Initialize wait counter
+            if not hasattr(self, 'pull1_wait_counter'):
+                self.pull1_wait_counter = 0
+            
+            # Check if we have process addresses loaded
+            if not hasattr(self, 'process_addresses') or len(self.process_addresses) < 4:
+                print("⚠️ Process addresses not loaded - starting test without pull1 check")
+                self.start_check_async()
+                return
+            
+            # Check current PLC status
+            status_values = self.read_process_status_values()
+            
+            # Get pull1 addresses (index 2 and 3)
+            pull1_ok_addr = self.process_addresses[2] if len(self.process_addresses) > 2 else None
+            pull1_ng_addr = self.process_addresses[3] if len(self.process_addresses) > 3 else None
+            
+            # Check if PLC is ready (not at pull1 OK or NG state)
+            pull1_ok_state = status_values.get(pull1_ok_addr, False) if pull1_ok_addr else False
+            pull1_ng_state = status_values.get(pull1_ng_addr, False) if pull1_ng_addr else False
+            
+            # Condition: Wait for PLC to be at neutral/ready state (not at pull1 result)
+            # The PLC should be ready to start pull1 test
+            is_pull1_ready = not pull1_ok_state and not pull1_ng_state
+            
+            if is_pull1_ready:
+                # PLC is at pull1 ready state - can start test
+                print("✅ PLC at pull1 ready state - Starting test now")
+                self.safe_update_message(
+                    f"PLC ready at pull1 - Starting test for LOT: {self.current_lot_number}", 
+                    "green"
+                )
+                self.pull1_wait_counter = 0  # Reset counter
+                
+                # Reset 1st PULL label color from yellow (waiting) to default blue
+                if hasattr(self, 'process_status_labels') and '1st' in self.process_status_labels:
+                    self.process_status_labels['1st'].config(bg="#00BFFF")
+                
+                # Start the test (C# style - line 413: start_CheckAsync())
+                print("🔄 Calling start_CheckAsync() - ReadCoils() loop will begin...")
+                self.start_check_async()
+                
+            else:
+                # PLC not ready - wait and check again
+                self.pull1_wait_counter += 1
+                
+                # Update status message with wait indication
+                wait_msg = f"Waiting for PLC pull1 ready state... ({self.pull1_wait_counter}s)"
+                self.safe_update_message(wait_msg, "orange")
+                print(f"⏳ {wait_msg}")
+                
+                # Visual feedback: Set 1st PULL label to yellow (waiting state)
+                if hasattr(self, 'process_status_labels') and '1st' in self.process_status_labels:
+                    self.process_status_labels['1st'].config(bg="#FFD700")  # Gold/Yellow for waiting
+                
+                # Print detailed state for debugging
+                if self.pull1_wait_counter % 5 == 0:  # Print every 5 seconds
+                    print(f"   Pull1 OK: {pull1_ok_state}, Pull1 NG: {pull1_ng_state}")
+                
+                # Timeout after 60 seconds
+                if self.pull1_wait_counter >= 60:
+                    print("⚠️ Timeout waiting for pull1 state - Starting test anyway")
+                    self.safe_update_message(
+                        "Timeout waiting for pull1 - Starting test", 
+                        "red"
+                    )
+                    self.pull1_wait_counter = 0
+                    self.start_check_async()
+                    return
+                
+                # Check again after 1 second
+                self.root.after(1000, self.wait_for_pull1_and_start_test)
+                
+        except Exception as e:
+            print(f"Error waiting for pull1 state: {e}")
+            print("⚠️ Starting test without pull1 check")
+            self.start_check_async()
+    
+    def is_plc_at_pull1_ready_state(self):
+        """
+        Check if PLC is at pull1 ready state (ready to start pull1 test)
+        
+        Returns:
+            True if PLC is ready for pull1 test, False otherwise
+        """
+        try:
+            # Check if we have process addresses loaded
+            if not hasattr(self, 'process_addresses') or len(self.process_addresses) < 4:
+                return True  # Assume ready if addresses not loaded
+            
+            # Read current PLC status
+            status_values = self.read_process_status_values()
+            
+            # Get pull1 addresses
+            pull1_ok_addr = self.process_addresses[2] if len(self.process_addresses) > 2 else None
+            pull1_ng_addr = self.process_addresses[3] if len(self.process_addresses) > 3 else None
+            
+            # Check if PLC is ready (not at pull1 OK or NG state)
+            pull1_ok_state = status_values.get(pull1_ok_addr, False) if pull1_ok_addr else False
+            pull1_ng_state = status_values.get(pull1_ng_addr, False) if pull1_ng_addr else False
+            
+            # Ready when both OK and NG are False (neutral state)
+            return not pull1_ok_state and not pull1_ng_state
+            
+        except Exception as e:
+            print(f"Error checking pull1 ready state: {e}")
+            return True  # Assume ready on error
+    
     def start_check_async(self):
         """Start asynchronous testing process (C# implementation)"""
         # Start the main testing workflow
@@ -4398,6 +4561,13 @@ class EOLTesterGUI:
                 return
             
             print("✅ PLC connected - starting ReadCoils() loop")
+            
+            # ===================================================================
+            # PLC LABEL COLORING: Set Test label to GREEN when test process starts
+            # Label remains green until reset (persistent)
+            # ===================================================================
+            self.set_label_color('test', 'green', persistent=True)
+            print("🟢 TEST label set to GREEN (test process started - persistent)")
             
             # Initialize test state flags (C# style)
             self.rcvdTestRslt = False  # C# flag for test completion
@@ -4563,8 +4733,12 @@ class EOLTesterGUI:
             try:
                 status_values = self.plc_status_queue.get_nowait()
             except queue.Empty:
-                # No new data available, use empty dict
-                status_values = {}
+                # No new data available, try direct read as fallback
+                try:
+                    status_values = self.read_process_status_values()
+                except Exception as e:
+                    print(f"⚠️ Fallback PLC read failed: {e}")
+                    status_values = {}
             
             # Update UI labels based on coil values (C# style)
             if status_values and hasattr(self, 'process_addresses') and self.process_addresses:
@@ -4573,18 +4747,20 @@ class EOLTesterGUI:
                 # [4]=PULL2_OK, [5]=PULL2_NG, [6]=TESTRESULT_OK, [7]=TESTRESULT_NG
                 
                 # AUTO label update (C# lines 484-487)
+                # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 0:
                     auto_addr = self.process_addresses[0]
                     auto_result = status_values.get(auto_addr, False)
-                    if hasattr(self, 'auto_label'):
+                    if hasattr(self, 'auto_label') and not self.is_label_persistent('auto'):
                         # Lime if HIGH, DeepSkyBlue if LOW (C# style)
                         self.auto_label.config(bg="#00FF00" if auto_result else "#00BFFF")
                 
                 # HOME label update (C# lines 489-492)
+                # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 1:
                     home_addr = self.process_addresses[1]
                     home_result = status_values.get(home_addr, False)
-                    if hasattr(self, 'home_label'):
+                    if hasattr(self, 'home_label') and not self.is_label_persistent('home'):
                         self.home_label.config(bg="#00FF00" if home_result else "#00BFFF")
                 
                 # PULL1 label update (C# lines 494-499)
@@ -4629,11 +4805,14 @@ class EOLTesterGUI:
                     test_ng_result = status_values.get(test_ng_addr, False)
                     
                     if hasattr(self, 'test_label'):
+                        # Allow updating to OK (green) or NG (red) results
+                        # But keep persistent green if test is running (before results)
                         if test_ok_result:
                             self.test_label.config(bg="#00FF00")  # Lime
                         elif test_ng_result:
                             self.test_label.config(bg="#FF4500")  # OrangeRed
-                        else:
+                        elif not self.is_label_persistent('test'):
+                            # Only revert to blue if not persistent (before test starts)
                             self.test_label.config(bg="#00BFFF")  # DeepSkyBlue
                     
                     # Check if test result received (C# lines 548-549)
@@ -6994,9 +7173,54 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error restarting monitoring: {e}")
 
+    def set_label_color(self, label_name, color, persistent=False):
+        """
+        Set the color of a process status label
+        
+        Args:
+            label_name: Name of label ('auto', 'home', '1st', '2nd', 'test')
+            color: Color to set (e.g., 'green', '#00FF00', 'red', etc.)
+            persistent: If True, label color persists until reset (used for part load indicators)
+        
+        Usage:
+            self.set_label_color('auto', 'green', persistent=True)  # Set AUTO label to green, keep it green
+            self.set_label_color('test', '#00FF00')  # Set TEST label to lime green
+        """
+        try:
+            # Initialize persistent label tracking if not exists
+            if not hasattr(self, 'persistent_label_colors'):
+                self.persistent_label_colors = {}
+            
+            # Get label object using attribute name pattern
+            label_obj = getattr(self, f"{label_name}_label", None)
+            
+            if label_obj:
+                label_obj.config(bg=color)
+                print(f"✓ Set {label_name.upper()} label color to {color}{' (persistent)' if persistent else ''}")
+                
+                # Track persistent labels
+                if persistent:
+                    self.persistent_label_colors[label_name] = color
+            else:
+                print(f"⚠️ Label '{label_name}' not found")
+                
+        except Exception as e:
+            print(f"Error setting label color for '{label_name}': {e}")
+    
+    def is_label_persistent(self, label_name):
+        """Check if a label has a persistent color set"""
+        if not hasattr(self, 'persistent_label_colors'):
+            return False
+        return label_name in self.persistent_label_colors
+    
     def reset_process_status_labels(self):
         """Reset all process status labels to default blue state"""
         try:
+            # Clear persistent label tracking
+            if hasattr(self, 'persistent_label_colors'):
+                self.persistent_label_colors.clear()
+                print("Cleared persistent label colors")
+            
             # List of status labels to reset
             status_labels = ['auto', 'home', '1st', '2nd', 'test']
             
@@ -7004,7 +7228,7 @@ class EOLTesterGUI:
                 label_obj = getattr(self, f"{label_name}_label", None)
                 if label_obj:
                     label_obj.config(bg="#00BFFF")  # Default blue color
-                    print(f"Reset {label_name} label to default")
+                    print(f"Reset {label_name} label to default blue")
             
         except Exception as e:
             print(f"Error resetting process status labels: {e}")

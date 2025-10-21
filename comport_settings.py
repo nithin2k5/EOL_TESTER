@@ -15,21 +15,26 @@ from datetime import datetime
 class ComPortSettings:
     def __init__(self, root):
         self.root = root
-        self.root.title("COM Port Settings")
         
         # Initialize lists and dictionaries at the start
         self.all_comboboxes = []  # Move this to the top
         self.loadcell_ports = {}  # Move this here too
         self.modbus_client = None
         
+        # Get machine ID from environment variable
+        self.machine_id = os.getenv('MACHINE_ID', 'Not Set')
+        
+        # Set title with machine ID
+        title = "COM Port Settings"
+        if self.machine_id and self.machine_id != 'Not Set':
+            title += f" - Machine ID: {self.machine_id}"
+        self.root.title(title)
+        
         # Make it full screen
         self.root.state('zoomed')
         
         # Configure the main background color
         self.root.configure(bg='#f0f0f0')  # Light gray background
-        
-        # Get machine ID from environment variable
-        self.machine_id = os.getenv('MACHINE_ID', 'Not Set')
         
         # Create and setup the UI
         self.setup_ui()
