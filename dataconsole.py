@@ -1,27 +1,32 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 import mysql.connector
 from datetime import datetime
+import csv
+import os
 
 class DataConsole:
-    def __init__(self):
-        # Create main application window
-        self.root = tk.Tk()
+    def __init__(self, root):
+        # Accept parent window instead of creating new one
+        self.root = root
         self.root.title("EOL (END OF LINE) TESTER")
-        self.root.geometry("1000x600")
+        
+        # Database configuration
+        self.db_config = {
+            'host': 'localhost',
+            'user': 'root',
+            'password': '12345',
+            'database': 'EOL'
+        }
         
         self.create_header()
         self.create_input_section()
         self.create_table()
         self.create_footer()
-
-        self.db_config = {
-            'host': 'localhost',
-            'user': 'your_username',
-            'password': 'your_password',
-            'database': 'your_database'
-        }
+        
+        # Load part numbers after UI is created
+        self.load_part_numbers()
 
     def create_header(self):
         header_frame = tk.Frame(self.root, bg="pink")
@@ -42,36 +47,48 @@ class DataConsole:
         self.part_combobox.grid(row=0, column=1, padx=5, pady=5)
 
         # Start Date Label
-        start_date_label = tk.Label(input_frame, text="START DATE:", font=("Arial", 12))
+        start_date_label = tk.Label(input_frame, text="START DATE:", font=("Arial", 12, "bold"))
         start_date_label.grid(row=0, column=2, padx=5, pady=5, sticky="e")
 
         # Set start date to beginning of current month and end date to current date
         current_date = datetime.now()
         start_of_month = current_date.replace(day=1)
 
-        self.start_date_entry = DateEntry(input_frame, width=20, 
-                                        date_pattern='yyyy-mm-dd',
+        # Calendar widget for start date with enhanced styling
+        self.start_date_entry = DateEntry(input_frame, 
+                                        width=18, 
+                                        date_pattern='dd-mm-yyyy',
+                                        background='darkblue',
+                                        foreground='white',
+                                        borderwidth=2,
+                                        font=("Arial", 11),
                                         showweeknumbers=False,
-                                        showothermonthdays=False,
+                                        showothermonthdays=True,
                                         firstweekday='sunday',
-                                        showtoday=True,
-                                        selectmode='day')
-        self.start_date_entry.bind('<Button-1>', lambda e: self.start_date_entry._select())
+                                        maxdate=current_date,
+                                        selectmode='day',
+                                        cursor='hand2')
         self.start_date_entry.grid(row=0, column=3, padx=5, pady=5)
         self.start_date_entry.set_date(start_of_month)
 
         # End Date Label
-        end_date_label = tk.Label(input_frame, text="END DATE:", font=("Arial", 12))
+        end_date_label = tk.Label(input_frame, text="END DATE:", font=("Arial", 12, "bold"))
         end_date_label.grid(row=0, column=4, padx=5, pady=5, sticky="e")
 
-        self.end_date_entry = DateEntry(input_frame, width=20, 
-                                      date_pattern='yyyy-mm-dd',
+        # Calendar widget for end date with enhanced styling
+        self.end_date_entry = DateEntry(input_frame, 
+                                      width=18, 
+                                      date_pattern='dd-mm-yyyy',
+                                      background='darkblue',
+                                      foreground='white',
+                                      borderwidth=2,
+                                      font=("Arial", 11),
                                       showweeknumbers=False,
-                                      showothermonthdays=False,
+                                      showothermonthdays=True,
                                       firstweekday='sunday',
-                                      showtoday=True,
-                                      selectmode='day')
-        self.end_date_entry.bind('<Button-1>', lambda e: self.end_date_entry._select())
+                                      maxdate=current_date,
+                                      selectmode='day',
+                                      cursor='hand2')
         self.end_date_entry.grid(row=0, column=5, padx=5, pady=5)
         self.end_date_entry.set_date(current_date)
 
@@ -98,13 +115,14 @@ class DataConsole:
         self.search_button.grid(row=0, column=10, padx=10, pady=5)
 
         self.export_button = tk.Button(input_frame, text="Export", bg="green", 
-                                     fg="white", font=("Arial", 12))
+                                     fg="white", font=("Arial", 12),
+                                     command=self.export_to_csv)
         self.export_button.grid(row=0, column=11, padx=10, pady=5)
 
     def create_table(self):
-        self.columns = ["NO", "MACHINE ID", "PART NUMBER", "ALC", "LOT NUMBER", 
-                       "CREATED DATE", "L1", "L2", "L3", "L4", "P1", "P2", "P3", 
-                       "P4", "CAM1", "CAM2", "RESULT","EMPLOYEE CODE"]
+        self.columns = ["NO", "LOT NUMBER", "PART NUMBER", "L1", "L2", "L3", "L4", 
+                       "P1", "P2", "P3", "P4", "RESULT", "SCAN RESULT", 
+                       "EMPLOYEE CODE", "SPEC DATA", "CREATED DATE"]
 
         table_frame = tk.Frame(self.root, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
@@ -139,7 +157,31 @@ class DataConsole:
                               font=("Arial", 10), bg="pink")
         footer_label.pack(pady=5)
 
+    def load_part_numbers(self):
+        """Load part numbers from TBL_MODEL_MASTER into combobox"""
+        try:
+            conn = mysql.connector.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT MM_PART_NUMBER FROM TBL_MODEL_MASTER ORDER BY MM_PART_NUMBER")
+            part_numbers = [row[0] for row in cursor.fetchall()]
+            
+            # Add "ALL" option at the beginning
+            part_numbers.insert(0, "ALL")
+            self.part_combobox['values'] = part_numbers
+            
+            # Set default to ALL
+            if part_numbers:
+                self.part_combobox.set("ALL")
+            
+            cursor.close()
+            conn.close()
+            
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Failed to load part numbers: {err}")
+    
     def search_records(self):
+        """Search records based on filters"""
         # Clear existing table
         for item in self.result_table.get_children():
             self.result_table.delete(item)
@@ -148,44 +190,91 @@ class DataConsole:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            # Convert dates to datetime format
-            start_date = self.start_date_entry.get_date().strftime('%Y-%m-%d 00:00:00')
-            end_date = self.end_date_entry.get_date().strftime('%Y-%m-%d 23:59:59')
+            # Get filter values - convert date objects to proper format for MySQL
+            start_date = self.start_date_entry.get_date().strftime('%Y-%m-%d')
+            end_date = self.end_date_entry.get_date().strftime('%Y-%m-%d')
             part_number = self.part_combobox.get()
+            result_filter = self.result_combobox.get()
             
+            # Build query with dynamic filters for TBL_TEST_RESULTS
             query = """
                 SELECT 
-                    ID, TD_MACHINE_ID, TD_PART_NUMBER, TD_TRACEABILITY_CODE,
-                    TD_LOT_NUMBER, TD_RECORD_DATE, L1, L2, L3, L4, P1, P2, P3, P4,
-                    CAM1, CAM2, TD_OVERALL_STATUS, TD_EMP_CODE
-                FROM TBL_TEST_DATA
-                WHERE TD_RECORD_DATE BETWEEN %s AND %s
-                AND TD_PART_NUMBER = %s
-                ORDER BY TD_RECORD_DATE DESC
+                    ID, LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4,
+                    RESULT, SCAN_RESULT, EMP_CODE, SPEC_DATA, CREATED_DATE
+                FROM TBL_TEST_RESULTS
+                WHERE DATE(CREATED_DATE) BETWEEN %s AND %s
             """
+            params = [start_date, end_date]
             
-            cursor.execute(query, (start_date, end_date, part_number))
+            # Add part number filter if not ALL
+            if part_number and part_number != "ALL":
+                query += " AND PART_NUMBER = %s"
+                params.append(part_number)
+            
+            # Add result filter if not ALL
+            if result_filter and result_filter != "ALL":
+                query += " AND RESULT = %s"
+                params.append(result_filter)
+            
+            query += " ORDER BY CREATED_DATE DESC"
+            
+            cursor.execute(query, tuple(params))
             records = cursor.fetchall()
             
             # Insert records into table
             for i, record in enumerate(records, 1):
-                values = [i] + list(record)[1:]  # Add row number
+                values = [i] + list(record)[1:]  # Add row number, skip ID
                 self.result_table.insert('', 'end', values=values)
+            
+            # Show count
+            messagebox.showinfo("Search Complete", f"Found {len(records)} records")
                 
         except mysql.connector.Error as err:
-            print(f"Database error: {err}")
+            messagebox.showerror("Database Error", f"Search failed: {err}")
             
         finally:
             if 'conn' in locals() and conn.is_connected():
                 cursor.close()
                 conn.close()
     
+    def export_to_csv(self):
+        """Export table data to CSV file"""
+        try:
+            # Check if there's data to export
+            if not self.result_table.get_children():
+                messagebox.showwarning("No Data", "No data to export. Please search first.")
+                return
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"EOL_Data_Export_{timestamp}.csv"
+            
+            # Get desktop path
+            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+            filepath = os.path.join(desktop, filename)
+            
+            # Write to CSV
+            with open(filepath, 'w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
                 
-
+                # Write headers
+                writer.writerow(self.columns)
+                
+                # Write data
+                for item in self.result_table.get_children():
+                    values = self.result_table.item(item)['values']
+                    writer.writerow(values)
+            
+            messagebox.showinfo("Export Successful", f"Data exported to:\n{filepath}")
+            
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export data: {e}")
+    
     def run(self):
         self.root.mainloop()
 
 
 if __name__ == "__main__":
-    app = DataConsole()
-    app.run()
+    root = tk.Tk()
+    app = DataConsole(root)
+    root.mainloop()
