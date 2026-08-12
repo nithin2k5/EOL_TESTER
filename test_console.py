@@ -3670,15 +3670,15 @@ class EOLTesterGUI:
             if not os.path.exists(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            # Get the frame dimensions
-            frame_width = self.image_frame.winfo_width()
-            frame_height = self.image_frame.winfo_height()
+            # Use the same exact fixed dimensions as model_settings.py for perfect label alignment
+            target_width = 750
+            target_height = 450
             
-            print(f"Loading image with frame dimensions: {frame_width}x{frame_height}")
+            print(f"Loading image with fixed dimensions: {target_width}x{target_height}")
             
-            # Load and resize image to exactly match frame dimensions
+            # Load and resize image to exactly match the model settings dimensions
             original_image = Image.open(image_path)
-            resized_image = original_image.resize((frame_width, frame_height), Image.Resampling.LANCZOS)
+            resized_image = original_image.resize((target_width, target_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized_image)
             
             # Remove old image label if it exists
