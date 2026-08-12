@@ -79,7 +79,32 @@ def apply_professional_theme(root):
                 if 'foreground' in cnf: del cnf['foreground']
                 
             original_init(self, master, cnf, **kw)
+            
+        def new_configure(self, cnf=None, **kw):
+            if cnf is None: cnf = {}
+            # Strip generic colors from dynamic config updates
+            semantic_colors = ['red', 'green', 'blue', 'orange', 'yellow', 'darkred', 'navy', '#ff0000', '#00ff00', '#0000ff']
+            
+            bg_val = kw.get('bg') or kw.get('background') or cnf.get('bg') or cnf.get('background')
+            if isinstance(bg_val, str) and bg_val.lower() not in semantic_colors:
+                kw.pop('bg', None)
+                kw.pop('background', None)
+                if 'bg' in cnf: del cnf['bg']
+                if 'background' in cnf: del cnf['background']
+                
+            fg_val = kw.get('fg') or kw.get('foreground') or cnf.get('fg') or cnf.get('foreground')
+            if isinstance(fg_val, str) and fg_val.lower() not in semantic_colors:
+                kw.pop('fg', None)
+                kw.pop('foreground', None)
+                if 'fg' in cnf: del cnf['fg']
+                if 'foreground' in cnf: del cnf['foreground']
+                
+            return original_configure(self, cnf, **kw)
+            
+        original_configure = widget_class.configure
         widget_class.__init__ = new_init
+        widget_class.configure = new_configure
+        widget_class.config = new_configure
 
     # Apply patch to common widgets
     patch_widget(tk.Frame)
@@ -93,3 +118,5 @@ def apply_professional_theme(root):
     patch_widget(tk.Text)
     patch_widget(tk.Spinbox)
     patch_widget(tk.OptionMenu)
+    patch_widget(tk.Tk)
+    patch_widget(tk.Toplevel)
