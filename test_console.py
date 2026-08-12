@@ -1267,7 +1267,7 @@ class EOLTesterGUI:
         
         # Create a frame to hold the image with exact dimensions
         self.image_frame = tk.Frame(q1, bg='white')
-        self.image_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        self.image_frame.pack(expand=True, padx=2, pady=2) # Removed fill='both' so it stays exactly 750x450
         self.image_frame.pack_propagate(False)
         
         # Set exact size to match model_settings.py image dimensions
@@ -2294,9 +2294,11 @@ class EOLTesterGUI:
             # Create or update the image label
             if hasattr(self, 'image_label'):
                 self.image_label.configure(image=self.photo)
+                # Ensure it's placed correctly if it was previously packed
+                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             else:
                 self.image_label = tk.Label(self.image_frame, image=self.photo, bg='white')
-                self.image_label.pack(expand=True, fill='both')
+                self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             
             # Update status
             self.status_label.config(text=f"Image loaded: {os.path.basename(image_path)}")

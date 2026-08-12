@@ -107,7 +107,7 @@ class WorkspaceApp:
 
         # Image frame within first quadrant - MATCH test_console.py EXACTLY
         self.image_frame = tk.Frame(first_quadrant, bg='white')
-        self.image_frame.pack(fill="both", expand=True, padx=2, pady=2)  # Match test_console.py
+        self.image_frame.pack(expand=True, padx=2, pady=2)  # Removed fill='both' to keep it exactly 750x450
         self.image_frame.pack_propagate(False)  # Match test_console.py
         self.image_frame.config(width=750, height=450)  # Match test_console.py image dimensions
         
