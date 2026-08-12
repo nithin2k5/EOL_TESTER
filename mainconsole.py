@@ -7,11 +7,12 @@ from test_console import EOLTesterGUI    # Import TestConsole
 from comport_settings import ComPortSettings  # Add this import
 from dataconsole import DataConsole  # Add this import
 from adminconsole import AdminConsole  # Add this import
-
+import theme
 
 class MainConsole(tk.Tk):
     def __init__(self):
         super().__init__()
+        theme.apply_professional_theme(self)
         self.title("EOL Tester")
         self.state('zoomed')  # Start maximized
         self.setup_ui()
