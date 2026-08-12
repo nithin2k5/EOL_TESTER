@@ -2,13 +2,14 @@ import tkinter as tk
 from tkinter import ttk
 
 def apply_professional_theme(root):
-    # Professional Light Theme Colors
-    BG_MAIN = '#ffffff'
-    BG_ALT = '#f3f4f6'
-    FG_MAIN = '#1f2937'
-    FG_ALT = '#111827'
-    ACCENT = '#2563eb'
-    BORDER = '#d1d5db'
+    # Enhanced Professional Light Theme Colors
+    BG_MAIN = '#f0f4f8'  # Soft, cool blue-gray for the app background
+    BG_ALT = '#ffffff'   # Pure white for panels and inputs
+    FG_MAIN = '#1e293b'  # Dark slate for text
+    FG_ALT = '#0f172a'   # Almost black for emphasis
+    ACCENT = '#3b82f6'   # Vibrant blue accent
+    ACCENT_HOVER = '#2563eb' # Deeper blue for hover
+    BORDER = '#cbd5e1'   # Soft gray border
     
     # Set the overall tk palette for a modern light theme
     root.tk_setPalette(
@@ -35,20 +36,20 @@ def apply_professional_theme(root):
                     selectforeground='#ffffff',
                     bordercolor=BORDER,
                     lightcolor=BG_MAIN,
-                    darkcolor=BG_ALT)
+                    darkcolor=BG_MAIN)
 
-    # Specific ttk widget styles
-    style.configure('TButton', padding=6, relief='flat', background=BG_ALT, foreground=FG_MAIN, bordercolor=BORDER, borderwidth=1)
+    # Specific ttk widget styles (Buttons are now vibrant blue)
+    style.configure('TButton', padding=6, relief='flat', background=ACCENT, foreground='#ffffff', font=('Arial', 10, 'bold'))
     style.map('TButton', 
-              background=[('active', '#e5e7eb'), ('pressed', '#d1d5db')],
-              foreground=[('active', FG_ALT)])
+              background=[('active', ACCENT_HOVER), ('pressed', '#1d4ed8')],
+              foreground=[('active', '#ffffff')])
     
     style.configure('TFrame', background=BG_MAIN)
-    style.configure('TLabelframe', background=BG_MAIN, bordercolor=BORDER, borderwidth=1)
-    style.configure('TLabelframe.Label', background=BG_MAIN, foreground=ACCENT, font=('Arial', 10, 'bold'))
+    style.configure('TLabelframe', background=BG_ALT, bordercolor=BORDER, borderwidth=1)
+    style.configure('TLabelframe.Label', background=BG_ALT, foreground=ACCENT, font=('Arial', 10, 'bold'))
     
     style.configure('TNotebook', background=BG_MAIN, tabmargins=[2, 5, 2, 0])
-    style.configure('TNotebook.Tab', background=BG_ALT, foreground=FG_MAIN, padding=[12, 4], bordercolor=BORDER)
+    style.configure('TNotebook.Tab', background='#e2e8f0', foreground=FG_MAIN, padding=[12, 4], bordercolor=BORDER, font=('Arial', 9, 'bold'))
     style.map('TNotebook.Tab', 
               background=[('selected', ACCENT)], 
               foreground=[('selected', '#ffffff')],
@@ -64,12 +65,14 @@ def apply_professional_theme(root):
             semantic_colors = ['red', 'green', 'blue', 'orange', 'yellow', 'darkred', 'navy', '#ff0000', '#00ff00', '#0000ff']
             
             bg_val = kw.get('bg') or kw.get('background') or cnf.get('bg') or cnf.get('background')
+            is_stripped = False
             # If the background is set and it's NOT a semantic color, strip it to force the modern theme
             if isinstance(bg_val, str) and bg_val.lower() not in semantic_colors:
                 kw.pop('bg', None)
                 kw.pop('background', None)
                 if 'bg' in cnf: del cnf['bg']
                 if 'background' in cnf: del cnf['background']
+                is_stripped = True
                 
             fg_val = kw.get('fg') or kw.get('foreground') or cnf.get('fg') or cnf.get('foreground')
             if isinstance(fg_val, str) and fg_val.lower() not in semantic_colors:
@@ -77,6 +80,15 @@ def apply_professional_theme(root):
                 kw.pop('foreground', None)
                 if 'fg' in cnf: del cnf['fg']
                 if 'foreground' in cnf: del cnf['foreground']
+                
+            # If this is a standard tk.Button and we stripped its color, inject the vibrant accent!
+            if widget_class.__name__ == 'Button' and (is_stripped or not bg_val):
+                kw['bg'] = ACCENT
+                kw['fg'] = '#ffffff'
+                kw['activebackground'] = ACCENT_HOVER
+                kw['activeforeground'] = '#ffffff'
+                kw['relief'] = 'flat'
+                kw['bd'] = 0
                 
             original_init(self, master, cnf, **kw)
             
@@ -91,6 +103,8 @@ def apply_professional_theme(root):
                 kw.pop('background', None)
                 if 'bg' in cnf: del cnf['bg']
                 if 'background' in cnf: del cnf['background']
+                if widget_class.__name__ == 'Button':
+                    kw['bg'] = ACCENT
                 
             fg_val = kw.get('fg') or kw.get('foreground') or cnf.get('fg') or cnf.get('foreground')
             if isinstance(fg_val, str) and fg_val.lower() not in semantic_colors:
@@ -98,6 +112,8 @@ def apply_professional_theme(root):
                 kw.pop('foreground', None)
                 if 'fg' in cnf: del cnf['fg']
                 if 'foreground' in cnf: del cnf['foreground']
+                if widget_class.__name__ == 'Button':
+                    kw['fg'] = '#ffffff'
                 
             return original_configure(self, cnf, **kw)
             
