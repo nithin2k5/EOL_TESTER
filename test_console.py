@@ -204,7 +204,7 @@ class EOLTesterGUI:
         self.loadcell1_client = None
         self.loadcell2_client = None
         
-        # Initialize C# style variables
+        # Initialize test flow variables
         self.rcvdTestRslt = False
         self.loadcell01Value = 0.0
         self.loadcell02Value = 0.0
@@ -230,7 +230,7 @@ class EOLTesterGUI:
         self.inputSensorsToReadList = []
         self.mldDataTable = []
         
-        # Database configuration for C# style implementation
+        # Database configuration for test flow
         self.db_config = db.get_config()
         
         # Part information variables
@@ -269,7 +269,7 @@ class EOLTesterGUI:
         self.printedLabelScanDataInput_WaitTime = 6000
         self.alertOn_TimeInterval = 5000
         
-        # EOL Testing Variables (from C# implementation)
+        # EOL Testing Variables
         self.alcInput_TimeInterval = 3000  # 3000ms for manual entry
         self.printedLabelScanDataInput_TimeInterval = 4000  # 4000ms for barcode scanner
         self.printedLabelScanDataInput_WaitTime = 6000  # 6 secs wait for printed label scan
@@ -572,7 +572,7 @@ class EOLTesterGUI:
         """
         Toggle process status between HIGH and LOW
         
-        NOTE: In C# implementation, test starts automatically after ALC code entry
+        NOTE: test starts automatically after ALC code entry
               This button is mainly for STOPPING the test or manual restart
         """
         try:
@@ -585,7 +585,7 @@ class EOLTesterGUI:
             
             # Toggle status
             if self.process_status == "LOW":
-                # Manual start/restart (not typical in C# - test auto-starts after ALC)
+                # Manual start/restart (test auto-starts after ALC)
                 if not hasattr(self, 'current_part_number') or not self.current_part_number:
                     self.safe_update_message("Part Number selection required", "red")
                     messagebox.showwarning("Part Number Required", 
@@ -657,7 +657,7 @@ class EOLTesterGUI:
                         return
             
             # ===================================================================
-            # C# IMPLEMENTATION STYLE (testconsole.cs lines 315-328, 556-559)
+            # TEST START SEQUENCE
             # ===================================================================
             # 1. Write Program Selection to PLC ONCE
             # 2. Write Machine On to PLC ONCE  
@@ -665,7 +665,7 @@ class EOLTesterGUI:
             # NO P0000 keep-alive, NO continuous writes - PLC runs autonomously
             # ===================================================================
             
-            # STEP 1: Write Program Selection to PLC (C# line 315-317)
+            # STEP 1: Write Program Selection to PLC
             if hasattr(self, 'programSelectionPLCAddress') and self.programSelectionPLCAddress:
                 print(f"📝 Writing Program Selection to PLC: {self.programSelectionPLCAddress}")
                 try:
@@ -679,7 +679,7 @@ class EOLTesterGUI:
                 except Exception as e:
                     print(f"⚠️ Program Selection write error: {e}")
             
-            # STEP 2: Write Machine On signal to PLC (C# lines 319-328)
+            # STEP 2: Write Machine On signal to PLC
             if hasattr(self, 'machineOnPLCCoilAddress') and self.machineOnPLCCoilAddress:
                 print(f"📝 Writing Machine On signal to PLC: {self.machineOnPLCCoilAddress}")
                 try:
@@ -694,13 +694,13 @@ class EOLTesterGUI:
                     print(f"⚠️ Machine On write error: {e}")
             
             # STEP 3: That's ALL the writes! Now just READ coils
-            # C# code (lines 556-559): start_CheckAsync() calls ReadCoils() and ReadSensorInputs()
+            # start_CheckAsync calls ReadCoils and ReadSensorInputs
             # Then enters a continuous read loop until test completes
             
             print("✅ PLC initialization complete - entering READ-ONLY monitoring mode")
             print("   🚫 NO P0000 writes, NO keep-alive loops")
             print("   📋 PLC runs autonomously: M0067→M0068→M0076→M0085→M0078→M0087→PASS/NG")
-            print("   👀 We ONLY READ M coils continuously (C# ReadCoils style)")
+            print("   👀 We ONLY READ M coils continuously (continuous coil reads)")
             
             # Update status variables
             self.process_status = "HIGH"
@@ -713,13 +713,13 @@ class EOLTesterGUI:
             self.log_operator_action("TEST_START", f"Started testing for Part: {self.current_part_number}, LOT: {self.current_lot_number}", 
                                    getattr(self, 'current_employee_id', 'UNKNOWN'))
             
-            # Start continuous PLC coil reading (C# ReadCoils loop - lines 470-553)
+            # Start continuous PLC coil reading (continuous coil read loop - lines 470-553)
             self.status_monitoring_active = True
-            self.rcvdTestRslt = False  # C# style test completion flag
-            print("✅ Starting continuous ReadCoils loop (C# style - 200ms intervals)...")
+            self.rcvdTestRslt = False  # test completion flag
+            print("✅ Starting continuous ReadCoils loop...")
             self.start_plc_status_monitoring()
             
-            print("✅ EOL Testing process initialized (C# testconsole.cs style)")
+            print("✅ EOL Testing process initialized")
             print("   📊 ReadCoils() monitoring active - updates every 200ms")
             print("   ⏳ Waiting for test result (rcvdTestRslt = True)")
             print("   🎯 Monitoring addresses: {', '.join(self.process_addresses[:8])}")
@@ -2578,7 +2578,7 @@ class EOLTesterGUI:
             else:
                 print(f"Warning: barcodeprintfilenames.txt not found at {barcode_print_path}")
             
-            # Load Machine On PLC Coil Address (C# testconsole.cs line 141)
+            # Load Machine On PLC Coil Address
             machine_on_path = os.path.join(txt_files_dir, 'MachineOnPLCCoilAddress.txt')
             if os.path.exists(machine_on_path):
                 with open(machine_on_path, 'r') as file:
@@ -2589,7 +2589,7 @@ class EOLTesterGUI:
                 print("   This file is REQUIRED for PLC to start test!")
                 self.machineOnPLCCoilAddress = ""
             
-            # Load Alert On PLC Coil Address (C# testconsole.cs line 142)
+            # Load Alert On PLC Coil Address
             alert_on_path = os.path.join(txt_files_dir, 'AlertOnPLCCoilAddress.txt')
             if os.path.exists(alert_on_path):
                 with open(alert_on_path, 'r') as file:
@@ -3043,7 +3043,7 @@ class EOLTesterGUI:
                 print(f"⚠️ PLC socket check failed: {e} - using simulation mode")
                 return self.get_simulated_process_status()
             
-            # Read from PLC (C# style)
+            # Read from PLC
             status_values = {}
             
             # Load process addresses if not loaded
@@ -3056,10 +3056,10 @@ class EOLTesterGUI:
             
             station_id = int(config.get('PLC_STATION_ID', '1'))
             
-            # Parse addresses from process status array (C# style)
+            # Parse addresses from process status array
             # Convert hex addresses to decimal
             try:
-                # C# code: Convert.ToUInt32(processStatusArray[0].Substring(1), 16)
+                # Convert.ToUInt32(processStatusArray[0].Substring(1), 16)
                 # Python equivalent: int(address[1:], 16) for hex addresses
                 
                 for i, address in enumerate(self.process_addresses):
@@ -3070,13 +3070,13 @@ class EOLTesterGUI:
                         # Parse address - check if hex or decimal
                         addr_str = address[1:] if len(address) > 1 else "0"
                         
-                        # Try hex first (C# uses hex), fallback to decimal
+                        # Try hex first (hex is expected), fallback to decimal
                         try:
-                            addr_num = int(addr_str, 16)  # Hex conversion (C# style)
+                            addr_num = int(addr_str, 16)  # Hex conversion
                         except ValueError:
                             addr_num = int(addr_str)  # Decimal fallback
                         
-                        # Read coil (C# style: ReadCoils)
+                        # Read coil
                         if address.startswith('M') or address.startswith('X'):
                             result = self.plc_client.read_coils(addr_num, count=1, device_id=station_id)
                             
@@ -3893,7 +3893,7 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="white")
 
     def validate_employee_code(self, event=None):
-        """Validate employee code against EmployeeCodes.txt - C# Implementation"""
+        """Validate employee code against EmployeeCodes.txt - the reference flow Implementation"""
         emp_code = self.emp_entry.get().strip()
         if emp_code == "EMP CODE" or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
@@ -3916,7 +3916,7 @@ class EOLTesterGUI:
                 messagebox.showerror("Error", "Employee Codes text file is either missing or empty!!")
                 return
             
-            # Read employee codes (C# style)
+            # Read employee codes
             with open(employee_codes_path, 'r') as file:
                 content = file.read().strip()
                 if content:
@@ -3927,17 +3927,17 @@ class EOLTesterGUI:
                     messagebox.showerror("Error", "Employee Codes text file is either missing or empty!!")
                     return
             
-            # Validate employee code (exact C# logic)
+            # Validate employee code
             if emp_code in self.employeeCodesArray:
                 # Set employee validation flags
                 self.current_employee_id = emp_code
                 self.employee_validation_complete = True
                 self.employee_validated = True
                 
-                # Make employee entry read-only (C# behavior)
+                # Make employee entry read-only
                 self.emp_entry.configure(state='readonly', bg="lightgreen")
                 
-                # Enable ALC entry and set focus (C# behavior)
+                # Enable ALC entry and set focus
                 self.alc_entry.configure(state='normal')
                 self.alc_entry.focus_set()
                 
@@ -3949,7 +3949,7 @@ class EOLTesterGUI:
                 self.test_database_connection()
                 
             else:
-                # Exact error message from C# code
+                # Exact error message from the reference flow
                 messagebox.showerror(
                     "Unauthorized Employee", 
                     f"Employee code: {emp_code} is NOT AUTHORIZED to operate this machine, please consult SUPERVISOR."
@@ -3967,9 +3967,9 @@ class EOLTesterGUI:
             return
 
     def process_alc_code_cs_style(self, alc_code):
-        """Process ALC code with C# implementation logic"""
+        """Process ALC code with the reference flow logic"""
         try:
-            # Wait for complete input (C# style with 3 second timeout)
+            # Wait for complete input
             time.sleep(self.alcInput_TimeInterval / 1000.0)  # Convert ms to seconds
             
             # Make ALC entry read-only
@@ -3987,7 +3987,7 @@ class EOLTesterGUI:
                 
             cursor = connection.cursor(dictionary=True)
 
-            # Query TBL_MODEL_MASTER for part information (exact C# query)
+            # Query TBL_MODEL_MASTER for part information
             model_query = """
             SELECT 
                 MM_PART_NUMBER,
@@ -4007,7 +4007,7 @@ class EOLTesterGUI:
             model_result = cursor.fetchone()
             
             if model_result:
-                # Store part information (C# style)
+                # Store part information
                 self.partNumber = model_result['MM_PART_NUMBER']
                 self.modelName = model_result['MM_MODEL_NAME'] 
                 self.vendorCode = model_result['MM_VENDOR_CODE'] or ""
@@ -4016,7 +4016,7 @@ class EOLTesterGUI:
                 self.initialID = model_result['MM_INITIAL_ID'] or ""
                 self.supplierSection = model_result['MM_SUPPLIER_SECTION'] or ""
                 
-                # Update part name label (C# style)
+                # Update part name label
                 if hasattr(self, 'model_header'):
                     self.model_header.config(text=f"{self.modelName} - {self.partNumber}")
                 
@@ -4034,19 +4034,19 @@ class EOLTesterGUI:
                             self.prnFileContent = f.read()
                 
                 # ===================================================================
-                # C# IMPLEMENTATION: Write to PLC during ALC code processing
+                # NOTE: Write to PLC during ALC code processing
                 # testconsole.cs lines 315-328
                 # These writes TRIGGER the PLC to start the test automatically
                 # ===================================================================
                 
-                # Get PLC program selection address from database (C# line 315)
+                # Get PLC program selection address from database
                 self.programSelectionPLCAddress = model_result['MM_PLC_ADDRESS']
                 
                 print(f"\n{'='*60}")
-                print(f"🎯 PLC INITIALIZATION (C# style - lines 315-328)")
+                print("🎯 PLC INITIALIZATION")
                 print(f"{'='*60}")
                 
-                # Write Program Selection to PLC (C# lines 316-317)
+                # Write Program Selection to PLC
                 if self.programSelectionPLCAddress:
                     print(f"📝 Program Selection Address: {self.programSelectionPLCAddress}")
                     success = self.write_program_selection_to_plc()
@@ -4057,7 +4057,7 @@ class EOLTesterGUI:
                 else:
                     print(f"⚠️ No Program Selection address in database - skipping")
                 
-                # Write Machine On signal to PLC (C# lines 320-324)
+                # Write Machine On signal to PLC
                 if self.machineOnPLCCoilAddress:
                     print(f"📝 Machine On Address: {self.machineOnPLCCoilAddress}")
                     success = self.write_machine_on_to_plc()
@@ -4077,7 +4077,7 @@ class EOLTesterGUI:
                 part_exists = True
             
             if part_exists:
-                # Load model specifications (C# style)
+                # Load model specifications
                 self.load_model_specifications(cursor)
                 
                 # Load label details for dynamic UI
@@ -4091,14 +4091,13 @@ class EOLTesterGUI:
                 self.get_lot_number()
                 
                 # ===================================================================
-                # C# IMPLEMENTATION: Auto-start test after ALC code processing
-                # C# code (line 410-413): Immediately calls start_CheckAsync()
+                # NOTE: Auto-start test after ALC code processing
+                # Immediately calls start_CheckAsync
                 # Test begins automatically without button click
                 # ===================================================================
                 
                 print("\n✅ Part loaded successfully!")
-                print("🚀 Starting test automatically (C# testconsole.cs line 413)")
-                print("   (No button click required - test auto-starts like C#)")
+                print("🚀 Starting test automatically - no button click required")
                 
                 # ===================================================================
                 # PLC LABEL COLORING: Set Auto and Home labels to GREEN when part loads
@@ -4166,7 +4165,7 @@ class EOLTesterGUI:
             self.alc_entry.focus_set()
 
     def load_model_specifications(self, cursor):
-        """Load model specifications from database (C# implementation)"""
+        """Load model specifications from database"""
         try:
             spec_query = """
             SELECT 
@@ -4196,7 +4195,7 @@ class EOLTesterGUI:
                 device = spec['MS_DEVICE'].upper()
                 self.deviceToRead.append(device)
                 
-                # Set column visibility flags (C# style)
+                # Set column visibility flags
                 if device == "L2":
                     self.columnL2 = True
                 elif device == "L3":
@@ -4229,7 +4228,7 @@ class EOLTesterGUI:
             print(f"Error loading model specifications: {e}")
 
     def load_model_label_details(self, cursor):
-        """Load model label details for dynamic UI (C# implementation)"""
+        """Load model label details for dynamic UI"""
         try:
             label_query = """
             SELECT 
@@ -4262,7 +4261,7 @@ class EOLTesterGUI:
 
     def write_program_selection_to_plc(self):
         """
-        Write program selection to PLC (C# implementation - line 315-317)
+        Write program selection to PLC
         Returns: bool - Success status
         """
         try:
@@ -4286,7 +4285,7 @@ class EOLTesterGUI:
 
     def write_machine_on_to_plc(self):
         """
-        Write Machine On signal to PLC (C# implementation - lines 319-328)
+        Write Machine On signal to PLC
         Returns: bool - Success status
         """
         try:
@@ -4476,7 +4475,7 @@ class EOLTesterGUI:
             print(f"Error updating charts: {e}")
 
     def get_lot_number(self):
-        """Get lot number from database (C# implementation)"""
+        """Get lot number from database"""
         try:
             connection = self.get_database_connection()
             if not connection:
@@ -4559,7 +4558,7 @@ class EOLTesterGUI:
                 if hasattr(self, 'process_status_labels') and '1st' in self.process_status_labels:
                     self.process_status_labels['1st'].config(bg="#00BFFF")
                 
-                # Start the test (C# style - line 413: start_CheckAsync())
+                # Start the test)
                 print("🔄 Calling start_CheckAsync() - ReadCoils() loop will begin...")
                 self.start_check_async()
                 
@@ -4630,7 +4629,7 @@ class EOLTesterGUI:
             return True  # Assume ready on error
     
     def start_check_async(self):
-        """Start asynchronous testing process (C# implementation)"""
+        """Start asynchronous testing process"""
         # Start the main testing workflow
         print("Starting EOL testing process...")
         self.safe_update_message("Starting test process...", "blue")
@@ -4646,16 +4645,16 @@ class EOLTesterGUI:
     def start_real_plc_test_process(self):
         """
         Start real PLC-controlled testing process
-        C# equivalent: ReadCoils() and ReadSensorInputs() loops (lines 454-559)
+        Equivalent to: ReadCoils and ReadSensorInputs loops (lines 454-559)
         
         NOTE: PLC writes already done in process_alc_code_cs_style()
               This method ONLY starts the continuous read loops
         """
         try:
-            print("🔄 Starting PLC monitoring loops (C# ReadCoils style)...")
+            print("🔄 Starting PLC monitoring loops (continuous coil reads)...")
             
-            # PLC writes already done during ALC code processing (C# lines 315-328)
-            # Now we just start the continuous read loops (C# lines 556-559)
+            # PLC writes already done during ALC code processing
+            # Now we just start the continuous read loops
             
             # Verify PLC connection
             if not hasattr(self, 'plc_client') or not self.plc_client or not self.plc_client.is_socket_open():
@@ -4672,18 +4671,18 @@ class EOLTesterGUI:
             self.set_label_color('test', 'green', persistent=True)
             print("🟢 TEST label set to GREEN (test process started - persistent)")
             
-            # Initialize test state flags (C# style)
-            self.rcvdTestRslt = False  # C# flag for test completion
-            self.noOfValues = 0        # C# counter for loadcell values
+            # Initialize test state flags
+            self.rcvdTestRslt = False  # flag for test completion
+            self.noOfValues = 0        # counter for loadcell values
             
-            # Start PLC coil monitoring (C# ReadCoils - line 558)
+            # Start PLC coil monitoring (the coil read step - line 558)
             self.status_monitoring_active = True
             self.start_plc_status_monitoring()
             
-            # Start sensor input monitoring (C# ReadSensorInputs - line 559)
+            # Start sensor input monitoring (the sensor input step - line 559)
             # This would monitor input sensors if configured
             
-            print("✅ Monitoring loops started (C# style)")
+            print("✅ Monitoring loops started")
             print("   📖 ReadCoils() - monitoring process status")
             print("   📖 Reading coils every 200ms")
             print("   ⏳ Waiting for rcvdTestRslt = True")
@@ -4729,10 +4728,10 @@ class EOLTesterGUI:
                     except:
                         pass
                 
-                # Also read input registers for loadcell/pressure data (C# ReadInputRegisters)
+                # Also read input registers for loadcell/pressure data (the input register step)
                 self._read_all_input_registers()
                 
-                # Wait 200ms between reads (C# style)
+                # Wait 200ms between reads
                 time.sleep(0.2)
                 
             except Exception as e:
@@ -4817,13 +4816,13 @@ class EOLTesterGUI:
     
     def monitor_plc_status(self):
         """
-        Continuously monitor PLC status and update UI - C# Implementation Style
+        Continuously monitor PLC status and update UI - the reference flow Implementation Style
         
         Matches testconsole.cs ReadCoils() method (lines 454-554):
         - Simple do-while loop that reads all coils
         - Updates label colors immediately (Lime/Green, OrangeRed/Red, DeepSkyBlue/Blue)
         - Continues until test result is received
-        - Uses 200ms delay between iterations (C# Task.Delay(200))
+        - Uses 200ms delay between iterations (a 200ms pause)
         
         NOTE: PLC reads now happen in background thread to prevent GUI freezing
         """
@@ -4843,22 +4842,22 @@ class EOLTesterGUI:
                     print(f"⚠️ Fallback PLC read failed: {e}")
                     status_values = {}
             
-            # Update UI labels based on coil values (C# style)
+            # Update UI labels based on coil values
             if status_values and hasattr(self, 'process_addresses') and self.process_addresses:
-                # C# mapping: processStatusArray indices
+                # mapping: processStatusArray indices
                 # [0]=AUTO, [1]=HOME, [2]=PULL1_OK, [3]=PULL1_NG, 
                 # [4]=PULL2_OK, [5]=PULL2_NG, [6]=TESTRESULT_OK, [7]=TESTRESULT_NG
                 
-                # AUTO label update (C# lines 484-487)
+                # AUTO label update
                 # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 0:
                     auto_addr = self.process_addresses[0]
                     auto_result = status_values.get(auto_addr, False)
                     if hasattr(self, 'auto_label') and not self.is_label_persistent('auto'):
-                        # Lime if HIGH, DeepSkyBlue if LOW (C# style)
+                        # Lime if HIGH, DeepSkyBlue if LOW
                         self.auto_label.config(bg="#00FF00" if auto_result else "#00BFFF")
                 
-                # HOME label update (C# lines 489-492)
+                # HOME label update
                 # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 1:
                     home_addr = self.process_addresses[1]
@@ -4866,7 +4865,7 @@ class EOLTesterGUI:
                     if hasattr(self, 'home_label') and not self.is_label_persistent('home'):
                         self.home_label.config(bg="#00FF00" if home_result else "#00BFFF")
                 
-                # PULL1 label update (C# lines 494-499)
+                # PULL1 label update
                 if len(self.process_addresses) > 3:
                     pull1_ok_addr = self.process_addresses[2]
                     pull1_ng_addr = self.process_addresses[3]
@@ -4883,7 +4882,7 @@ class EOLTesterGUI:
                         else:
                             label.config(bg="#00BFFF")  # DeepSkyBlue
                 
-                # PULL2 label update (C# lines 501-506)
+                # PULL2 label update
                 if len(self.process_addresses) > 5:
                     pull2_ok_addr = self.process_addresses[4]
                     pull2_ng_addr = self.process_addresses[5]
@@ -4900,7 +4899,7 @@ class EOLTesterGUI:
                         else:
                             label.config(bg="#00BFFF")  # DeepSkyBlue
                 
-                # TEST RESULT label update (C# lines 508-513)
+                # TEST RESULT label update
                 if len(self.process_addresses) > 7:
                     test_ok_addr = self.process_addresses[6]
                     test_ng_addr = self.process_addresses[7]
@@ -4918,7 +4917,7 @@ class EOLTesterGUI:
                             # Only revert to blue if not persistent (before test starts)
                             self.test_label.config(bg="#00BFFF")  # DeepSkyBlue
                     
-                    # Check if test result received (C# lines 548-549)
+                    # Check if test result received
                     if test_ok_result or test_ng_result:
                         if not getattr(self, 'rcvdTestRslt', False):
                             self.rcvdTestRslt = True
@@ -4926,8 +4925,8 @@ class EOLTesterGUI:
                             # Handle test completion
                             self.root.after(500, self.test_result_command)
             
-            # Continue monitoring loop (C# uses await Task.Delay(200))
-            # Use 200ms delay to match C# implementation
+            # Continue monitoring loop (a 200ms pause)
+            # Use 200ms delay to match the reference flow
             if self.status_monitoring_active:
                 self.root.after(200, self.monitor_plc_status)
             
@@ -5254,7 +5253,7 @@ class EOLTesterGUI:
             print(f"Error completing test cycle: {e}")
 
     def generate_lot_and_traceability(self):
-        """Generate lot number and traceability code (C# implementation)"""
+        """Generate lot number and traceability code"""
         try:
             # Check if day has changed
             current_date = datetime.today().date()
@@ -5306,7 +5305,7 @@ class EOLTesterGUI:
             return False
 
     def reset_test_parameters(self):
-        """Reset test parameters for next cycle (C# implementation)"""
+        """Reset test parameters for next cycle"""
         # Reset message
         self.safe_update_message("", "black")
         
@@ -5337,7 +5336,7 @@ class EOLTesterGUI:
         self.cam1Result = ""
 
     def save_testing_data(self, status):
-        """Save testing data to database (C# implementation)"""
+        """Save testing data to database"""
         try:
             connection = self.get_database_connection()
             if not connection:
@@ -5407,7 +5406,7 @@ class EOLTesterGUI:
             messagebox.showerror("Database Error", f"Failed to save test data: {e}")
 
     def update_part_running_serial(self, cursor):
-        """Update or insert part running serial record (C# implementation)"""
+        """Update or insert part running serial record"""
         try:
             if not self.partRunningSerialExists:
                 # Insert new record
@@ -5447,13 +5446,13 @@ class EOLTesterGUI:
             print(f"Error updating part running serial: {e}")
 
     def print_barcode_label_async(self):
-        """Print barcode label asynchronously (C# implementation)"""
+        """Print barcode label asynchronously"""
         try:
             if not self.prnFileContent:
                 print("No barcode template content available")
                 return
             
-            # Replace placeholders in template (C# style)
+            # Replace placeholders in template
             print_file_text = self.prnFileContent
             
             # Replace all placeholders with actual values
@@ -5518,7 +5517,7 @@ class EOLTesterGUI:
             messagebox.showerror("Print Error", f"Printing failed: {e}")
 
     def wait_for_barcode_scan(self):
-        """Wait for barcode scan verification (C# implementation)"""
+        """Wait for barcode scan verification"""
         try:
             print("Waiting for barcode scan verification...")
             
@@ -5554,14 +5553,14 @@ class EOLTesterGUI:
             print(f"Error simulating barcode scan: {e}")
 
     def check_barcode_scan_timeout(self):
-        """Check if barcode scan timed out (C# implementation)"""
+        """Check if barcode scan timed out"""
         if not self.printedLabelScanDataInput_Received:
             # Scanner could not detect any barcode - update scan result as '***'
             self.update_scan_result("***")
             print("Barcode scan timed out - marked as '***'")
 
     def process_barcode_scan_result(self, scanned_text):
-        """Process barcode scan result (C# implementation)"""
+        """Process barcode scan result"""
         try:
             self.printedLabelScanDataInput_Received = True
             
@@ -5585,7 +5584,7 @@ class EOLTesterGUI:
             print(f"Error processing barcode scan result: {e}")
 
     def update_scan_result(self, result):
-        """Update barcode scan result in database (C# implementation)"""
+        """Update barcode scan result in database"""
         try:
             connection = self.get_database_connection()
             if not connection:
@@ -5613,7 +5612,7 @@ class EOLTesterGUI:
             print(f"Error updating scan result: {e}")
 
     def activate_plc_alert(self):
-        """Activate PLC alert signal (C# implementation)"""
+        """Activate PLC alert signal"""
         try:
             if self.alertOnPLCCoilAddress and self.plc_client:
                 # Convert hex address to int (remove 'M' prefix)
@@ -5680,7 +5679,7 @@ class EOLTesterGUI:
         # Log part number entry attempt
         self.log_operator_action("PART_NUMBER_ENTRY", f"ALC Code: {alc_code}", self.current_employee_id)
         
-        # Call the C# style implementation
+        # Call the test flow
         threading.Thread(target=self.process_alc_code_cs_style, args=(alc_code,), daemon=True).start()
         return
 
