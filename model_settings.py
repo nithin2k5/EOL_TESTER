@@ -9,8 +9,13 @@ from datetime import datetime
 from mysql.connector import Error
 import threading
 import os
+import re
 
 class WorkspaceApp:
+    # A part carries at most eight measured devices, one spec row each.
+    MAX_SPECIFICATIONS = 8
+    NUMERIC_SPEC_FIELDS = ('Master Min', 'Master Max', 'Normal Min', 'Normal Max')
+
     def __init__(self, root, user=None):
         self.root = root
 
@@ -202,6 +207,8 @@ class WorkspaceApp:
             
             entry = tk.Entry(input_frame)
             entry.grid(row=row*2+1, column=col, columnspan=span, sticky='ew', padx=5, pady=2)
+            if label_text in self.NUMERIC_SPEC_FIELDS:
+                self.restrict_to_number(entry)
             self.spec_entries[label_text] = entry
 
         # Buttons frame
@@ -788,24 +795,69 @@ class WorkspaceApp:
         save_btn.pack(pady=5)
         entry.focus_set()
 
+    def restrict_to_number(self, entry):
+        """Allow only a signed number with up to two decimals in this entry."""
+        def is_allowed(proposed):
+            if proposed in ('', '-', '.', '-.'):
+                return True
+            return re.fullmatch(r'-?\d*\.?\d{0,2}', proposed) is not None
+
+        validator = entry.register(lambda proposed: is_allowed(proposed))
+        entry.configure(validate='key', validatecommand=(validator, '%P'))
+
+    def device_exists_in_tree(self, tree, device, column_index=1):
+        """True when the grid already lists this device."""
+        wanted = device.strip().upper()
+        for item in tree.get_children():
+            values = tree.item(item, 'values')
+            if len(values) > column_index and str(values[column_index]).strip().upper() == wanted:
+                return True
+        return False
+
     def on_add_button_click(self, entries, tree):
         """Add specification to the tree (not database yet - saved when SAVE is clicked)"""
         # Get entries in the correct order to match database columns
         spec_field_order = ['Description', 'Device', 'Unit', 'Master Min', 'Master Max', 'Normal Min', 'Normal Max']
-        data = tuple(self.spec_entries[field].get().upper() for field in spec_field_order)
-        
+        data = tuple(self.spec_entries[field].get().strip().upper() for field in spec_field_order)
+
         # Check if all fields have values
         if not all(data):
             messagebox.showwarning("Input Error", "Please fill in all specification fields!")
             return
-        
+
+        # Min/max must be numbers, whatever was typed or pasted in
+        for field in self.NUMERIC_SPEC_FIELDS:
+            value = self.spec_entries[field].get().strip()
+            try:
+                float(value)
+            except ValueError:
+                messagebox.showwarning(
+                    "Input Error",
+                    f"{field} must be a number - '{value}' is not valid."
+                )
+                return
+
+        # One row per device, so the test console can match readings to a spec
+        device = data[1]
+        if self.device_exists_in_tree(tree, device):
+            messagebox.showwarning("Duplicate Device", f"Device '{device}' already exists...")
+            return
+
+        if len(tree.get_children()) >= self.MAX_SPECIFICATIONS:
+            messagebox.showwarning(
+                "Too Many Devices",
+                f"Cannot add more than {self.MAX_SPECIFICATIONS} devices..."
+            )
+            return
+
         # Add to tree view only (will be saved to database when SAVE is clicked)
         tree.insert('', 'end', values=data)
-        
+
         # Clear all specification entries after adding to tree
         for entry in self.spec_entries.values():
             entry.delete(0, tk.END)
-        
+
+        tree.selection_remove(tree.selection())
         print(f"Added specification to tree: {data}")
 
     def on_remove_button_click(self, tree):
@@ -1275,10 +1327,16 @@ class WorkspaceApp:
                 )
                 return
             
+            # Part details, specifications and labels all need to be complete
+            if not (self.validate_part_details()
+                    and self.validate_spec_details()
+                    and self.validate_label_details()):
+                return
+            
             # Collect other data
             part_number = self.textboxes["Part Number"].get()
             model_name = self.textboxes["Model & Part Name"].get()
-            alc_code = self.textboxes["ALC Code"].get()
+            alc_code = self.textboxes["ALC Code"].get().strip()
             
             # Enhanced duplicate check and edit mode validation
             conn = mysql.connector.connect(**self.db_config)
@@ -1287,6 +1345,19 @@ class WorkspaceApp:
             existing = cursor.fetchone()
             cursor.close()
             conn.close()
+            
+            # An ALC code identifies a part during testing, so it must be unique
+            owner = self.check_alc_exists(
+                alc_code,
+                ignore_part_number=part_number if self.edit_mode else None)
+            if owner:
+                messagebox.showerror(
+                    "Duplicate ALC Code",
+                    f"ALC Code '{alc_code}' is already used by part '{owner}'.\n\n" +
+                    "Each part needs its own ALC Code, because testing looks up " +
+                    "the part by the code that is scanned."
+                )
+                return
             
             # Logic to prevent duplication and ensure proper update flow
             if not self.edit_mode:
@@ -1580,6 +1651,86 @@ class WorkspaceApp:
             print(f"Database Error: {err}")
             messagebox.showerror("Database Error", f"Failed to update model master data: {err}")
 
+    PLACEHOLDER_COMBO_VALUES = ('', 'select plc address', 'select barcode type',
+                                '- - select plc address', '- - select barcode type',
+                                'select', 'none')
+
+    def combo_value(self, name):
+        """Selected text for one of the second-quadrant combos, blank when unset."""
+        combo = self.second_quad_combos.get(name)
+        if combo is None:
+            return ''
+
+        value = combo.get().strip()
+        if value.lower().lstrip('- ') in self.PLACEHOLDER_COMBO_VALUES:
+            return ''
+        return value
+
+    def validate_part_details(self):
+        """Both combos in the part details section must have a real selection."""
+        missing = [name for name in ("PLC Address", "Barcode Type")
+                   if not self.combo_value(name)]
+        if missing:
+            messagebox.showwarning(
+                "Input Error",
+                "Please select a value for: " + ", ".join(missing)
+            )
+            return False
+        return True
+
+    def validate_spec_details(self):
+        """A part is not testable without at least one specification row."""
+        if not self.spec_tree.get_children():
+            messagebox.showwarning(
+                "Input Error",
+                "At least one specification detail needs to be entered..."
+            )
+            return False
+        return True
+
+    def validate_label_details(self):
+        """At least one label needs a status before the part can be saved."""
+        for item in self.tree.get_children():
+            values = self.tree.item(item, 'values')
+            if len(values) > 1 and str(values[1]).strip():
+                return True
+
+        messagebox.showwarning(
+            "Input Error",
+            "Please make sure at least one label information is filled "
+            "under Label Details section..."
+        )
+        return False
+
+    def check_alc_exists(self, alc_code, ignore_part_number=None):
+        """True when another part already claims this ALC code.
+
+        Parts are looked up by ALC code during testing, so two parts sharing
+        one would make that lookup ambiguous.
+        """
+        if not alc_code:
+            return False
+
+        try:
+            conn = db.connect()
+            cursor = conn.cursor()
+            if ignore_part_number:
+                cursor.execute(
+                    "SELECT MM_PART_NUMBER FROM TBL_MODEL_MASTER "
+                    "WHERE MM_ALC_CODE = %s AND MM_PART_NUMBER <> %s",
+                    (alc_code, ignore_part_number))
+            else:
+                cursor.execute(
+                    "SELECT MM_PART_NUMBER FROM TBL_MODEL_MASTER WHERE MM_ALC_CODE = %s",
+                    (alc_code,))
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            return result[0] if result else None
+        except mysql.connector.Error as err:
+            print(f"Database Error: {err}")
+            return None
+
     def check_part_exists(self, part_number):
         """Check if a part number already exists in the database"""
         try:
@@ -1780,16 +1931,44 @@ class WorkspaceApp:
         # No popup needed, options are already loaded in combobox
         pass
 
-    def load_plc_options(self):
-        """Load PLC address options from txt_files/ProgramSelectionInPLC.txt"""
+    def used_plc_addresses(self, ignore_part_number=None):
+        """PLC addresses already assigned to a part.
+
+        One address drives one part's program selection, so an address in
+        use must not be offered again.
+        """
+        try:
+            conn = db.connect()
+            cursor = conn.cursor()
+            if ignore_part_number:
+                cursor.execute(
+                    "SELECT MM_PLC_ADDRESS FROM TBL_MODEL_MASTER "
+                    "WHERE MM_PLC_ADDRESS IS NOT NULL AND MM_PART_NUMBER <> %s",
+                    (ignore_part_number,))
+            else:
+                cursor.execute(
+                    "SELECT MM_PLC_ADDRESS FROM TBL_MODEL_MASTER "
+                    "WHERE MM_PLC_ADDRESS IS NOT NULL")
+            taken = {str(row[0]).strip() for row in cursor.fetchall() if row[0]}
+            cursor.close()
+            conn.close()
+            return taken
+        except mysql.connector.Error as err:
+            print(f"Could not read assigned PLC addresses: {err}")
+            return set()
+
+    def load_plc_options(self, ignore_part_number=None):
+        """Load the PLC addresses that are still free to assign."""
         try:
             # Use file in txt_files directory
             file_path = "txt_files/ProgramSelectionInPLC.txt"
             with open(file_path, 'r') as file:
                 content = file.read().strip()
                 options = [opt.strip() for opt in content.split(',') if opt.strip()]
-                print(f"Loaded PLC options: {options}")
-                return options
+                taken = self.used_plc_addresses(ignore_part_number)
+                available = [opt for opt in options if opt not in taken]
+                print(f"Loaded PLC options: {available} ({len(taken)} already assigned)")
+                return available
         except FileNotFoundError:
             print(f"Warning: ProgramSelectionInPLC.txt not found at {file_path}")
             return []
@@ -2149,6 +2328,18 @@ class WorkspaceApp:
         """Handle reset button click"""
         self.reset_form()
 
+    def refresh_plc_address_options(self, ignore_part_number=None):
+        """Repopulate the PLC address combo, keeping the current selection."""
+        combo = self.second_quad_combos.get("PLC Address")
+        if combo is None:
+            return
+
+        current = combo.get()
+        options = self.load_plc_options(ignore_part_number)
+        combo['values'] = options
+        if current:
+            combo.set(current)
+
     def edit_record(self):
         """Enable editing of the selected record"""
         if not hasattr(self, 'current_selected_part') or not self.current_selected_part:
@@ -2193,6 +2384,9 @@ class WorkspaceApp:
         # Enable comboboxes
         for combo in self.second_quad_combos.values():
             combo.config(state='normal')
+        
+        # Offer the free PLC addresses plus the one this part already holds
+        self.refresh_plc_address_options(self.current_selected_part)
         
         # Enable specification entries
         for entry in self.spec_entries.values():
