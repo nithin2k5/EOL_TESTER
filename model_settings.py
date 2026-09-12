@@ -3,6 +3,8 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import json
 import mysql.connector
+
+import db
 from datetime import datetime
 from mysql.connector import Error
 import threading
@@ -49,12 +51,7 @@ class WorkspaceApp:
         self.current_selected_part = None
         
         # Database configuration
-        self.db_config = {
-            'host': 'localhost',
-            'user': 'root',
-            'password': '12345',
-            'database': 'EOL'
-        }
+        self.db_config = db.get_config()
         
         # Initialize database connection and create table if not exists
         self.init_database()
@@ -1133,58 +1130,9 @@ class WorkspaceApp:
                 break
 
     def init_database(self):
-        try:
-            conn = mysql.connector.connect(**self.db_config)
-            cursor = conn.cursor(buffered=True)  # Use buffered cursor to prevent "Unread result" errors
-            
-            # Create TBL_MODEL_MASTER table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MM_PART_NUMBER VARCHAR(255) UNIQUE,
-                    MM_MODEL_NAME VARCHAR(255),
-                    MM_ALC_CODE VARCHAR(255),
-                    MM_PLC_ADDRESS VARCHAR(255),
-                    MM_BARCODE_LABEL_CODE VARCHAR(255),
-                    MM_IMAGE_PATH VARCHAR(255),
-                    MM_VENDOR_CODE VARCHAR(255),
-                    MM_EO_NUMBER VARCHAR(255),
-                    MM_SPECIAL_DATA VARCHAR(255),
-                    MM_INITIAL_ID VARCHAR(255),
-                    MM_SUPPLIER_SECTION VARCHAR(255),
-                    MM_CREATED_BY VARCHAR(255),
-                    MM_CREATED_DATE DATETIME,
-                    MM_STATUS TINYINT(1),
-                    MM_MODIFIED_BY VARCHAR(255),
-                    MM_MODIFIED_DATE DATETIME,
-                    MM_LABEL_POSITIONS JSON,
-                    MM_LABEL_COORDINATES JSON
-                )
-            ''')
-            
-            # Create TBL_MODEL_SPECIFICATION table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_SPECIFICATION (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MS_PART_NUMBER VARCHAR(255),
-                    MS_DESCRIPTION VARCHAR(255),
-                    MS_DEVICE VARCHAR(255),
-                    MS_UNIT VARCHAR(255),
-                    MS_MASTER_MIN VARCHAR(255),
-                    MS_MASTER_MAX VARCHAR(255),
-                    MS_NORMAL_MIN VARCHAR(255),
-                    MS_NORMAL_MAX VARCHAR(255),
-                    FOREIGN KEY (MS_PART_NUMBER) REFERENCES TBL_MODEL_MASTER(MM_PART_NUMBER) ON DELETE CASCADE
-                )
-            ''')
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-        except mysql.connector.Error as err:
-            print(f"Database initialization error: {err}")
-            messagebox.showerror("Database Error", f"Failed to initialize database: {err}")
+        """Create the database and any missing tables."""
+        if not db.init_database():
+            messagebox.showerror("Database Error", "Failed to initialize database")
 
     def save_to_database(self):
         try:
@@ -1240,12 +1188,7 @@ class WorkspaceApp:
             # Debugging: Print the data being inserted
             print("Inserting data:", data)
             
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            conn = db.connect()
             cursor = conn.cursor()
             
             # Add part number to the data tuple
@@ -1274,12 +1217,7 @@ class WorkspaceApp:
 
     def remove_specification(self, part_number):
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            conn = db.connect()
             cursor = conn.cursor()
             query = "DELETE FROM TBL_MODEL_SPECIFICATION WHERE MS_PART_NUMBER = %s"
             cursor.execute(query, (part_number,))

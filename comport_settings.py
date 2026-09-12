@@ -8,7 +8,7 @@ from pymodbus.exceptions import ModbusException
 import serial.tools.list_ports
 import os
 import time
-from dotenv import load_dotenv, set_key, find_dotenv
+import config
 import json
 from datetime import datetime
 
@@ -22,7 +22,7 @@ class ComPortSettings:
         self.modbus_client = None
         
         # Get machine ID from environment variable
-        self.machine_id = os.getenv('MACHINE_ID', 'Not Set')
+        self.machine_id = config.get('MACHINE_ID', 'Not Set')
         
         # Set title with machine ID
         title = "COM Port Settings"
@@ -39,20 +39,17 @@ class ComPortSettings:
         # Create and setup the UI
         self.setup_ui()
         
-        # Load environment variables
-        self.env_file = '.env'
-        load_dotenv(self.env_file)
-        
-        # Create .env file if it doesn't exist
-        if not os.path.exists(self.env_file):
-            with open(self.env_file, 'w') as f:
-                f.write('# COM Port Settings\n')
+        # Settings are read through config.py, which creates .config on demand.
+        config.reload()
 
         # Add Modbus client attribute
         self.modbus_client = None
 
         # Initialize loadcell serial ports dictionary
         self.loadcell_ports = {}
+
+        # Recent loadcell readings, kept for this session only
+        self.loadcell_data = {}
 
         # Initialize loadcell data in environment
         self.initialize_loadcell_env()
@@ -84,7 +81,7 @@ class ComPortSettings:
         title_label.pack(expand=True)
         
         # Machine ID Label (Right side)
-        machine_id = os.getenv('MACHINE_ID', 'Not Set')  # Get from environment variable
+        machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
         machine_label = tk.Label(
             header_content, 
             text=f"Machine ID: {machine_id}",
@@ -764,19 +761,15 @@ class ComPortSettings:
                 messagebox.showerror("Validation Error", "Please fill in all required fields!")
                 return
 
-            # Get the .env file path
-            env_path = find_dotenv()
-            if not env_path:
-                env_path = self.env_file
 
             # Save PLC settings
-            set_key(env_path, 'PLC_COM_PORT', self.plc_com_combo.get())
-            set_key(env_path, 'PLC_BAUD_RATE', self.plc_baud_combo.get())
-            set_key(env_path, 'PLC_STATION_ID', self.station_id_entry.get())
+            config.set('PLC_COM_PORT', self.plc_com_combo.get())
+            config.set('PLC_BAUD_RATE', self.plc_baud_combo.get())
+            config.set('PLC_STATION_ID', self.station_id_entry.get())
             
             # Save Register Address and Points settings
-            set_key(env_path, 'PLC_REG_ADDRESS', self.reg_address_entry.get())
-            set_key(env_path, 'PLC_POINTS_TO_READ', self.points_entry.get())
+            config.set('PLC_REG_ADDRESS', self.reg_address_entry.get())
+            config.set('PLC_POINTS_TO_READ', self.points_entry.get())
             
             # Save Loadcell settings
             for frame in self.root.winfo_children():
@@ -789,12 +782,12 @@ class ComPortSettings:
                                 com_combo = child.winfo_children()[2]  # COM port combo
                                 baud_combo = child.winfo_children()[4]  # BAUD rate combo
                                 
-                                set_key(env_path, f'LOADCELL_{loadcell_num}_COM_PORT', com_combo.get())
-                                set_key(env_path, f'LOADCELL_{loadcell_num}_BAUD_RATE', baud_combo.get())
+                                config.set(f'LOADCELL_{loadcell_num}_COM_PORT', com_combo.get())
+                                config.set(f'LOADCELL_{loadcell_num}_BAUD_RATE', baud_combo.get())
             
             # Save Modbus TCP settings
-            set_key(env_path, 'MODBUS_TCP_IP', self.ip_entry.get())
-            set_key(env_path, 'MODBUS_TCP_PORT', self.port_entry.get())
+            config.set('MODBUS_TCP_IP', self.ip_entry.get())
+            config.set('MODBUS_TCP_PORT', self.port_entry.get())
             
             # Disable all inputs
             self._freeze_all_inputs()
@@ -881,11 +874,7 @@ class ComPortSettings:
                 return
             
             # Get the .env file path
-            env_path = find_dotenv()
-            if not env_path:
-                env_path = self.env_file
-            
-            # Clear environment variables
+            # Settings to clear
             env_vars = [
                 'PLC_COM_PORT', 'PLC_BAUD_RATE', 'PLC_STATION_ID',
                 'MODBUS_TCP_IP', 'MODBUS_TCP_PORT'
@@ -899,9 +888,9 @@ class ComPortSettings:
                     f'LOADCELL_{loadcell_num}_BAUD_RATE'
                 ])
             
-            # Clear each environment variable
+            # Clear each setting
             for var in env_vars:
-                set_key(env_path, var, '')
+                config.set(var, '')
             
             # Reset all inputs to default values
             self._reset_to_defaults()
@@ -920,17 +909,12 @@ class ComPortSettings:
     def _reset_to_defaults(self):
         """Helper method to reset all inputs to default values"""
         try:
-            # Get the .env file path
-            env_path = find_dotenv()
-            if not env_path:
-                env_path = self.env_file
-
-            # Clear saved values from environment
-            set_key(env_path, 'PLC_RX_DATA', '')
-            set_key(env_path, 'LOADCELL_01_RX_DATA', '')
-            set_key(env_path, 'LOADCELL_02_RX_DATA', '')
-            set_key(env_path, 'PLC_REG_ADDRESS', '')
-            set_key(env_path, 'PLC_POINTS_TO_READ', '1')
+            # Clear saved values from the settings file
+            config.set('PLC_RX_DATA', '')
+            config.set('LOADCELL_01_RX_DATA', '')
+            config.set('LOADCELL_02_RX_DATA', '')
+            config.set('PLC_REG_ADDRESS', '')
+            config.set('PLC_POINTS_TO_READ', '1')
 
             # Get available COM ports
             available_ports = [port.device for port in serial.tools.list_ports.comports()]
@@ -971,9 +955,9 @@ class ComPortSettings:
         """Load settings from environment variables"""
         try:
             # Load PLC settings
-            plc_port = os.getenv('PLC_COM_PORT', '')
-            plc_baud = os.getenv('PLC_BAUD_RATE', '')
-            plc_station_id = os.getenv('PLC_STATION_ID', '')
+            plc_port = config.get('PLC_COM_PORT', '')
+            plc_baud = config.get('PLC_BAUD_RATE', '')
+            plc_station_id = config.get('PLC_STATION_ID', '')
             
             self.plc_com_combo.set(plc_port)
             self.plc_baud_combo.set(plc_baud)
@@ -981,8 +965,8 @@ class ComPortSettings:
             self.station_id_entry.insert(0, plc_station_id)
             
             # Load Register Address and Points settings if they exist
-            reg_address = os.getenv('PLC_REG_ADDRESS', '')
-            points_to_read = os.getenv('PLC_POINTS_TO_READ', '1')
+            reg_address = config.get('PLC_REG_ADDRESS', '')
+            points_to_read = config.get('PLC_POINTS_TO_READ', '1')
             
             self.reg_address_entry.delete(0, tk.END)
             self.reg_address_entry.insert(0, reg_address)
@@ -1001,15 +985,15 @@ class ComPortSettings:
                                 com_combo = child.winfo_children()[2]
                                 baud_combo = child.winfo_children()[4]
                                 
-                                com_port = os.getenv(f'LOADCELL_{loadcell_num}_COM_PORT', '')
-                                baud_rate = os.getenv(f'LOADCELL_{loadcell_num}_BAUD_RATE', '')
+                                com_port = config.get(f'LOADCELL_{loadcell_num}_COM_PORT', '')
+                                baud_rate = config.get(f'LOADCELL_{loadcell_num}_BAUD_RATE', '')
                                 
                                 com_combo.set(com_port)
                                 baud_combo.set(baud_rate)
             
             # Load Modbus TCP settings
-            modbus_ip = os.getenv('MODBUS_TCP_IP', '')
-            modbus_port = os.getenv('MODBUS_TCP_PORT', '')
+            modbus_ip = config.get('MODBUS_TCP_IP', '')
+            modbus_port = config.get('MODBUS_TCP_PORT', '')
             
             self.ip_entry.delete(0, tk.END)
             self.ip_entry.insert(0, modbus_ip)
@@ -1026,23 +1010,18 @@ class ComPortSettings:
             messagebox.showerror("Load Error", f"Failed to load settings!\nError: {str(e)}")
 
     def initialize_loadcell_env(self):
-        """Initialize environment variables for loadcell data if they don't exist"""
+        """Initialize the in-memory loadcell buffers if they don't exist"""
         try:
             for i in range(1, 3):  # For loadcell 1 and 2
-                env_key = f'LOADCELL_{i}_DATA'
-                if not os.getenv(env_key):
-                    # Initialize with empty data list
-                    os.environ[env_key] = json.dumps([])
+                self.loadcell_data.setdefault(i, [])
         except Exception as e:
             print(f"Error initializing environment variables: {str(e)}")
 
     def save_loadcell_data(self, loadcell_num, value):
-        """Save loadcell data to environment variable"""
+        """Save loadcell data to the in-memory buffer"""
         try:
-            env_key = f'LOADCELL_{loadcell_num}_DATA'
-            
             # Get existing data
-            existing_data = json.loads(os.getenv(env_key, '[]'))
+            existing_data = self.loadcell_data.get(loadcell_num, [])
             
             # Create new data entry
             new_entry = {
@@ -1055,20 +1034,19 @@ class ComPortSettings:
             if len(existing_data) > 100:  # Limit to last 100 readings
                 existing_data = existing_data[-100:]
             
-            # Save back to environment variable
-            os.environ[env_key] = json.dumps(existing_data)
+            # Save back to the in-memory buffer
+            self.loadcell_data[loadcell_num] = existing_data
             
         except Exception as e:
             print(f"Error saving loadcell data: {str(e)}")
 
     def load_loadcell_data(self, frame):
-        """Load previous loadcell data from environment variable"""
+        """Load previous loadcell data from the in-memory buffer"""
         try:
             loadcell_num = frame.loadcell_num
-            env_key = f'LOADCELL_{loadcell_num}_DATA'
-            
-            # Get data from environment variable
-            data = json.loads(os.getenv(env_key, '[]'))
+
+            # Get data from the in-memory buffer
+            data = self.loadcell_data.get(loadcell_num, [])
             
             # Clear current display
             frame.rx_text.delete("1.0", tk.END)
@@ -1088,13 +1066,10 @@ class ComPortSettings:
     def save_device_values(self):
         """Save PLC and loadcell values to environment variables"""
         try:
-            env_path = find_dotenv()
-            if not env_path:
-                env_path = self.env_file
 
             # Save PLC Rx string
             plc_rx = self.rx_text.get("1.0", tk.END).strip()
-            set_key(env_path, 'PLC_RX_DATA', plc_rx)
+            config.set('PLC_RX_DATA', plc_rx)
 
             # Save Loadcell Rx strings
             for frame in self.root.winfo_children():
@@ -1106,7 +1081,7 @@ class ComPortSettings:
                                 loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
                                 rx_text = child.rx_text  # Get the Text widget reference
                                 rx_data = rx_text.get("1.0", tk.END).strip()
-                                set_key(env_path, f'LOADCELL_{loadcell_num}_RX_DATA', rx_data)
+                                config.set(f'LOADCELL_{loadcell_num}_RX_DATA', rx_data)
 
         except Exception as e:
             print(f"Error saving device values: {str(e)}")
@@ -1115,7 +1090,7 @@ class ComPortSettings:
         """Load PLC and loadcell values from environment variables"""
         try:
             # Load PLC Rx string
-            plc_rx = os.getenv('PLC_RX_DATA', '')
+            plc_rx = config.get('PLC_RX_DATA', '')
             if plc_rx:
                 self.rx_text.delete("1.0", tk.END)
                 self.rx_text.insert(tk.END, plc_rx)
@@ -1129,7 +1104,7 @@ class ComPortSettings:
                             if isinstance(title_label, tk.Label) and "LOADCELL" in title_label.cget("text"):
                                 loadcell_num = title_label.cget("text").split('-')[1].strip()[:2]
                                 rx_text = child.rx_text  # Get the Text widget reference
-                                rx_data = os.getenv(f'LOADCELL_{loadcell_num}_RX_DATA', '')
+                                rx_data = config.get(f'LOADCELL_{loadcell_num}_RX_DATA', '')
                                 if rx_data:
                                     rx_text.delete("1.0", tk.END)
                                     rx_text.insert(tk.END, rx_data)

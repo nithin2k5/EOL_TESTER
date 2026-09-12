@@ -1,21 +1,19 @@
 """Employee login dialog used to gate the Settings and Admin consoles."""
 
-import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 import mysql.connector
-from dotenv import load_dotenv
 
 import auth
-
-load_dotenv()
+import config
+import db
 
 # Employee number of the support account, whose password lives in .env as a
 # hash rather than in the EMPLOYEE_INFO table. The account still needs a row
 # in EMPLOYEE_INFO so that it appears in the dropdown.
-SERVICE_ACCOUNT_USER = os.getenv('SERVICE_ACCOUNT_USER', '')
-SERVICE_ACCOUNT_PASSWORD_HASH = os.getenv('SERVICE_ACCOUNT_PASSWORD_HASH', '')
+SERVICE_ACCOUNT_USER = config.get('SERVICE_ACCOUNT_USER', '')
+SERVICE_ACCOUNT_PASSWORD_HASH = config.get('SERVICE_ACCOUNT_PASSWORD_HASH', '')
 
 
 class LoginForm(tk.Toplevel):
@@ -33,19 +31,14 @@ class LoginForm(tk.Toplevel):
         self._passwords = {}   # employee number -> stored password value
         self._numbers = {}     # combobox display text -> employee number
 
-        machine_id = os.getenv('MACHINE_ID', '').strip("'")
+        machine_id = config.get('MACHINE_ID', '')
         title = "Login"
         if machine_id:
             title += f" - Machine ID: {machine_id}"
         self.title(title)
         self.resizable(False, False)
 
-        self.db_config = {
-            'host': 'localhost',
-            'user': 'root',
-            'password': '12345',
-            'database': 'EOL'
-        }
+        self.db_config = db.get_config()
 
         self.setup_ui()
 

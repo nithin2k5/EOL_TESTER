@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 import mysql.connector
+
+import db
 from datetime import datetime
 import csv
 import os
@@ -13,12 +15,7 @@ class DataConsole:
         self.root.title("EOL (END OF LINE) TESTER")
         
         # Database configuration
-        self.db_config = {
-            'host': 'localhost',
-            'user': 'root',
-            'password': '12345',
-            'database': 'EOL'
-        }
+        self.db_config = db.get_config()
         
         self.create_header()
         self.create_input_section()

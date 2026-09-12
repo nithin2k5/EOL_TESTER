@@ -8,7 +8,8 @@ import json
 from datetime import datetime, timedelta
 import csv
 import shutil
-from dotenv import find_dotenv, set_key
+import config
+import db
 
 class AdminConsole:
     def __init__(self, root):
@@ -16,10 +17,10 @@ class AdminConsole:
         
         # Initialize backup paths and machine ID from environment variables
         self.backup_paths = {
-            'primary': os.getenv('PRIMARY_BACKUP_PATH', ''),
-            'secondary': os.getenv('SECONDARY_BACKUP_PATH', '')
+            'primary': config.get('PRIMARY_BACKUP_PATH', ''),
+            'secondary': config.get('SECONDARY_BACKUP_PATH', '')
         }
-        self.machine_id = os.getenv('MACHINE_ID', '')  # Get machine ID from env
+        self.machine_id = config.get('MACHINE_ID', '')  # Get machine ID from settings
         
         # Set title with machine ID
         title = "ADMIN CONSOLE"
@@ -28,12 +29,7 @@ class AdminConsole:
         self.root.title(title)
         
         # Database configuration
-        self.db_config = {
-            'host': 'localhost',
-            'user': 'root',
-            'password': '12345',
-            'database': 'EOL'
-        }
+        self.db_config = db.get_config()
         
         # Initialize database
         self.init_database()
@@ -48,56 +44,9 @@ class AdminConsole:
         self.load_records()
 
     def init_database(self):
-        """Initialize the database table"""
-        try:
-            conn = mysql.connector.connect(**self.db_config)
-            cursor = conn.cursor()
-            
-            # First, check if MACHINE_ID column exists
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM information_schema.columns 
-                WHERE table_schema = 'EOL'
-                AND table_name = 'EMPLOYEE_INFO'
-                AND column_name = 'MACHINE_ID'
-            """)
-            
-            has_machine_id = cursor.fetchone()[0] > 0
-            
-            if not has_machine_id:
-                # Add MACHINE_ID column if it doesn't exist
-                try:
-                    cursor.execute("""
-                        ALTER TABLE EMPLOYEE_INFO
-                        ADD COLUMN MACHINE_ID VARCHAR(100) AFTER MOBILE_NUMBER
-                    """)
-                    conn.commit()
-                except mysql.connector.Error as err:
-                    # If table doesn't exist, create it with all columns
-                    if err.errno == 1146:  # Table doesn't exist
-                        cursor.execute('''
-                            CREATE TABLE EMPLOYEE_INFO (
-                                ID INT AUTO_INCREMENT PRIMARY KEY,
-                                EMPLOYEE_FULL_NAME VARCHAR(255),
-                                EMPLOYEE_NUMBER VARCHAR(50) UNIQUE,
-                                PASSWORD VARCHAR(255),
-                                DESIGNATION VARCHAR(100),
-                                DEPARTMENT VARCHAR(100),
-                                MOBILE_NUMBER VARCHAR(20),
-                                MACHINE_ID VARCHAR(100),
-                                IS_ACTIVE BOOLEAN DEFAULT TRUE,
-                                CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                            )
-                        ''')
-                        conn.commit()
-                    else:
-                        raise
-            
-            cursor.close()
-            conn.close()
-            
-        except mysql.connector.Error as err:
-            messagebox.showerror("Database Error", f"Failed to initialize database: {err}")
+        """Create the database and any missing tables."""
+        if not db.init_database():
+            messagebox.showerror("Database Error", "Failed to initialize database")
 
     def load_records(self):
         """Load existing records into the treeview"""
@@ -851,11 +800,8 @@ class AdminConsole:
                 # Store in backup_paths dictionary
                 self.backup_paths[path_type] = folder_path
                 
-                # Save to .env file
-                env_path = find_dotenv()
-                if not env_path:
-                    env_path = '.env'
-                set_key(env_path, f'{path_type.upper()}_BACKUP_PATH', folder_path)
+                # Save to the settings file
+                config.set(f'{path_type.upper()}_BACKUP_PATH', folder_path)
                 
                 messagebox.showinfo("Success", f"{path_type.title()} backup path set successfully!")
                 
@@ -990,13 +936,8 @@ class AdminConsole:
                 messagebox.showwarning("Warning", "Please enter a Machine ID")
                 return
             
-            # Get the .env file path
-            env_path = find_dotenv()
-            if not env_path:
-                env_path = '.env'
-            
-            # Save to .env file
-            set_key(env_path, 'MACHINE_ID', machine_id)
+            # Save to the settings file
+            config.set('MACHINE_ID', machine_id)
             self.machine_id = machine_id
             
             # Update database with machine ID for all records
@@ -1031,13 +972,13 @@ class AdminConsole:
     def cleanup(self):
         """Cleanup function called when closing the application"""
         try:
-            # Save backup paths and machine ID to environment variables
+            # Save backup paths and machine ID to the settings file
             if self.backup_paths.get('primary') and not self.backup_paths['primary'].startswith('Click to select'):
-                os.environ['PRIMARY_BACKUP_PATH'] = self.backup_paths['primary']
+                config.set('PRIMARY_BACKUP_PATH', self.backup_paths['primary'])
             if self.backup_paths.get('secondary') and not self.backup_paths['secondary'].startswith('Click to select'):
-                os.environ['SECONDARY_BACKUP_PATH'] = self.backup_paths['secondary']
+                config.set('SECONDARY_BACKUP_PATH', self.backup_paths['secondary'])
             if self.machine_id_var.get().strip():
-                os.environ['MACHINE_ID'] = self.machine_id_var.get().strip()
+                config.set('MACHINE_ID', self.machine_id_var.get().strip())
             
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")

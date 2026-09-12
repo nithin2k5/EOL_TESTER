@@ -10,22 +10,23 @@ import json
 from pymodbus.client import ModbusSerialClient, ModbusTcpClient  # PLC functionality restored
 import serial
 from serial.tools import list_ports  # Proper import for port enumeration
-from dotenv import load_dotenv
 import time
 import traceback
 from datetime import datetime
 import random
 import sys
-from dotenv import load_dotenv, set_key
 import queue
 import re
+
+import config
+import db
 
 class EOLTesterGUI:
     def __init__(self, root):
         self.root = root
         
         # Get machine ID from environment
-        machine_id = os.getenv('MACHINE_ID', '')
+        machine_id = config.get('MACHINE_ID', '')
         
         # Set title with machine ID
         title = "EOL (END OF LINE) TESTER"
@@ -83,48 +84,39 @@ class EOLTesterGUI:
             print(f"Error getting available ports: {e}")
             return []
 
-    def ensure_env_file_exists(self):
-        """Ensure that the .env file exists and create it if it doesn't"""
-        env_file = '.env'
-        if not os.path.exists(env_file):
-            print(f"Creating new {env_file} file")
-            
-            with open(env_file, 'w') as f:
-                f.write('# Machine Settings\n')
-                f.write('MACHINE_ID=\n')
-        return env_file
+    def ensure_settings_file_exists(self):
+        """Make sure the settings file exists; config.py creates it on demand."""
+        config.reload()
+        return config.CONFIG_FILE
 
     def reload_env_settings(self):
-        """Force reload environment settings from .env file"""
+        """Force a re-read of the settings file"""
         try:
-            env_file = '.env'
-            if os.path.exists(env_file):
-                # Force reload from file
-                load_dotenv(dotenv_path=env_file, override=True)
-                print("Environment variables reloaded from .env file")
-                return True
-            else:
-                print("No .env file found to reload")
-                return False
+            config.reload()
+            print("Settings reloaded from the config file")
+            return True
+        except Exception as e:
+            print(f"Error reloading settings: {str(e)}")
+            return False
         except Exception as e:
             print(f"Error reloading environment settings: {str(e)}")
             return False
 
     def load_plc_config(self):
-        """Load PLC configuration from environment variables"""
+        """Load PLC configuration from the settings file"""
         try:
             # PLC connection settings
-            self.plc_com_port = os.getenv('PLC_COM_PORT', 'COM5').strip("'")
-            self.plc_baud_rate = int(os.getenv('PLC_BAUD_RATE', '38400'))
-            self.plc_station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            self.plc_com_port = config.get('PLC_COM_PORT', 'COM5').strip("'")
+            self.plc_baud_rate = int(config.get('PLC_BAUD_RATE', '38400'))
+            self.plc_station_id = int(config.get('PLC_STATION_ID', '1'))
             
             # TCP settings (if available)
-            self.plc_tcp_ip = os.getenv('MODBUS_TCP_IP', '').strip("'")
-            self.plc_tcp_port = int(os.getenv('MODBUS_TCP_PORT', '502')) if os.getenv('MODBUS_TCP_PORT') else 502
+            self.plc_tcp_ip = config.get('MODBUS_TCP_IP', '').strip("'")
+            self.plc_tcp_port = int(config.get('MODBUS_TCP_PORT', '502')) if config.get('MODBUS_TCP_PORT') else 502
             
             # Register settings
-            self.plc_reg_address = os.getenv('PLC_REG_ADDRESS', '').strip("'")
-            self.plc_points_to_read = int(os.getenv('PLC_POINTS_TO_READ', '1'))
+            self.plc_reg_address = config.get('PLC_REG_ADDRESS', '').strip("'")
+            self.plc_points_to_read = int(config.get('PLC_POINTS_TO_READ', '1'))
             
             print(f"PLC Config loaded - COM: {self.plc_com_port}, Baud: {self.plc_baud_rate}, Station: {self.plc_station_id}")
             if self.plc_tcp_ip:
@@ -181,15 +173,14 @@ class EOLTesterGUI:
         self.monitoring_interval = 3000  # Start with 3 seconds
         self.last_status_values = {}  # Track last status to detect changes
         
-        # Ensure .env file exists and load environment variables
-        env_file = self.ensure_env_file_exists()
-        load_dotenv(dotenv_path=env_file, override=True)
+        # Make sure the settings file exists and is freshly read
+        self.ensure_settings_file_exists()
         
-        # Load PLC configuration from .env
+        # Load PLC configuration from the settings file
         self.load_plc_config()
         
-        # Get machine ID from environment variable and store it
-        self.machineid = os.getenv('MACHINE_ID', 'Not Set')
+        # Get machine ID from the settings file and store it
+        self.machineid = config.get('MACHINE_ID', 'Not Set')
         
         # Initialize arrays for different data types
         self.process_status_array = []
@@ -240,13 +231,7 @@ class EOLTesterGUI:
         self.mldDataTable = []
         
         # Database configuration for C# style implementation
-        self.db_config = {
-            'host': 'localhost',
-            'port': 3306,
-            'user': 'root',
-            'password': '12345',
-            'database': 'EOL'
-        }
+        self.db_config = db.get_config()
         
         # Part information variables
         self.partNumber = ""
@@ -412,11 +397,10 @@ class EOLTesterGUI:
         self.message_label = tk.Label(self.main_container, text="Initializing...", font=("Arial", 10))
         self.message_label.pack(fill="x", pady=2)
         
-        # Ensure .env file exists and load environment variables
-        env_file = self.ensure_env_file_exists()
-        load_dotenv(dotenv_path=env_file, override=True)
+        # Make sure the settings file exists and is freshly read
+        self.ensure_settings_file_exists()
         
-        # Load data after environment variables are loaded
+        # Load data after the settings are loaded
         self.load_configuration_data()
         
         # Set up GUI components before connecting to devices
@@ -496,7 +480,7 @@ class EOLTesterGUI:
         title_label.pack(pady=5)
         
         # Machine ID (right side)
-        machine_id = os.getenv('MACHINE_ID', 'Not Set')  # Get from environment variable
+        machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
         machine_label = tk.Label(
             title_frame, 
             text=f"Machine ID: {machine_id}",
@@ -2458,102 +2442,9 @@ class EOLTesterGUI:
             return False
 
     def create_database_tables(self, cursor):
-        """Create necessary database tables for EOL testing"""
-        try:
-            # Create TBL_MODEL_MASTER table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_MASTER (
-                    MM_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MM_ALC_CODE VARCHAR(50) NOT NULL,
-                    MM_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MM_MODEL_NAME VARCHAR(200),
-                    MM_VENDOR_CODE VARCHAR(50),
-                    MM_EO_NUMBER VARCHAR(50),
-                    MM_SPECIAL_DATA VARCHAR(200),
-                    MM_INITIAL_ID VARCHAR(50),
-                    MM_SUPPLIER_SECTION VARCHAR(100),
-                    MM_IMAGE_PATH VARCHAR(500),
-                    MM_BARCODE_LABEL_CODE VARCHAR(200),
-                    MM_PLC_ADDRESS VARCHAR(20),
-                    MM_STATUS BOOLEAN DEFAULT TRUE,
-                    MM_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_MODEL_SPECIFICATION table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_SPECIFICATION (
-                    MS_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MS_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MS_DESCRIPTION VARCHAR(200),
-                    MS_DEVICE VARCHAR(10) NOT NULL,
-                    MS_NORMAL_MIN DECIMAL(10,3),
-                    MS_NORMAL_MAX DECIMAL(10,3),
-                    MS_UNIT VARCHAR(20),
-                    MS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_MODEL_LABEL_DETAILS table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_MODEL_LABEL_DETAILS (
-                    MLD_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    MLD_PART_NUMBER VARCHAR(100) NOT NULL,
-                    MLD_LABEL_ID VARCHAR(50) NOT NULL,
-                    MLD_ON_STATUS VARCHAR(100),
-                    MLD_OFF_STATUS VARCHAR(100),
-                    MLD_X INT DEFAULT 0,
-                    MLD_Y INT DEFAULT 0,
-                    MLD_FONT VARCHAR(100) DEFAULT 'Arial, 12pt',
-                    MLD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_TEST_DATA table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_TEST_DATA (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    TD_MACHINE_ID VARCHAR(50),
-                    TD_PART_NUMBER VARCHAR(100),
-                    TD_LOT_NUMBER VARCHAR(50),
-                    TD_TRACEABILITY_CODE VARCHAR(100),
-                    TD_RECORD_DATE DATE,
-                    TD_DATETIME DATETIME,
-                    L1 DECIMAL(10,3),
-                    L2 DECIMAL(10,3),
-                    L3 DECIMAL(10,3),
-                    L4 DECIMAL(10,3),
-                    P1 DECIMAL(10,3),
-                    P2 DECIMAL(10,3),
-                    P3 DECIMAL(10,3),
-                    P4 DECIMAL(10,3),
-                    CAM1 VARCHAR(20),
-                    TD_OVERALL_STATUS VARCHAR(10),
-                    TD_EMP_CODE VARCHAR(50),
-                    TD_BARCODE_SCAN_RESULT VARCHAR(10),
-                    TD_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create TBL_PART_RUNNING_SERIAL table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS TBL_PART_RUNNING_SERIAL (
-                    PRS_ID INT AUTO_INCREMENT PRIMARY KEY,
-                    PART_NUMBER VARCHAR(100) NOT NULL,
-                    TEST_DAY_DATE DATE NOT NULL,
-                    TEST_DAY_LAST_DATE_TIME DATETIME,
-                    TRACEABILITY_CODE VARCHAR(100),
-                    RUNNING_LOT_NUMBER VARCHAR(50),
-                    PRS_CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_part_date (PART_NUMBER, TEST_DAY_DATE)
-                )
-            """)
-            
-            print("Database tables created/verified successfully")
-            
-        except mysql.connector.Error as e:
-            print(f"Error creating database tables: {e}")
-            raise e
+        """Create the database tables used by the EOL test flow."""
+        db.init_database(raise_on_error=True)
+        print("Database tables created/verified successfully")
 
     def load_configuration_data(self):
         """Load configuration data from txt_files subdirectory"""
@@ -3096,7 +2987,7 @@ class EOLTesterGUI:
                 print("⚠️ No process addresses loaded - using simulation mode")
                 return self.get_simulated_process_status()
             
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            station_id = int(config.get('PLC_STATION_ID', '1'))
             
             # Parse addresses from process status array (C# style)
             # Convert hex addresses to decimal
@@ -3489,14 +3380,14 @@ class EOLTesterGUI:
             # PLC port handling removed
                 
             # Also check if any loadcell ports need to be closed
-            loadcell1_port = os.getenv('LOADCELL_01_COM_PORT')
+            loadcell1_port = config.get('LOADCELL_01_COM_PORT')
             if loadcell1_port and loadcell1_port.strip():
                 if loadcell1_port not in available_ports:
                     print(f"Warning: Configured Loadcell 1 port {loadcell1_port} is not available on this system")
                 else:
                     self._force_close_port(loadcell1_port)
                     
-            loadcell2_port = os.getenv('LOADCELL_02_COM_PORT')
+            loadcell2_port = config.get('LOADCELL_02_COM_PORT')
             if loadcell2_port and loadcell2_port.strip():
                 if loadcell2_port not in available_ports:
                     print(f"Warning: Configured Loadcell 2 port {loadcell2_port} is not available on this system")
@@ -3557,12 +3448,7 @@ class EOLTesterGUI:
         try:
             # Connect to database with error handling
             try:
-                conn = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="12345",
-                    database="EOL"
-                )
+                conn = db.connect()
             except mysql.connector.Error as err:
                 print(f"Database connection failed: {err}")
                 messagebox.showerror("Database Error", "Failed to connect to database. Please check your database connection.")
@@ -3896,12 +3782,7 @@ class EOLTesterGUI:
                 }
 
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            conn = db.connect()
             cursor = conn.cursor()
 
             # Update the database with new positions
@@ -4651,7 +4532,7 @@ class EOLTesterGUI:
             if not self.hold_register_addresses:
                 return
             
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            station_id = int(config.get('PLC_STATION_ID', '1'))
             register_data = {}
             
             # Track if we should print debug info (every 5 seconds)
@@ -5592,12 +5473,7 @@ class EOLTesterGUI:
         return
 
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            conn = db.connect()
             cursor = conn.cursor(dictionary=True)
 
             # Get model information using ALC code
@@ -6082,7 +5958,7 @@ class EOLTesterGUI:
             if not hasattr(self, 'plc_client') or not self.plc_client:
                 return False
                 
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            station_id = int(config.get('PLC_STATION_ID', '1'))
             reset_success = True
             
             print("🔄 Starting comprehensive PLC reset for new cycle...")
@@ -6311,13 +6187,7 @@ class EOLTesterGUI:
     def test_database_connectivity(self):
         """Test database connectivity for workflow validation"""
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root", 
-                password="12345",
-                database="EOL",
-                connection_timeout=5
-            )
+            conn = db.connect(connection_timeout=5)
             conn.close()
             return True
         except Exception as e:
@@ -7279,31 +7149,13 @@ class EOLTesterGUI:
                 
             # Database connection config
             print("Attempting database connection...")
-            db_config = {
-                'host': os.getenv('DB_HOST', 'localhost'),
-                'user': os.getenv('DB_USER', 'root'),
-                'password': os.getenv('DB_PASSWORD', ''),
-                'database': os.getenv('DB_NAME', 'eol_test_data'),
-                'port': int(os.getenv('DB_PORT', 3306))
-            }
+            db_config = db.get_config()
             print(f"DB Config: host={db_config['host']}, user={db_config['user']}, database={db_config['database']}")
                 
             # Test database connection first with improved settings
             print("Attempting database connection...")
             try:
-                conn = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="12345",
-                    database="EOL",
-                    autocommit=False,
-                    connection_timeout=10,
-                    charset='utf8mb4',
-                    use_unicode=True,
-                    raise_on_warnings=True,
-                    sql_mode='STRICT_TRANS_TABLES',
-                    pool_reset_session=True
-                )
+                conn = db.connect(autocommit=False, connection_timeout=10, charset='utf8mb4', use_unicode=True, raise_on_warnings=True, sql_mode='STRICT_TRANS_TABLES', pool_reset_session=True)
                 print("Database connection successful with enhanced settings")
             except mysql.connector.Error as db_err:
                 print(f"Database connection failed: {db_err}")
@@ -7578,12 +7430,7 @@ class EOLTesterGUI:
     def get_available_alc_codes(self):
         """Fetch all available ALC codes from the database"""
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL"
-            )
+            conn = db.connect()
             
             cursor = conn.cursor()
             
@@ -7729,16 +7576,7 @@ class EOLTesterGUI:
         """Get lot test result history from database"""
         try:
             print(f"Getting lot history (limit: {limit})...")
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL",
-                connection_timeout=10,
-                charset='utf8mb4',
-                use_unicode=True,
-                autocommit=True
-            )
+            conn = db.connect(connection_timeout=10, charset='utf8mb4', use_unicode=True, autocommit=True)
             
             cursor = conn.cursor()
             
@@ -7917,7 +7755,7 @@ class EOLTesterGUI:
             registers_to_read = self.hold_register_addresses[start_index:start_index + num_registers]
             register_values = {}
             
-            station_id = int(os.getenv('PLC_STATION_ID', '1'))
+            station_id = int(config.get('PLC_STATION_ID', '1'))
             
             for reg_addr_str in registers_to_read:
                 if not reg_addr_str.strip():
@@ -8235,29 +8073,8 @@ class EOLTesterGUI:
     def get_next_lot_increment(self, date_str, machine_digit):
         """Get the next increment number for lot generation"""
         try:
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="12345",
-                database="EOL",
-                connection_timeout=10,
-                charset='utf8mb4',
-                use_unicode=True
-            )
+            conn = db.connect(connection_timeout=10, charset='utf8mb4', use_unicode=True)
             cursor = conn.cursor()
-            
-            # Create lot sequence table if it doesn't exist (simple increment without iteration)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS TBL_LOT_SEQUENCE (
-                    ID INT AUTO_INCREMENT PRIMARY KEY,
-                    DATE_STR VARCHAR(6) NOT NULL,
-                    MACHINE_DIGIT VARCHAR(1) NOT NULL,
-                    LAST_INCREMENT INT DEFAULT 0,
-                    CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UPDATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_date_machine (DATE_STR, MACHINE_DIGIT)
-                )
-            ''')
             
             # Get current increment for this date and machine
             cursor.execute(

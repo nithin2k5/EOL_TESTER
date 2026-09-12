@@ -8,12 +8,15 @@ from comport_settings import ComPortSettings  # Add this import
 from dataconsole import DataConsole  # Add this import
 from adminconsole import AdminConsole  # Add this import
 from login_form import prompt_login
+import config
+import db
 import theme
 
 class MainConsole(tk.Tk):
     def __init__(self):
         super().__init__()
         theme.apply_professional_theme(self)
+        db.init_database()
         self.title("EOL Tester")
         self.state('zoomed')  # Start maximized
         self.setup_ui()
@@ -113,7 +116,7 @@ class MainConsole(tk.Tk):
         
         try:
             # Attempt to force-release COM ports before creating new instance
-            plc_port = os.getenv('PLC_COM_PORT')
+            plc_port = config.get('PLC_COM_PORT')
             if plc_port:
                 try:
                     # Try direct port open/close to force release
@@ -143,7 +146,7 @@ class MainConsole(tk.Tk):
                 
                 # Force an additional cleanup of COM ports
                 try:
-                    plc_port = os.getenv('PLC_COM_PORT')
+                    plc_port = config.get('PLC_COM_PORT')
                     if plc_port:
                         try:
                             cleanup_serial = serial.Serial(plc_port)
