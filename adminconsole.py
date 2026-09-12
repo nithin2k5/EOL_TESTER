@@ -11,6 +11,7 @@ import shutil
 import auth
 import config
 import db
+import ui
 
 class AdminConsole:
     # A stored password is a hash, so it is never shown. This stands in
@@ -19,6 +20,7 @@ class AdminConsole:
 
     def __init__(self, root):
         self.root = root
+        ui.apply(root)
         
         # Initialize backup paths and machine ID from environment variables
         self.backup_paths = {
@@ -40,7 +42,7 @@ class AdminConsole:
         self.init_database()
         
         # Configure the main background color
-        self.root.configure(bg='pink')
+        self.root.configure(bg=ui.APP_BG)
         
         # Create and setup the UI
         self.setup_ui()
@@ -411,8 +413,12 @@ class AdminConsole:
         )
         title_label.pack(expand=True)
 
-        # Main content frame
-        content_frame = tk.Frame(self.root, bg='white')
+        # Main content frame, inside a scroller so nothing falls off a
+        # shorter screen.
+        self.page_scroller = ui.scrollable(self.root)
+        self.page_scroller.pack(fill=tk.BOTH, expand=True)
+        
+        content_frame = tk.Frame(self.page_scroller.body, bg='white')
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         # Top section container
@@ -499,25 +505,25 @@ class AdminConsole:
         style = ttk.Style()
         style.configure(
             "Custom.Treeview",
-            background="black",
-            foreground="white",
-            fieldbackground="black",  # Color of empty rows
-            rowheight=25,
-            font=('Arial', 9)
+            background=ui.SURFACE,
+            foreground=ui.TEXT,
+            fieldbackground=ui.SURFACE,  # Color of empty rows
+            rowheight=26,
+            font=ui.FONT_BODY
         )
         
         style.configure(
             "Custom.Treeview.Heading",
-            background="navy",
-            foreground="white",
+            background=ui.SUBTLE,
+            foreground=ui.TEXT,
             relief="flat",
-            font=('Arial', 10, 'bold')
+            font=ui.FONT_BODY_BOLD
         )
         
         # Map selected row colors
         style.map('Custom.Treeview',
-            background=[('selected', '#303030')],
-            foreground=[('selected', '#ffffff')]
+            background=[('selected', ui.ACCENT)],
+            foreground=[('selected', ui.TEXT_ON_ACCENT)]
         )
 
         # Updated buttons configuration with distinct colors

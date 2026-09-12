@@ -5,6 +5,7 @@ import json
 import mysql.connector
 
 import db
+import ui
 from datetime import datetime
 from mysql.connector import Error
 import threading
@@ -18,6 +19,7 @@ class WorkspaceApp:
 
     def __init__(self, root, user=None):
         self.root = root
+        ui.apply(root)
 
         # Employee number of whoever logged in, stamped on the audit columns.
         self.user = user or 'User'
@@ -64,8 +66,13 @@ class WorkspaceApp:
         self.setup_ui()
 
     def setup_ui(self):
+        # The page is laid out at fixed sizes and is taller and wider than a
+        # smaller screen, so it scrolls rather than losing the edges.
+        self.page_scroller = ui.scrollable(self.root, horizontal=True)
+        self.page_scroller.pack(fill=tk.BOTH, expand=True)
+        
         # Create main container
-        self.main_container = tk.Frame(self.root)
+        self.main_container = tk.Frame(self.page_scroller.body)
         self.main_container.pack(fill=tk.BOTH, expand=True)
         
         # Create header with labels

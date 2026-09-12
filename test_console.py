@@ -20,10 +20,12 @@ import re
 
 import config
 import db
+import ui
 
 class EOLTesterGUI:
     def __init__(self, root):
         self.root = root
+        ui.apply(root)
         
         # Get machine ID from environment
         machine_id = config.get('MACHINE_ID', '')

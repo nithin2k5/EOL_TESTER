@@ -11,6 +11,7 @@ import os
 import time
 import threading
 import config
+import ui
 import json
 from datetime import datetime
 
@@ -22,6 +23,7 @@ class ComPortSettings:
 
     def __init__(self, root):
         self.root = root
+        ui.apply(root)
         
         # Initialize lists and dictionaries at the start
         self.all_comboboxes = []  # Move this to the top
@@ -49,7 +51,7 @@ class ComPortSettings:
         self.root.state('zoomed')
         
         # Configure the main background color
-        self.root.configure(bg='#f0f0f0')  # Light gray background
+        self.root.configure(bg=ui.APP_BG)
         
         # Create and setup the UI
         self.setup_ui()
@@ -143,9 +145,11 @@ class ComPortSettings:
         self.control_buttons["SAVE"].config(state="normal")
         self.control_buttons["EDIT"].config(state="disabled")
 
-        # Panels frame using grid
-        panels_frame = tk.Frame(main_frame, bg='#f0f0f0')
-        panels_frame.pack(fill=tk.BOTH, expand=True)
+        # Nine panels are taller than a short screen, so they scroll.
+        scroller = ui.scrollable(main_frame)
+        scroller.pack(fill=tk.BOTH, expand=True)
+        self.panel_scroller = scroller
+        panels_frame = scroller.body
         
         # Configure grid columns to have equal width
         panels_frame.grid_columnconfigure(0, weight=1)
@@ -205,12 +209,16 @@ class ComPortSettings:
         self.add_modbus_tcp_content(modbus_tcp_frame)
 
     def create_section(self, parent, title, bg_color, width, height):
-        frame = tk.Frame(parent, bg=bg_color, width=width, height=height, relief='solid', borderwidth=1)
+        frame = tk.Frame(parent, bg=bg_color, width=width,
+                         highlightbackground=ui.BORDER, highlightthickness=1)
+        # Height follows the content; a fixed one clipped the lower rows.
         frame.pack_propagate(False)
+        frame.configure(height=height)
         
-        # Add title with background color
-        tk.Label(frame, text=title, bg=bg_color, fg='black',
-                font=('Arial', 10, 'bold')).pack(anchor='w', padx=5, pady=2)
+        # Section caption, set off from the body
+        tk.Label(frame, text=title, bg=ui.SUBTLE, fg=ui.ACCENT,
+                 font=ui.FONT_SECTION, anchor='w',
+                 padx=ui.PAD, pady=ui.PAD).pack(fill='x')
         
         return frame
 

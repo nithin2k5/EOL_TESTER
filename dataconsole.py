@@ -4,6 +4,7 @@ from tkcalendar import DateEntry
 import mysql.connector
 
 import db
+import ui
 from datetime import datetime
 import csv
 import os
@@ -12,6 +13,7 @@ class DataConsole:
     def __init__(self, root):
         # Accept parent window instead of creating new one
         self.root = root
+        ui.apply(root)
         self.root.title("EOL (END OF LINE) TESTER")
         
         # Database configuration
@@ -34,7 +36,11 @@ class DataConsole:
         header_label.pack(pady=10)
 
     def create_input_section(self):
-        input_frame = tk.Frame(self.root, padx=10, pady=10)
+        self.page_scroller = ui.scrollable(self.root, horizontal=True)
+        self.page_scroller.pack(fill=tk.BOTH, expand=True)
+        page = self.page_scroller.body
+        
+        input_frame = tk.Frame(page, padx=10, pady=10)
         input_frame.pack(fill=tk.X)
 
         # Part Number
@@ -121,7 +127,7 @@ class DataConsole:
                        "P1", "P2", "P3", "P4", "RESULT", "SCAN RESULT", 
                        "EMPLOYEE CODE", "SPEC DATA", "CREATED DATE"]
 
-        table_frame = tk.Frame(self.root, padx=10, pady=10)
+        table_frame = tk.Frame(self.page_scroller.body, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
