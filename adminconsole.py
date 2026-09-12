@@ -8,10 +8,15 @@ import json
 from datetime import datetime, timedelta
 import csv
 import shutil
+import auth
 import config
 import db
 
 class AdminConsole:
+    # A stored password is a hash, so it is never shown. This stands in
+    # its place and means "leave the password as it is".
+    KEEP_PASSWORD = "(unchanged - type to replace)"
+
     def __init__(self, root):
         self.root = root
         
@@ -90,6 +95,13 @@ class AdminConsole:
                     return
                 values[field] = value
             
+            # A new employee needs a real password, not the "unchanged" marker
+            # left behind by selecting an existing record.
+            if values["PASSWORD :"] == self.KEEP_PASSWORD:
+                messagebox.showwarning("Warning", "Please enter a password for the new employee")
+                self.entries["PASSWORD :"].focus_set()
+                return
+            
             # Add machine ID to the record
             machine_id = self.machine_id_var.get().strip()
             if not machine_id:
@@ -109,7 +121,7 @@ class AdminConsole:
             cursor.execute(query, (
                 values["EMPLOYEE FULL NAME :"],
                 values["EMPLOYEE NUMBER :"],
-                values["PASSWORD :"],
+                auth.compute_hash(values["PASSWORD :"]),
                 values["DESIGNATION :"],
                 values["DEPARTMENT :"],
                 values["MOBILE NUMBER :"],
@@ -129,6 +141,30 @@ class AdminConsole:
                 messagebox.showerror("Error", "Employee number already exists!")
             else:
                 messagebox.showerror("Database Error", f"Failed to add employee: {err}")
+
+    def show_password_placeholder(self):
+        """Mark the password box as carrying the stored password, not a new one."""
+        entry = self.entries.get("PASSWORD :")
+        if entry is None:
+            return
+
+        entry.delete(0, tk.END)
+        entry.insert(0, self.KEEP_PASSWORD)
+        entry.config(fg='#999999')
+
+        # Clear the marker as soon as the operator starts typing a new one.
+        def clear_marker(event, entry=entry):
+            if entry.get() == self.KEEP_PASSWORD:
+                entry.delete(0, tk.END)
+                entry.config(fg='black')
+
+        def restore_marker(event, entry=entry):
+            if not entry.get():
+                entry.insert(0, self.KEEP_PASSWORD)
+                entry.config(fg='#999999')
+
+        entry.bind('<FocusIn>', clear_marker)
+        entry.bind('<FocusOut>', restore_marker)
 
     def get_placeholder(self, field):
         """Get placeholder text for a field"""
@@ -234,26 +270,50 @@ class AdminConsole:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             
-            query = """
-                UPDATE EMPLOYEE_INFO SET 
-                    EMPLOYEE_FULL_NAME = %s,
-                    EMPLOYEE_NUMBER = %s,
-                    PASSWORD = %s,
-                    DESIGNATION = %s,
-                    DEPARTMENT = %s,
-                    MOBILE_NUMBER = %s
-                WHERE EMPLOYEE_NUMBER = %s
-            """
+            # The password column is only touched when a new one was typed.
+            typed_password = values["PASSWORD :"]
+            replace_password = typed_password != self.KEEP_PASSWORD
             
-            cursor.execute(query, (
-                values["EMPLOYEE FULL NAME :"],
-                values["EMPLOYEE NUMBER :"],
-                values["PASSWORD :"],
-                values["DESIGNATION :"],
-                values["DEPARTMENT :"],
-                values["MOBILE NUMBER :"],
-                emp_number
-            ))
+            if replace_password:
+                query = """
+                    UPDATE EMPLOYEE_INFO SET 
+                        EMPLOYEE_FULL_NAME = %s,
+                        EMPLOYEE_NUMBER = %s,
+                        PASSWORD = %s,
+                        DESIGNATION = %s,
+                        DEPARTMENT = %s,
+                        MOBILE_NUMBER = %s
+                    WHERE EMPLOYEE_NUMBER = %s
+                """
+                parameters = (
+                    values["EMPLOYEE FULL NAME :"],
+                    values["EMPLOYEE NUMBER :"],
+                    auth.compute_hash(typed_password),
+                    values["DESIGNATION :"],
+                    values["DEPARTMENT :"],
+                    values["MOBILE NUMBER :"],
+                    emp_number
+                )
+            else:
+                query = """
+                    UPDATE EMPLOYEE_INFO SET 
+                        EMPLOYEE_FULL_NAME = %s,
+                        EMPLOYEE_NUMBER = %s,
+                        DESIGNATION = %s,
+                        DEPARTMENT = %s,
+                        MOBILE_NUMBER = %s
+                    WHERE EMPLOYEE_NUMBER = %s
+                """
+                parameters = (
+                    values["EMPLOYEE FULL NAME :"],
+                    values["EMPLOYEE NUMBER :"],
+                    values["DESIGNATION :"],
+                    values["DEPARTMENT :"],
+                    values["MOBILE NUMBER :"],
+                    emp_number
+                )
+            
+            cursor.execute(query, parameters)
             
             conn.commit()
             cursor.close()
@@ -283,7 +343,7 @@ class AdminConsole:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD, 
+                SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, 
                        DESIGNATION, DEPARTMENT, MOBILE_NUMBER
                 FROM EMPLOYEE_INFO
                 WHERE EMPLOYEE_NUMBER = %s
@@ -306,7 +366,7 @@ class AdminConsole:
                 entry.unbind('<FocusOut>')
             
             # Populate entry fields with actual data
-            fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "PASSWORD :",
+            fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :",
                      "DESIGNATION :", "DEPARTMENT :", "MOBILE NUMBER :"]
             
             for field, value in zip(fields, record):
@@ -314,6 +374,8 @@ class AdminConsole:
                     self.entries[field].delete(0, tk.END)
                     self.entries[field].insert(0, value)
                     self.entries[field].config(fg='black')
+            
+            self.show_password_placeholder()
                     
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to load record: {err}")
@@ -572,7 +634,7 @@ class AdminConsole:
                 conn = mysql.connector.connect(**self.db_config)
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD, 
+                    SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, 
                            DESIGNATION, DEPARTMENT, MOBILE_NUMBER
                     FROM EMPLOYEE_INFO
                     WHERE EMPLOYEE_NUMBER = %s
@@ -593,8 +655,8 @@ class AdminConsole:
                     entry.unbind('<FocusIn>')
                     entry.unbind('<FocusOut>')
                 
-                # Populate entries with selected record data (including password)
-                fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :", "PASSWORD :",
+                # Populate entries with selected record data
+                fields = ["EMPLOYEE FULL NAME :", "EMPLOYEE NUMBER :",
                          "DESIGNATION :", "DEPARTMENT :", "MOBILE NUMBER :"]
                 
                 for field, value in zip(fields, record):
@@ -602,6 +664,8 @@ class AdminConsole:
                         self.entries[field].delete(0, tk.END)
                         self.entries[field].insert(0, value)
                         self.entries[field].config(fg='black')
+                
+                self.show_password_placeholder()
                         
             except mysql.connector.Error as err:
                 print(f"Error loading record: {err}")
