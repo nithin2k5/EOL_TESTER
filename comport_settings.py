@@ -5,14 +5,21 @@ from mysql.connector import Error
 from pymodbus.client import ModbusSerialClient
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
+import serial
 import serial.tools.list_ports
 import os
 import time
+import threading
 import config
 import json
 from datetime import datetime
 
 class ComPortSettings:
+    # The machine carries four loadcells and two barcode cameras.
+    LOADCELL_COUNT = 4
+    CAMERA_COUNT = 2
+    BAUD_RATES = [9600, 19200, 38400, 57600, 115200]
+
     def __init__(self, root):
         self.root = root
         
@@ -20,6 +27,14 @@ class ComPortSettings:
         self.all_comboboxes = []  # Move this to the top
         self.loadcell_ports = {}  # Move this here too
         self.modbus_client = None
+
+        # LVDT stream
+        self.lvdt_port = None
+        self.lvdt_thread = None
+        self.lvdt_running = False
+
+        # Camera combos, keyed by camera number
+        self.camera_combos = {}
         
         # Get machine ID from environment variable
         self.machine_id = config.get('MACHINE_ID', 'Not Set')
@@ -145,21 +160,48 @@ class ComPortSettings:
         plc_frame.grid(row=0, column=0, padx=10, sticky='nsew')
         self.add_plc_content(plc_frame)
 
+        # Sections are laid out three to a row, starting beside the PLC panel.
+        position = 1
+
         # Loadcell Sections
-        for i in range(1, 3):  # Creating 2 loadcells
+        for i in range(1, self.LOADCELL_COUNT + 1):
             loadcell_frame = self.create_section(
                 panels_frame, f"LOADCELL - {i:02d} (L{i})", '#f5e6e8',
                 width=400, height=400
             )
-            loadcell_frame.grid(row=0, column=i, padx=10, sticky='nsew')
+            loadcell_frame.grid(row=position // 3, column=position % 3,
+                                padx=10, pady=10, sticky='nsew')
             self.add_loadcell_content(loadcell_frame)
+            position += 1
+
+        # LVDT Section
+        lvdt_frame = self.create_section(
+            panels_frame, "LVDT", '#e6eef5',
+            width=400, height=400
+        )
+        lvdt_frame.grid(row=position // 3, column=position % 3,
+                        padx=10, pady=10, sticky='nsew')
+        self.add_lvdt_content(lvdt_frame)
+        position += 1
+
+        # Camera Sections
+        for i in range(1, self.CAMERA_COUNT + 1):
+            camera_frame = self.create_section(
+                panels_frame, f"CAMERA - {i:02d}", '#f5f0e6',
+                width=400, height=400
+            )
+            camera_frame.grid(row=position // 3, column=position % 3,
+                              padx=10, pady=10, sticky='nsew')
+            self.add_camera_content(camera_frame, i)
+            position += 1
 
         # Modbus TCP Section
         modbus_tcp_frame = self.create_section(
             panels_frame, "MODBUS TCP", '#e8f6e9',
             width=400, height=400
         )
-        modbus_tcp_frame.grid(row=1, column=0, padx=10, sticky='nsew')
+        modbus_tcp_frame.grid(row=position // 3, column=position % 3,
+                              padx=10, pady=10, sticky='nsew')
         self.add_modbus_tcp_content(modbus_tcp_frame)
 
     def create_section(self, parent, title, bg_color, width, height):
@@ -197,6 +239,10 @@ class ComPortSettings:
         station_frame = tk.Frame(top_frame, bg=frame['bg'])
         station_frame.pack(side='left', padx=5)
         self.station_id_entry = tk.Entry(station_frame, width=10)
+        # A station id is a plain number, so reject anything else as it is typed.
+        digits_only = self.station_id_entry.register(
+            lambda proposed: proposed == '' or proposed.isdigit())
+        self.station_id_entry.configure(validate='key', validatecommand=(digits_only, '%P'))
         self.station_id_entry.pack(side='left', padx=2)
         tk.Label(station_frame, text="Station ID", bg=frame['bg']).pack(side='left')
         
@@ -663,6 +709,189 @@ class ComPortSettings:
         except Exception as e:
             messagebox.showerror("Error", f"Unexpected error: {str(e)}")
 
+    def add_lvdt_content(self, frame):
+        """Build the LVDT panel: port, baud, connect and the four live readings."""
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+
+        top_frame = tk.Frame(frame, bg=frame['bg'])
+        top_frame.pack(fill='x', padx=5, pady=5)
+
+        self.lvdt_connect_button = tk.Button(
+            top_frame, text="CONNECT", bg='navy', fg='white',
+            width=10, font=('Arial', 9, 'bold'),
+            command=self.connect_lvdt)
+        self.lvdt_connect_button.pack(side='left', padx=2)
+
+        self.lvdt_stop_button = tk.Button(
+            top_frame, text="STOP", bg='darkred', fg='white',
+            width=8, font=('Arial', 9, 'bold'), state='disabled',
+            command=self.disconnect_lvdt)
+        self.lvdt_stop_button.pack(side='left', padx=2)
+
+        tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=2)
+        self.lvdt_com_combo = ttk.Combobox(frame, width=25, state="readonly")
+        self.lvdt_com_combo['values'] = [p.device for p in serial.tools.list_ports.comports()]
+        self.lvdt_com_combo.set("")
+        self.lvdt_com_combo.pack(anchor='w', padx=5)
+
+        tk.Label(frame, text="BAUD Rate", **label_style).pack(anchor='w', padx=5, pady=2)
+        self.lvdt_baud_combo = ttk.Combobox(frame, width=25, state="readonly")
+        self.lvdt_baud_combo['values'] = self.BAUD_RATES
+        self.lvdt_baud_combo.set("")
+        self.lvdt_baud_combo.pack(anchor='w', padx=5)
+
+        self.all_comboboxes.extend([self.lvdt_com_combo, self.lvdt_baud_combo])
+
+        # The four readings the device streams.
+        values_frame = tk.Frame(frame, bg=frame['bg'])
+        values_frame.pack(fill='x', padx=5, pady=(10, 5))
+
+        self.lvdt_value_entries = {}
+        for index, name in enumerate(('P01', 'P02', 'P03', 'P04')):
+            row = tk.Frame(values_frame, bg=frame['bg'])
+            row.grid(row=index // 2, column=index % 2, padx=4, pady=3, sticky='w')
+
+            tk.Label(row, text=f"{name}:", bg=frame['bg'], fg='black',
+                     font=('Arial', 10, 'bold')).pack(side='left')
+
+            entry = tk.Entry(row, width=10, justify='center', state='readonly')
+            entry.pack(side='left', padx=(4, 0))
+            self.lvdt_value_entries[name] = entry
+
+        self.lvdt_status_label = tk.Label(frame, text="Not connected", bg=frame['bg'],
+                                          fg='#666666', font=('Arial', 9))
+        self.lvdt_status_label.pack(anchor='w', padx=5, pady=(5, 0))
+
+    def parse_lvdt_data(self, line):
+        """Pull the readings out of one streamed line.
+
+        The device sends a comma separated record whose second field says how
+        many readings follow - either two or four. Returns a dict keyed P01..P04,
+        or None when the line does not carry a usable record.
+        """
+        if not line:
+            return None
+
+        tokens = [token.strip() for token in line.strip().split(',')]
+        if len(tokens) < 2:
+            return None
+
+        try:
+            count = int(tokens[1])
+        except ValueError:
+            return None
+
+        if count not in (2, 4) or len(tokens) < count + 2:
+            return None
+
+        names = ('P01', 'P02', 'P03', 'P04')[:count]
+        readings = {}
+        for index, name in enumerate(names):
+            raw = tokens[2 + index]
+            if index == count - 1:
+                # The last field carries trailing characters from the frame.
+                raw = raw[:5]
+            try:
+                value = float(raw)
+            except ValueError:
+                # A reading that will not parse counts as zero rather than
+                # throwing away the rest of the record.
+                value = 0.0
+            # Readings arrive scaled by 100.
+            readings[name] = value / 100 if value else 0.0
+
+        return readings
+
+    def show_lvdt_data(self, readings):
+        """Write the parsed readings into the four boxes."""
+        for name, entry in self.lvdt_value_entries.items():
+            entry.config(state='normal')
+            entry.delete(0, tk.END)
+            if name in readings:
+                entry.insert(0, f"{readings[name]:g}")
+            entry.config(state='readonly')
+
+    def connect_lvdt(self):
+        """Open the LVDT port and start reading its stream."""
+        try:
+            port = self.lvdt_com_combo.get()
+            baud = self.lvdt_baud_combo.get()
+            if not port or not baud:
+                messagebox.showwarning("LVDT", "Please select a COM port and BAUD rate first!")
+                return
+
+            if self.lvdt_port and self.lvdt_port.is_open:
+                self.disconnect_lvdt()
+
+            self.lvdt_port = serial.Serial(port=port, baudrate=int(baud), timeout=1)
+            self.lvdt_running = True
+            self.lvdt_status_label.config(text=f"Connected on {port}", fg='#198754')
+            self.lvdt_connect_button.config(state='disabled')
+            self.lvdt_stop_button.config(state='normal')
+
+            self.lvdt_thread = threading.Thread(target=self.read_lvdt_stream, daemon=True)
+            self.lvdt_thread.start()
+
+        except Exception as e:
+            messagebox.showerror("LVDT", f"Could not open the LVDT port: {e}")
+            self.lvdt_status_label.config(text="Not connected", fg='#666666')
+
+    def read_lvdt_stream(self):
+        """Read lines off the LVDT port until asked to stop."""
+        while self.lvdt_running and self.lvdt_port and self.lvdt_port.is_open:
+            try:
+                line = self.lvdt_port.readline().decode('utf-8', errors='ignore')
+                if not line:
+                    continue
+
+                readings = self.parse_lvdt_data(line)
+                if readings:
+                    # Tk widgets are only safe to touch from the main thread.
+                    self.root.after(0, self.show_lvdt_data, readings)
+                else:
+                    self.root.after(0, self.lvdt_status_label.config,
+                                    {'text': 'Improper received string...', 'fg': '#dc3545'})
+            except Exception as e:
+                print(f"LVDT read error: {e}")
+                break
+
+    def disconnect_lvdt(self):
+        """Stop reading and close the LVDT port."""
+        self.lvdt_running = False
+        try:
+            if self.lvdt_port and self.lvdt_port.is_open:
+                self.lvdt_port.close()
+        except Exception as e:
+            print(f"Error closing LVDT port: {e}")
+
+        self.lvdt_port = None
+        try:
+            self.lvdt_status_label.config(text="Not connected", fg='#666666')
+            self.lvdt_connect_button.config(state='normal')
+            self.lvdt_stop_button.config(state='disabled')
+        except Exception:
+            pass
+
+    def add_camera_content(self, frame, camera_num):
+        """Build a camera panel: just the port and baud rate it is wired on."""
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        frame.camera_num = camera_num
+
+        tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=(10, 2))
+        com_combo = ttk.Combobox(frame, width=25, state="readonly")
+        com_combo['values'] = [p.device for p in serial.tools.list_ports.comports()]
+        com_combo.set("")
+        com_combo.pack(anchor='w', padx=5)
+
+        tk.Label(frame, text="BAUD Rate", **label_style).pack(anchor='w', padx=5, pady=2)
+        baud_combo = ttk.Combobox(frame, width=25, state="readonly")
+        baud_combo['values'] = self.BAUD_RATES
+        baud_combo.set("")
+        baud_combo.pack(anchor='w', padx=5)
+
+        self.all_comboboxes.extend([com_combo, baud_combo])
+        self.camera_combos[camera_num] = (com_combo, baud_combo)
+
     def add_modbus_tcp_content(self, frame):
         # Test button and IP Address
         top_frame = tk.Frame(frame, bg=frame['bg'])
@@ -785,6 +1014,15 @@ class ComPortSettings:
                                 config.set(f'LOADCELL_{loadcell_num}_COM_PORT', com_combo.get())
                                 config.set(f'LOADCELL_{loadcell_num}_BAUD_RATE', baud_combo.get())
             
+            # Save LVDT settings
+            config.set('LVDT_COM_PORT', self.lvdt_com_combo.get())
+            config.set('LVDT_BAUD_RATE', self.lvdt_baud_combo.get())
+            
+            # Save Camera settings
+            for camera_num, (com_combo, baud_combo) in self.camera_combos.items():
+                config.set(f'CAMERA_{camera_num:02d}_COM_PORT', com_combo.get())
+                config.set(f'CAMERA_{camera_num:02d}_BAUD_RATE', baud_combo.get())
+            
             # Save Modbus TCP settings
             config.set('MODBUS_TCP_IP', self.ip_entry.get())
             config.set('MODBUS_TCP_PORT', self.port_entry.get())
@@ -877,11 +1115,19 @@ class ComPortSettings:
             # Settings to clear
             env_vars = [
                 'PLC_COM_PORT', 'PLC_BAUD_RATE', 'PLC_STATION_ID',
-                'MODBUS_TCP_IP', 'MODBUS_TCP_PORT'
+                'MODBUS_TCP_IP', 'MODBUS_TCP_PORT',
+                'LVDT_COM_PORT', 'LVDT_BAUD_RATE'
             ]
             
+            # Add camera settings
+            for i in range(1, self.CAMERA_COUNT + 1):
+                env_vars.extend([
+                    f'CAMERA_{i:02d}_COM_PORT',
+                    f'CAMERA_{i:02d}_BAUD_RATE'
+                ])
+            
             # Add loadcell environment variables
-            for i in range(1, 3):  # For LOADCELL-01 and LOADCELL-02
+            for i in range(1, self.LOADCELL_COUNT + 1):
                 loadcell_num = f"{i:02d}"
                 env_vars.extend([
                     f'LOADCELL_{loadcell_num}_COM_PORT',
@@ -911,8 +1157,8 @@ class ComPortSettings:
         try:
             # Clear saved values from the settings file
             config.set('PLC_RX_DATA', '')
-            config.set('LOADCELL_01_RX_DATA', '')
-            config.set('LOADCELL_02_RX_DATA', '')
+            for i in range(1, self.LOADCELL_COUNT + 1):
+                config.set(f'LOADCELL_{i:02d}_RX_DATA', '')
             config.set('PLC_REG_ADDRESS', '')
             config.set('PLC_POINTS_TO_READ', '1')
 
@@ -992,6 +1238,23 @@ class ComPortSettings:
                                 baud_combo.set(baud_rate)
             
             # Load Modbus TCP settings
+            # Restore LVDT settings
+            lvdt_port = config.get('LVDT_COM_PORT', '')
+            lvdt_baud = config.get('LVDT_BAUD_RATE', '')
+            if lvdt_port:
+                self.lvdt_com_combo.set(lvdt_port)
+            if lvdt_baud:
+                self.lvdt_baud_combo.set(lvdt_baud)
+            
+            # Restore Camera settings
+            for camera_num, (com_combo, baud_combo) in self.camera_combos.items():
+                saved_port = config.get(f'CAMERA_{camera_num:02d}_COM_PORT', '')
+                saved_baud = config.get(f'CAMERA_{camera_num:02d}_BAUD_RATE', '')
+                if saved_port:
+                    com_combo.set(saved_port)
+                if saved_baud:
+                    baud_combo.set(saved_baud)
+            
             modbus_ip = config.get('MODBUS_TCP_IP', '')
             modbus_port = config.get('MODBUS_TCP_PORT', '')
             
@@ -1012,7 +1275,7 @@ class ComPortSettings:
     def initialize_loadcell_env(self):
         """Initialize the in-memory loadcell buffers if they don't exist"""
         try:
-            for i in range(1, 3):  # For loadcell 1 and 2
+            for i in range(1, self.LOADCELL_COUNT + 1):
                 self.loadcell_data.setdefault(i, [])
         except Exception as e:
             print(f"Error initializing environment variables: {str(e)}")
@@ -1125,6 +1388,9 @@ class ComPortSettings:
             if hasattr(self, 'modbus_tcp_client') and self.modbus_tcp_client:
                 self.modbus_tcp_client.close()
                 
+            # Stop the LVDT stream and release its port
+            self.disconnect_lvdt()
+            
             # Close loadcell connections
             for frame, ser in self.loadcell_ports.items():
                 if ser and ser.is_open:

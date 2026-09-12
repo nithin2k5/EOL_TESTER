@@ -53,6 +53,22 @@ DEFAULTS = {
         'LOADCELL_02_COM_PORT': '',
         'LOADCELL_02_BAUD_RATE': '9600',
         'LOADCELL_02_RX_DATA': '',
+        'LOADCELL_03_COM_PORT': '',
+        'LOADCELL_03_BAUD_RATE': '9600',
+        'LOADCELL_03_RX_DATA': '',
+        'LOADCELL_04_COM_PORT': '',
+        'LOADCELL_04_BAUD_RATE': '9600',
+        'LOADCELL_04_RX_DATA': '',
+    },
+    'LVDT': {
+        'LVDT_COM_PORT': '',
+        'LVDT_BAUD_RATE': '9600',
+    },
+    'Camera': {
+        'CAMERA_01_COM_PORT': '',
+        'CAMERA_01_BAUD_RATE': '9600',
+        'CAMERA_02_COM_PORT': '',
+        'CAMERA_02_BAUD_RATE': '9600',
     },
     'Testing': {
         'ALC_INPUT_TIME_INTERVAL': '3000',
