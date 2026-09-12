@@ -245,6 +245,11 @@ class EOLTesterGUI:
         self.traceabilityCode = ""
         self.today = datetime.today().date()
         self.dataPointX = 0
+
+        # Plotted chart points, keyed by series name
+        self.chart_series = {name: [] for name in
+                             ('L1', 'L2', 'L3', 'L4', 'P1', 'P2', 'P3', 'P4')}
+
         self.barcodePrintFileName = ""
         self.prnFileContent = ""
         self.programSelectionPLCAddress = ""
@@ -286,6 +291,8 @@ class EOLTesterGUI:
         self.traceabilityCode = ""
         self.today = datetime.today().date()
         self.dataPointX = 0
+        self.chart_series = {name: [] for name in
+                             ('L1', 'L2', 'L3', 'L4', 'P1', 'P2', 'P3', 'P4')}
         
         # Machine and Process Variables
         self.machineID = self.machineid  # Use existing machine ID
@@ -1473,7 +1480,8 @@ class EOLTesterGUI:
         
         # Configure grid for main content
         content_frame.grid_rowconfigure(0, weight=1)  # Treeview gets most space
-        content_frame.grid_rowconfigure(1, weight=0)  # Entry frame gets fixed space
+        content_frame.grid_rowconfigure(1, weight=0)  # Scan counters
+        content_frame.grid_rowconfigure(2, weight=0)  # Entry frame gets fixed space
         content_frame.grid_columnconfigure(0, weight=1)  # Single column takes full width
         
         # Create lot number tree view with frame - in the first row
@@ -1510,9 +1518,12 @@ class EOLTesterGUI:
         # Create Treeview with default columns
         self.create_lot_tree(self.grid_frame, self.current_columns)
         
-        # Bottom frame for entry fields - in the second row
+        # Scan result counters, sitting under the grid
+        self.create_scan_counters(content_frame)
+        
+        # Bottom frame for entry fields - in the third row
         entry_frame = tk.Frame(content_frame, bg="#f5f5f5", height=50)  # Reduced height
-        entry_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
+        entry_frame.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
         entry_frame.grid_propagate(False)  # Prevent shrinking
         
         # Simplified layout with just the entry fields
@@ -1580,6 +1591,40 @@ class EOLTesterGUI:
         
         return q4
         
+    def create_scan_counters(self, parent_frame):
+        """Build the OK / NG / invalid / total strip shown under the results grid."""
+        counter_frame = tk.Frame(parent_frame, bg="#f5f5f5", height=28)
+        counter_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 4))
+        counter_frame.grid_propagate(False)
+
+        definitions = [
+            ("OK", "#2e7d32"),
+            ("NG", "#c62828"),
+            ("INVALID", "#ef6c00"),
+            ("TOTAL", "#1565c0"),
+        ]
+
+        self.scan_count_labels = {}
+        for column, (caption, color) in enumerate(definitions):
+            counter_frame.columnconfigure(column, weight=1)
+
+            cell = tk.Frame(counter_frame, bg="#f5f5f5")
+            cell.grid(row=0, column=column, sticky="ew", padx=4)
+
+            tk.Label(cell, text=f"{caption}:", bg="#f5f5f5", fg=color,
+                     font=("Arial", 9, "bold")).pack(side="left")
+
+            value = tk.Label(cell, text="", bg="#ffffff", fg=color, width=6,
+                             relief="solid", borderwidth=1, anchor="center",
+                             font=("Arial", 9, "bold"))
+            value.pack(side="left", padx=(4, 0))
+            self.scan_count_labels[caption] = value
+
+        self.ok_count_label = self.scan_count_labels["OK"]
+        self.ng_count_label = self.scan_count_labels["NG"]
+        self.invalid_count_label = self.scan_count_labels["INVALID"]
+        self.total_count_label = self.scan_count_labels["TOTAL"]
+
     def create_lot_tree(self, parent_frame, columns):
         """Create the lot tree with specified columns"""
         # Configure base column widths
@@ -1817,115 +1862,137 @@ class EOLTesterGUI:
         self.load_canvas.bind('<Configure>', lambda e: self.draw_load_graph())
         self.length_canvas.bind('<Configure>', lambda e: self.draw_length_graph())
 
-    def draw_load_graph(self):
-        canvas = self.load_canvas
+    def visible_series(self, names):
+        """Of the given series, the ones this part actually reports."""
+        optional = {
+            'L2': self.columnL2,
+            'L3': self.columnL3,
+            'L4': self.columnL4,
+            'P3': self.columnP3,
+            'P4': self.columnP4,
+        }
+        return [name for name in names if optional.get(name, True)]
+
+    def series_bounds(self, names):
+        """Y-axis range covering the plotted points, padded a little."""
+        values = [value for name in names for value in self.chart_series.get(name, [])]
+        values = [v for v in values if v is not None]
+        if not values:
+            return None
+
+        low, high = min(values), max(values)
+        if low == high:
+            # A flat line still needs a band to sit in.
+            padding = abs(low) * 0.1 or 1.0
+            return low - padding, high + padding
+
+        padding = (high - low) * 0.1
+        return low - padding, high + padding
+
+    def draw_graph(self, canvas, names, colors, default_labels):
+        """Draw one chart: grid, y-axis scale, plotted series and legend."""
         canvas.delete("all")
-        
-        # Get dimensions
+
         width = canvas.winfo_width()
         height = canvas.winfo_height()
-        
-        # Set margins
+        if width <= 1:
+            width = canvas.winfo_reqwidth()   # not mapped yet
+        if height <= 1:
+            height = canvas.winfo_reqheight()
+        if width <= 1 or height <= 1:
+            return
+
         left_margin = 40
         right_margin = 100  # Extra space for legend
         top_margin = 20
         bottom_margin = 30
-        
-        # Drawing area
+
         graph_width = width - (left_margin + right_margin)
         graph_height = height - (top_margin + bottom_margin)
-        
-        # Draw grid
-        # Vertical lines
-        for i in range(9):  # 8 divisions
+        if graph_width <= 0 or graph_height <= 0:
+            return
+
+        names = self.visible_series(names)
+        bounds = self.series_bounds(names)
+
+        # Number of points across the x-axis, at least one grid span.
+        point_count = max((len(self.chart_series.get(n, [])) for n in names), default=0)
+        span = max(point_count - 1, 1)
+
+        # Vertical grid lines, labelled with the sample number.
+        for i in range(9):
             x = left_margin + (i * graph_width / 8)
-            canvas.create_line(x, top_margin, x, height-bottom_margin, 
-                             fill="gray", dash=(1,2))
-            # X-axis labels
-            canvas.create_text(x, height-bottom_margin+10, 
-                             text=str(i+1), fill="white")
-        
-        # Horizontal lines
-        for i in range(6):  # 5 divisions (0, 20, 40, 60, 80, 100)
-            y = height - (bottom_margin + (i * graph_height / 5))
-            canvas.create_line(left_margin, y, width-right_margin, y, 
-                             fill="gray", dash=(1,2))
-            # Y-axis labels
-            canvas.create_text(left_margin-15, y, 
-                             text=str(i*20), fill="white")
-        
-        # Draw legend
-        legend_items = [
-            ("L1", "cyan"),
-            ("L2", "orange"),
-            ("L3", "red"),
-            ("L4", "blue")
-        ]
-        
+            canvas.create_line(x, top_margin, x, height - bottom_margin,
+                               fill="gray", dash=(1, 2))
+            if point_count:
+                first = self.dataPointX - point_count + 1
+                label = str(int(first + round(i * span / 8)))
+            else:
+                label = str(i + 1)
+            canvas.create_text(x, height - bottom_margin + 10, text=label, fill="white")
+
+        # Horizontal grid lines, labelled from the data when there is any.
+        divisions = 5
+        for i in range(divisions + 1):
+            y = height - (bottom_margin + (i * graph_height / divisions))
+            canvas.create_line(left_margin, y, width - right_margin, y,
+                               fill="gray", dash=(1, 2))
+            if bounds:
+                low, high = bounds
+                label = f"{low + (high - low) * i / divisions:.2f}"
+            else:
+                label = str(default_labels[i])
+            canvas.create_text(left_margin - 15, y, text=label, fill="white")
+
+        # Plot each series.
+        if bounds and point_count > 1:
+            low, high = bounds
+            value_range = high - low
+
+            for name in names:
+                points = self.chart_series.get(name, [])
+                if len(points) < 2:
+                    continue
+
+                coordinates = []
+                for index, value in enumerate(points):
+                    if value is None:
+                        continue
+                    x = left_margin + (index * graph_width / span)
+                    y = height - bottom_margin - ((value - low) / value_range) * graph_height
+                    coordinates.extend((x, y))
+
+                if len(coordinates) >= 4:
+                    canvas.create_line(*coordinates, fill=colors[name], width=2)
+
+        # Legend, showing only the series this part reports.
         legend_x = width - right_margin + 20
         legend_y = top_margin + 20
-        
-        for text, color in legend_items:
-            canvas.create_line(legend_x, legend_y, legend_x+20, legend_y, 
-                             fill=color, width=2)
-            canvas.create_text(legend_x+30, legend_y, 
-                             text=text, fill="white", anchor="w")
+        for name in names:
+            canvas.create_line(legend_x, legend_y, legend_x + 20, legend_y,
+                               fill=colors[name], width=2)
+            canvas.create_text(legend_x + 30, legend_y, text=name, fill="white", anchor="w")
             legend_y += 20
 
+    def draw_load_graph(self):
+        self.draw_graph(self.load_canvas,
+                        ['L1', 'L2', 'L3', 'L4'],
+                        {'L1': 'cyan', 'L2': 'orange', 'L3': 'red', 'L4': 'blue'},
+                        [0, 20, 40, 60, 80, 100])
+
     def draw_length_graph(self):
-        canvas = self.length_canvas
-        canvas.delete("all")
-        
-        # Get dimensions
-        width = canvas.winfo_width()
-        height = canvas.winfo_height()
-        
-        # Set margins
-        left_margin = 40
-        right_margin = 100
-        top_margin = 20
-        bottom_margin = 30
-        
-        # Drawing area
-        graph_width = width - (left_margin + right_margin)
-        graph_height = height - (top_margin + bottom_margin)
-        
-        # Draw grid
-        # Vertical lines
-        for i in range(9):  # 8 divisions
-            x = left_margin + (i * graph_width / 8)
-            canvas.create_line(x, top_margin, x, height-bottom_margin, 
-                             fill="gray", dash=(1,2))
-            # X-axis labels
-            canvas.create_text(x, height-bottom_margin+10, 
-                             text=str(i+1), fill="white")
-        
-        # Horizontal lines and labels
-        y_labels = [-5, -3, -1, 1, 3, 5]
-        for i, label in enumerate(y_labels):
-            y = top_margin + (i * graph_height / (len(y_labels)-1))
-            canvas.create_line(left_margin, y, width-right_margin, y, 
-                             fill="gray", dash=(1,2))
-            canvas.create_text(left_margin-15, y, 
-                             text=str(label), fill="white")
-        
-        # Draw legend
-        legend_items = [
-            ("P1", "blue"),
-            ("P2", "orange"),
-            ("P3", "red"),
-            ("P4", "white")
-        ]
-        
-        legend_x = width - right_margin + 20
-        legend_y = top_margin + 20
-        
-        for text, color in legend_items:
-            canvas.create_line(legend_x, legend_y, legend_x+20, legend_y, 
-                             fill=color, width=2)
-            canvas.create_text(legend_x+30, legend_y, 
-                             text=text, fill="white", anchor="w")
-            legend_y += 20
+        self.draw_graph(self.length_canvas,
+                        ['P1', 'P2', 'P3', 'P4'],
+                        {'P1': 'blue', 'P2': 'orange', 'P3': 'red', 'P4': 'white'},
+                        [-5, -3, -1, 1, 3, 5])
+
+    def redraw_graphs(self):
+        """Repaint both charts, ignoring canvases that are not on screen yet."""
+        try:
+            self.draw_load_graph()
+            self.draw_length_graph()
+        except Exception as e:
+            print(f"Error drawing graphs: {e}")
 
     def create_footer(self):
         footer = tk.Label(self.main_container,
@@ -4244,16 +4311,169 @@ class EOLTesterGUI:
             return False
 
     def display_data(self):
-        """Display test data (C# implementation placeholder)"""
-        # This would update the data grid with today's test results
-        # For now, just print a message
-        print("Displaying test data for part:", self.partNumber)
+        """Show today's passing results for the current part and refresh the counters."""
+        if not self.partNumber:
+            self.reset_scan_result_counters()
+            return
+
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                return
+
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT *
+                FROM TBL_TEST_DATA
+                WHERE TD_RECORD_DATE = CURDATE()
+                  AND TD_PART_NUMBER = %s
+                  AND TD_OVERALL_STATUS = 'OK'
+                ORDER BY ID DESC
+            """, (self.partNumber,))
+            rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
+
+            self.update_scan_result_counters(rows)
+            self.populate_data_grid(rows)
+            print(f"Displaying {len(rows)} test records for part: {self.partNumber}")
+
+        except Exception as e:
+            print(f"Error displaying test data: {e}")
+
+    def populate_data_grid(self, rows):
+        """Fill the results grid, banding every five rows so they are easy to scan."""
+        try:
+            self.tree.tag_configure('band', background='#FFFF99')
+            self.tree.tag_configure('plain', background='#FFFFFF')
+
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+
+            for position, row in enumerate(rows):
+                values = []
+                for column in self.current_columns:
+                    if column == "LOT NUMBER":
+                        values.append(row.get('TD_LOT_NUMBER', ''))
+                    elif column == "RESULT":
+                        values.append(row.get('TD_OVERALL_STATUS', ''))
+                    elif column in ("SCAN RESULT", "SR"):
+                        values.append(row.get('TD_BARCODE_SCAN_RESULT', ''))
+                    else:
+                        values.append(row.get(column, ''))
+
+                # Rows alternate in blocks of five, matching the older grid.
+                tag = 'band' if (position // 5) % 2 == 0 else 'plain'
+                self.tree.insert('', 'end', values=tuple(values), tags=(tag,))
+
+            self.tree.selection_remove(self.tree.selection())
+
+        except Exception as e:
+            print(f"Error populating data grid: {e}")
+
+    def update_scan_result_counters(self, rows):
+        """Count OK, NG and invalid barcode scans across the displayed rows."""
+        try:
+            results = [str(row.get('TD_BARCODE_SCAN_RESULT') or '') for row in rows]
+            self.ok_count_label.config(text=str(results.count('OK')))
+            self.ng_count_label.config(text=str(results.count('NG')))
+            self.invalid_count_label.config(text=str(results.count('***')))
+            self.total_count_label.config(text=str(len(rows)))
+        except Exception as e:
+            print(f"Error updating scan result counters: {e}")
+
+    def reset_scan_result_counters(self):
+        """Blank the scan counters, ready for the next part."""
+        try:
+            for label in (self.ok_count_label, self.ng_count_label,
+                          self.invalid_count_label, self.total_count_label):
+                label.config(text="")
+        except Exception as e:
+            print(f"Error resetting scan result counters: {e}")
 
     def load_graph(self):
-        """Load graph data (C# implementation placeholder)"""
-        # This would load historical chart data
-        # For now, just print a message
-        print("Loading graph data for part:", self.partNumber)
+        """Load today's readings for the current part into the charts."""
+        if not self.partNumber:
+            return
+
+        try:
+            connection = self.get_database_connection()
+            if not connection:
+                return
+
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM TBL_TEST_DATA
+                WHERE TD_PART_NUMBER = %s AND TD_RECORD_DATE = CURDATE()
+            """, (self.partNumber,))
+            total_records = cursor.fetchone()[0] or 0
+
+            # Only the most recent 1000 readings are plotted.
+            cursor.execute("""
+                SELECT ID, L1, L2, L3, L4, P1, P2, P3, P4
+                FROM TBL_TEST_DATA
+                WHERE TD_PART_NUMBER = %s AND TD_RECORD_DATE = CURDATE()
+                ORDER BY ID DESC
+                LIMIT 1000
+            """, (self.partNumber,))
+            rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
+
+            rows.reverse()  # oldest first, so the chart reads left to right
+
+            names = ('L1', 'L2', 'L3', 'L4', 'P1', 'P2', 'P3', 'P4')
+            self.chart_series = {name: [] for name in names}
+            for row in rows:
+                for offset, name in enumerate(names, start=1):
+                    self.chart_series[name].append(self.to_chart_value(row[offset]))
+
+            # Keep numbering continuous when older readings were left out.
+            self.dataPointX = total_records if total_records > 1000 else len(rows)
+
+            self.redraw_graphs()
+            print(f"Loaded {len(rows)} chart points for part: {self.partNumber}")
+
+        except Exception as e:
+            print(f"Error loading graph data: {e}")
+
+    def to_chart_value(self, value):
+        """Chart values arrive as text or decimals; anything unparsable is a gap."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def update_charts(self, values=None):
+        """Append the readings just measured as the next point on each chart."""
+        try:
+            if values is None:
+                values = {
+                    'L1': self.L1MaxValue,
+                    'L2': self.L2MaxValue,
+                    'L3': self.L3MaxValue,
+                    'L4': self.L4MaxValue,
+                    'P1': self.P01Value,
+                    'P2': self.P02Value,
+                    'P3': self.P03Value,
+                    'P4': self.P04Value,
+                }
+
+            self.dataPointX += 1
+            for name, series in self.chart_series.items():
+                series.append(self.to_chart_value(values.get(name)))
+                # Charts hold the same 1000-point window as the initial load.
+                if len(series) > 1000:
+                    del series[:len(series) - 1000]
+
+            self.redraw_graphs()
+            print(f"Updated charts with data point {self.dataPointX}")
+
+        except Exception as e:
+            print(f"Error updating charts: {e}")
 
     def get_lot_number(self):
         """Get lot number from database (C# implementation)"""
@@ -5116,17 +5336,6 @@ class EOLTesterGUI:
         self.rcvdTestRslt = False
         self.cam1Result = ""
 
-    def update_charts(self):
-        """Update charts with new data points (C# implementation)"""
-        try:
-            # This would update the load and length charts
-            # For now, just increment data point counter
-            self.dataPointX += 1
-            print(f"Updated charts with data point {self.dataPointX}")
-            
-        except Exception as e:
-            print(f"Error updating charts: {e}")
-
     def save_testing_data(self, status):
         """Save testing data to database (C# implementation)"""
         try:
@@ -5396,6 +5605,9 @@ class EOLTesterGUI:
             connection.close()
             
             print(f"Barcode scan result updated: {result}")
+            
+            # The grid and counters both show scan results, so refresh them.
+            self.display_data()
             
         except Exception as e:
             print(f"Error updating scan result: {e}")
@@ -7020,6 +7232,12 @@ class EOLTesterGUI:
             # Reset model header
             if hasattr(self, 'model_header'):
                 self.model_header.config(text="MODEL - PART NUMBER")
+            
+            # Clear the results grid and its scan counters
+            if hasattr(self, 'tree'):
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+            self.reset_scan_result_counters()
             
             # PLC functionality removed
             print("Page reset complete - PLC functionality removed")
