@@ -9,8 +9,11 @@ import threading
 import os
 
 class WorkspaceApp:
-    def __init__(self, root):
+    def __init__(self, root, user=None):
         self.root = root
+
+        # Employee number of whoever logged in, stamped on the audit columns.
+        self.user = user or 'User'
         self.root.title("EOL Tester - Model Settings")
         
         # Set window state to zoomed instead of fullscreen
@@ -872,7 +875,7 @@ class WorkspaceApp:
             WHERE MM_PART_NUMBER = %s
             """
             
-            cursor.execute(query, (positions_json, 'User', datetime.now(), part_number))
+            cursor.execute(query, (positions_json, self.user, datetime.now(), part_number))
             conn.commit()
             cursor.close()
             conn.close()
@@ -1402,7 +1405,7 @@ class WorkspaceApp:
             master_data = (
                 part_number, model_name, alc_code, plc_address, barcode_type, 
                 image_path, vendor_code, eo_number, special_data, 
-                initial_id, supplier_section, 'User', datetime.now(), True, 'User', datetime.now()
+                initial_id, supplier_section, self.user, datetime.now(), True, self.user, datetime.now()
             )
             
             # Save specifications from the spec_tree (not from entry fields)
@@ -1511,10 +1514,10 @@ class WorkspaceApp:
                 data[8],  # MM_SPECIAL_DATA
                 data[9],  # MM_INITIAL_ID
                 data[10], # MM_SUPPLIER_SECTION
-                'User',   # MM_CREATED_BY
+                self.user,   # MM_CREATED_BY
                 datetime.now(), # MM_CREATED_DATE
                 1,       # MM_STATUS (TINYINT)
-                'User',  # MM_MODIFIED_BY
+                self.user,  # MM_MODIFIED_BY
                 datetime.now(), # MM_MODIFIED_DATE
                 positions_json,    # MM_LABEL_POSITIONS
                 coordinates_json   # MM_LABEL_COORDINATES
@@ -1604,7 +1607,7 @@ class WorkspaceApp:
                 data[8],  # MM_SPECIAL_DATA
                 data[9],  # MM_INITIAL_ID
                 data[10], # MM_SUPPLIER_SECTION
-                'User',   # MM_MODIFIED_BY
+                self.user,   # MM_MODIFIED_BY
                 datetime.now(), # MM_MODIFIED_DATE
                 positions_json,    # MM_LABEL_POSITIONS
                 coordinates_json,   # MM_LABEL_COORDINATES

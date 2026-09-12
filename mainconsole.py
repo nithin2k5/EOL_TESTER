@@ -7,6 +7,7 @@ from test_console import EOLTesterGUI    # Import TestConsole
 from comport_settings import ComPortSettings  # Add this import
 from dataconsole import DataConsole  # Add this import
 from adminconsole import AdminConsole  # Add this import
+from login_form import prompt_login
 import theme
 
 class MainConsole(tk.Tk):
@@ -78,11 +79,15 @@ class MainConsole(tk.Tk):
         settings_window.protocol("WM_DELETE_WINDOW", on_settings_close)
             
     def settings_click(self):
+        user = prompt_login(self)
+        if user is None:
+            return
+
         settings_window = tk.Toplevel(self)
         # Set the window to full screen
         settings_window.state('zoomed')
         settings_window.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
-        app = WorkspaceApp(settings_window)
+        app = WorkspaceApp(settings_window, user=user)
         settings_window.grab_set()
         self.withdraw()
         
@@ -179,6 +184,9 @@ class MainConsole(tk.Tk):
         work_data_window.protocol("WM_DELETE_WINDOW", on_work_data_close)
         
     def admin_click(self):
+        if prompt_login(self) is None:
+            return
+
         admin_window = tk.Toplevel(self)
         
         # Set the window to full screen
