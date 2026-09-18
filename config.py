@@ -97,6 +97,11 @@ DEFAULTS = {
     'Support': {
         'SERVICE_ACCOUNT_USER': '',
         'SERVICE_ACCOUNT_PASSWORD_HASH': '',
+        # Shown on the Contact page. Blank means the page says so rather
+        # than printing a number nobody answers.
+        'SUPPORT_COMPANY': 'Nice Computers & Industrial Solutions',
+        'SUPPORT_EMAIL': '',
+        'SUPPORT_PHONE': '',
     },
 }
 

@@ -12,6 +12,7 @@ from test_console import EOLTesterGUI    # Import TestConsole
 from comport_settings import ComPortSettings  # Add this import
 from dataconsole import DataConsole  # Add this import
 from adminconsole import AdminConsole  # Add this import
+from helpconsole import HelpConsole, ContactConsole
 from login_form import prompt_login
 import config
 import db
@@ -241,8 +242,8 @@ class MainConsole(tk.Tk):
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="User Manual", command=self.user_manual_click)
-        help_menu.add_command(label="Support", command=self.support_click)
+        help_menu.add_command(label="Help", command=self.user_manual_click)
+        help_menu.add_command(label="Contact", command=self.support_click)
 
         # Closing the window has to take the open page with it, or the test
         # console's serial threads and COM ports are left behind.
@@ -274,6 +275,8 @@ class MainConsole(tk.Tk):
             ('btn_test', "\u25b6", "Test", self.test_click),
             ('btn_work_data', "\u25a4", "Work Data", self.work_data_click),
             ('btn_admin', "\u26ca", "Admin", self.admin_click),
+            ('btn_help', "\u2753", "Help", self.user_manual_click),
+            ('btn_contact', "\u2709", "Contact", self.support_click),
         )
 
         self.nav_buttons = []
@@ -376,7 +379,9 @@ class MainConsole(tk.Tk):
             btn.set_enabled(ready)
 
         # Admin stays reachable, since that is where the machine ID and the
-        # archive folders are set in the first place.
+        # archive folders are set in the first place. Help and Contact are
+        # left alone for the same reason: an unset machine is exactly when
+        # someone needs to read what to set, or who to ring about it.
         self.btn_admin.set_enabled(True)
 
         if not ready:
@@ -639,10 +644,15 @@ class MainConsole(tk.Tk):
         self.open_page("Admin", AdminConsole, entry=self.btn_admin)
 
     def user_manual_click(self):
-        messagebox.showinfo("User Manual", "User manual functionality will be implemented here.")
+        self.open_page(
+            "Help",
+            lambda page: HelpConsole(page,
+                                     archive_days=self.ARCHIVE_AFTER_DAYS,
+                                     stale_days=self.STALE_TEST_WARNING_DAYS),
+            entry=self.btn_help)
 
     def support_click(self):
-        messagebox.showinfo("Support", "For technical support, please contact:\n\nEmail: support@company.com\nPhone: +1-800-SUPPORT\n\nFor immediate assistance, refer to the User Manual.")
+        self.open_page("Contact", ContactConsole, entry=self.btn_contact)
 
     def exit_click(self):
         self.close_page()
