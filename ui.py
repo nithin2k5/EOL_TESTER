@@ -413,21 +413,28 @@ def apply(root):
 # Small building blocks pages can use directly
 # --------------------------------------------------------------------------
 
-def page_header(parent, title, right_text=''):
-    """A titled bar across the top of a page, with optional right-hand text."""
+def page_header(parent, title, right_text='', compact=False):
+    """A titled bar across the top of a page, with optional right-hand text.
+
+    `compact` trades the display-sized title for a single line of text,
+    giving back most of the bar's height to whatever sits below it.
+    """
+    pad = PAD if compact else PAD_LARGE
+    font = FONT_SECTION if compact else FONT_TITLE
+
     header = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER,
                       highlightthickness=1)
     header.pack(fill='x')
 
     inner = tk.Frame(header, bg=SURFACE)
-    inner.pack(fill='x', padx=PAD_LARGE, pady=PAD_LARGE)
+    inner.pack(fill='x', padx=PAD_LARGE, pady=pad)
 
     tk.Label(inner, text=title, bg=SURFACE, fg=TEXT,
-             font=FONT_TITLE).pack(side='left')
+             font=font).pack(side='left')
 
     if right_text:
         tk.Label(inner, text=right_text, bg=SURFACE, fg=TEXT_MUTED,
-                 font=FONT_BODY_BOLD).pack(side='right')
+                 font=FONT_SMALL if compact else FONT_BODY_BOLD).pack(side='right')
 
     return header
 
