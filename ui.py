@@ -33,6 +33,12 @@ ACCENT = '#1d4ed8'
 ACCENT_HOVER = '#1e40af'
 ACCENT_ACTIVE = '#1e3a8a'
 
+# Tinted backgrounds, for marking a row as selected without filling it with
+# the full accent - a whole column of solid accent reads as a wall, not a
+# list, and leaves nothing to say which entry you are actually on.
+ACCENT_SOFT = '#e6edfd'
+DANGER_SOFT = '#fdeaea'
+
 SUCCESS = '#15803d'
 SUCCESS_HOVER = '#166534'
 DANGER = '#b91c1c'

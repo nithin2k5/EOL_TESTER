@@ -71,22 +71,38 @@ class NavButton(tk.Frame):
 
     A button takes a single font, and at this width the rail needs a large
     glyph over small text, so this is a frame that behaves like one.
+
+    It carries four looks - disabled, resting, hovered and current. The
+    current one is marked with a tint and a bar down its left edge rather
+    than by filling the row: every entry filled with accent reads as a wall
+    of colour, and leaves nothing to say which console is actually open.
     """
 
     ICON_FONT = (ui.FONT_FAMILY, 17)
     LABEL_FONT = (ui.FONT_FAMILY, 8, 'bold')
+    MARKER_WIDTH = 3
 
-    def __init__(self, master, icon, label, command):
-        super().__init__(master, bg=ui.ACCENT)
+    def __init__(self, master, icon, label, command, danger=False):
+        super().__init__(master, bg=ui.SURFACE)
         self.command = command
+        self.danger = danger
         self.enabled = True
+        self.active = False
+        self.hovered = False
 
-        self.icon = tk.Label(self, text=icon, bg=ui.ACCENT,
-                             font=self.ICON_FONT)
+        self.marker = tk.Frame(self, bg=ui.SURFACE, width=self.MARKER_WIDTH)
+        self.marker.pack(side='left', fill='y')
+
+        self.content = tk.Frame(self, bg=ui.SURFACE)
+        self.content.pack(side='left', fill='both', expand=True)
+
+        self.icon = tk.Label(self.content, text=icon, bg=ui.SURFACE,
+                             fg=ui.TEXT, font=self.ICON_FONT)
         self.icon.pack(pady=(ui.PAD, 0))
 
-        self.label = tk.Label(self, text=label, bg=ui.ACCENT,
-                              font=self.LABEL_FONT, justify='center')
+        self.label = tk.Label(self.content, text=label, bg=ui.SURFACE,
+                              fg=ui.TEXT, font=self.LABEL_FONT,
+                              justify='center')
         self.label.pack(pady=(1, ui.PAD), padx=2)
 
         for part in self.parts():
@@ -94,23 +110,49 @@ class NavButton(tk.Frame):
             part.bind('<Enter>', self.entered)
             part.bind('<Leave>', self.left)
 
-        self.set_enabled(True)
+        self.repaint()
 
     def parts(self):
-        return (self, self.icon, self.label)
+        return (self, self.content, self.icon, self.label)
 
-    def paint(self, background):
-        for part in self.parts():
-            # ui gives every one of these readable text for the background
-            # it is handed, so the icon and label follow along on their own.
-            part.config(bg=background)
+    def look(self):
+        """The background and text colour this entry should be wearing."""
+        if not self.enabled:
+            return ui.SURFACE, ui.TEXT_MUTED
+        if self.active:
+            return ui.ACCENT_SOFT, ui.ACCENT
+        if self.hovered:
+            if self.danger:
+                return ui.DANGER_SOFT, ui.DANGER
+            return ui.SUBTLE, ui.TEXT
+        return ui.SURFACE, ui.TEXT
+
+    def repaint(self):
+        background, foreground = self.look()
+        cursor = 'hand2' if self.enabled else 'arrow'
+
+        self.config(bg=background, cursor=cursor)
+        self.content.config(bg=background, cursor=cursor)
+
+        for part in (self.icon, self.label):
+            # Background and foreground go in together: handed a background
+            # on its own, ui picks the text colour itself.
+            part.config(bg=background, fg=foreground, cursor=cursor)
+
+        self.marker.config(bg=ui.ACCENT if self.active else background)
 
     def set_enabled(self, enabled):
         """Stand in for the `state` option a real button would take."""
         self.enabled = enabled
-        self.paint(ui.ACCENT if enabled else ui.mix(ui.ACCENT, ui.SURFACE, 0.65))
-        for part in self.parts():
-            part.config(cursor='hand2' if enabled else 'arrow')
+        if not enabled:
+            self.active = False
+            self.hovered = False
+        self.repaint()
+
+    def set_active(self, active):
+        """Mark this as the console currently on show."""
+        self.active = bool(active) and self.enabled
+        self.repaint()
 
     def fit(self, width):
         """Wrap the label to the width the rail actually got."""
@@ -121,11 +163,12 @@ class NavButton(tk.Frame):
             self.command()
 
     def entered(self, event=None):
-        if self.enabled:
-            self.paint(ui.ACCENT_HOVER)
+        self.hovered = True
+        self.repaint()
 
     def left(self, event=None):
-        self.set_enabled(self.enabled)
+        self.hovered = False
+        self.repaint()
 
 
 class MainConsole(tk.Tk):
@@ -244,16 +287,22 @@ class MainConsole(tk.Tk):
         gap = len(entries)
         nav.grid_rowconfigure(gap, weight=1)
 
-        self.btn_exit = self.nav_button(nav, "\u23fb", "Exit", self.exit_click)
+        self.btn_exit = self.nav_button(nav, "\u23fb", "Exit", self.exit_click,
+                                        danger=True)
         self.btn_exit.grid(row=gap + 1, column=0, sticky="ew", padx=3, pady=3)
 
         nav.bind('<Configure>', self.fit_nav_labels)
         return nav
 
-    def nav_button(self, nav, icon, label, command):
-        button = NavButton(nav, icon, label, command)
+    def nav_button(self, nav, icon, label, command, danger=False):
+        button = NavButton(nav, icon, label, command, danger=danger)
         self.nav_buttons.append(button)
         return button
+
+    def mark_current(self, entry):
+        """Light up the rail entry whose console is on show, and only that one."""
+        for button in self.nav_buttons:
+            button.set_active(button is entry)
 
     def fit_nav_labels(self, event):
         """Wrap the labels to whatever width the rail actually got."""
@@ -444,11 +493,12 @@ class MainConsole(tk.Tk):
         if self.shell_is_alive():
             self.placeholder.pack(fill="both", expand=True)
 
-    def open_page(self, title, build, on_closed=None):
+    def open_page(self, title, build, on_closed=None, entry=None):
         """Build one console into the page panel, replacing what is there.
 
-        `build` is handed the panel and returns the console instance, and
-        `on_closed` runs once that page has been torn down again.
+        `build` is handed the panel and returns the console instance,
+        `on_closed` runs once that page has been torn down again, and
+        `entry` is the rail entry to show as current while it is open.
         """
         self.close_page()
         self.placeholder.pack_forget()
@@ -468,12 +518,14 @@ class MainConsole(tk.Tk):
             page.destroy()
             self.wm_title("EOL Tester")
             self.show_placeholder()
+            self.mark_current(None)
             messagebox.showerror(
                 "EOL Tester",
                 "The {} page could not be opened.\n\n{}".format(title, e))
             return False
 
         self.page_closed_hook = on_closed
+        self.mark_current(entry)
         return True
 
     def close_page(self):
@@ -506,6 +558,7 @@ class MainConsole(tk.Tk):
 
         self.wm_title("EOL Tester")
         self.show_placeholder()
+        self.mark_current(None)
         self.run_closed_hook(hook)
 
     def page_closed(self, page):
@@ -522,6 +575,7 @@ class MainConsole(tk.Tk):
         if self.shell_is_alive():
             self.wm_title("EOL Tester")
             self.show_placeholder()
+            self.mark_current(None)
 
         # The hook releases the PLC port, so it runs either way.
         self.run_closed_hook(hook)
@@ -550,7 +604,8 @@ class MainConsole(tk.Tk):
             print(f"MainConsole: {port} is busy {when}: {e}")
 
     def com_port_settings_click(self):
-        self.open_page("COM Port Settings", ComPortSettings)
+        self.open_page("COM Port Settings", ComPortSettings,
+                       entry=self.btn_com_settings)
 
     def settings_click(self):
         # Ask before tearing down the open page, so a cancelled login
@@ -560,12 +615,14 @@ class MainConsole(tk.Tk):
             return
 
         self.open_page("Model Settings",
-                       lambda page: WorkspaceApp(page, user=user))
+                       lambda page: WorkspaceApp(page, user=user),
+                       entry=self.btn_settings)
 
     def test_click(self):
         self.open_page(
             "Test Console", self.build_test_console,
-            on_closed=lambda: self.release_plc_port("after closing the test console"))
+            on_closed=lambda: self.release_plc_port("after closing the test console"),
+            entry=self.btn_test)
 
     def build_test_console(self, page):
         # A port left open by an earlier run would refuse to connect.
@@ -573,13 +630,13 @@ class MainConsole(tk.Tk):
         return EOLTesterGUI(page)
 
     def work_data_click(self):
-        self.open_page("Work Data", DataConsole)
+        self.open_page("Work Data", DataConsole, entry=self.btn_work_data)
 
     def admin_click(self):
         if prompt_login(self) is None:
             return
 
-        self.open_page("Admin", AdminConsole)
+        self.open_page("Admin", AdminConsole, entry=self.btn_admin)
 
     def user_manual_click(self):
         messagebox.showinfo("User Manual", "User manual functionality will be implemented here.")
