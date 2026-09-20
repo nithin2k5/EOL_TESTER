@@ -21,6 +21,8 @@ import re
 import config
 import db
 import ui
+import icons
+import customtkinter as ctk
 
 class EOLTesterGUI:
     def __init__(self, root):
@@ -457,8 +459,12 @@ class EOLTesterGUI:
         # INFAC brand mark (left side)
         brand = tk.Frame(title_frame, bg=ui.SURFACE)
         brand.pack(side="left", padx=ui.PAD_LARGE)
-        tk.Label(brand, text="⚙", bg=ui.SURFACE, fg=ui.ACCENT,
-                font=(ui.FONT_FAMILY, 22)).pack(side="left", padx=(0, ui.PAD))
+        logo = ctk.CTkFrame(brand, width=36, height=36, corner_radius=10,
+                            fg_color=ui.ACCENT)
+        logo.pack(side="left", padx=(0, ui.PAD))
+        logo.pack_propagate(False)
+        ctk.CTkLabel(logo, text='', fg_color=ui.ACCENT,
+                    image=ui.icon_image('gear', ui.TEXT_ON_ACCENT, 20)).pack(expand=True)
         tk.Label(brand, text="INFAC\nINDIA", bg=ui.SURFACE, fg=ui.TEXT,
                 font=ui.FONT_SECTION, justify="left").pack(side="left")
 
@@ -506,40 +512,25 @@ class EOLTesterGUI:
         """Create PLC process control section in the title frame"""
         try:
             # Control card
-            control_frame = tk.Frame(parent_frame, bg=ui.SUBTLE,
-                                     highlightbackground=ui.BORDER,
-                                     highlightthickness=1)
+            control_frame = ui.ctk_card(parent_frame, corner_radius=ui.CORNER_RADIUS_SMALL)
             control_frame.pack(side="left", padx=(0, ui.PAD), pady=ui.PAD)
 
             # Control label
             control_label = tk.Label(control_frame, text="Process Control",
-                                   font=ui.FONT_SMALL, bg=ui.SUBTLE,
+                                   font=ui.FONT_SMALL, bg=ui.SURFACE,
                                    fg=ui.TEXT_MUTED)
             control_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
 
             # Initialize process status
             self.process_status = "LOW"  # HIGH or LOW
 
-            # Process control button
-            self.process_control_btn = tk.Button(
-                control_frame,
-                text="START TESTING",
-                font=ui.FONT_BODY_BOLD,
-                bg=ui.SUCCESS,
-                fg=ui.TEXT_ON_ACCENT,
-                width=15,
-                command=self.toggle_process_status,
-                state='disabled'  # Initially disabled until ALC code is processed
-            )
+            # Process control button - starts disabled until ALC code is
+            # processed; toggle_process_status() and the monitoring loop
+            # recolour it live via fg_color, same as any other CTkButton.
+            self.process_control_btn = ui.ctk_button(
+                control_frame, text="START TESTING", icon='play', kind='success',
+                width=150, command=self.toggle_process_status, state='disabled')
             self.process_control_btn.pack(padx=ui.PAD, pady=(0, ui.PAD))
-
-            # Add hover effects
-            self.process_control_btn.bind('<Enter>',
-                lambda e: self.process_control_btn.config(bg=ui.SUCCESS_HOVER)
-                if self.process_control_btn.cget('state') != 'disabled' else None)
-            self.process_control_btn.bind('<Leave>',
-                lambda e: self.process_control_btn.config(bg=ui.SUCCESS)
-                if self.process_control_btn.cget('state') != 'disabled' else None)
 
         except Exception as e:
             print(f"Error creating PLC control section: {e}")
@@ -548,29 +539,23 @@ class EOLTesterGUI:
         """Create process status indicator in the title frame"""
         try:
             # Status card
-            status_frame = tk.Frame(parent_frame, bg=ui.SUBTLE,
-                                    highlightbackground=ui.BORDER,
-                                    highlightthickness=1)
+            status_frame = ui.ctk_card(parent_frame, corner_radius=ui.CORNER_RADIUS_SMALL)
             status_frame.pack(side="left", padx=(0, ui.PAD_LARGE), pady=ui.PAD)
 
             # Status label
             status_label = tk.Label(status_frame, text="Process Status",
-                                  font=ui.FONT_SMALL, bg=ui.SUBTLE,
+                                  font=ui.FONT_SMALL, bg=ui.SURFACE,
                                   fg=ui.TEXT_MUTED)
             status_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
 
             # Initialize process indicator status
             self.process_indicator_status = "IDLE"  # IDLE, RUNNING, COMPLETED, FAILED
 
-            # Status indicator (LED-style)
-            self.status_indicator = tk.Label(
-                status_frame,
-                text="● IDLE",
-                font=ui.FONT_BODY_BOLD,
-                bg=ui.SUBTLE,
-                fg=ui.TEXT_MUTED,
-                width=12
-            )
+            # Status indicator (LED-style) - update_process_indicator()
+            # recolours this via text_color.
+            self.status_indicator = ctk.CTkLabel(
+                status_frame, text="● IDLE", font=ui.FONT_BODY_BOLD,
+                fg_color=ui.SURFACE, text_color=ui.TEXT_MUTED, width=100)
             self.status_indicator.pack(padx=ui.PAD, pady=(0, ui.PAD))
 
         except Exception as e:
@@ -610,7 +595,7 @@ class EOLTesterGUI:
                 
                 # Start monitoring
                 self.process_status = "HIGH"
-                self.process_control_btn.config(text="STOP TESTING", bg="#f44336")
+                self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
                 self.start_check_async()
             else:
                 # Stop EOL testing process
@@ -642,7 +627,7 @@ class EOLTesterGUI:
             
             # STEP 2: Update status variables
             self.process_status = "HIGH"
-            self.process_control_btn.config(text="STOP TESTING", bg="#f44336")
+            self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
             
             # Generate initial lot number if not exists
             if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
@@ -712,7 +697,7 @@ class EOLTesterGUI:
             
             # Update status variables
             self.process_status = "HIGH"
-            self.process_control_btn.config(text="STOP TESTING", bg="#f44336")
+            self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
             self.update_process_indicator("RUNNING")
             self.safe_update_message(f"EOL Testing Started - LOT: {self.current_lot_number}", "green")
             
@@ -746,7 +731,7 @@ class EOLTesterGUI:
             
             # Update status variables
             self.process_status = "LOW"
-            self.process_control_btn.config(text="START TESTING", bg="#4CAF50")
+            self.process_control_btn.configure(text="START TESTING", fg_color=ui.SUCCESS, hover_color=ui.SUCCESS_HOVER)
                 
             # CRITICAL: Stop P0000 keep-alive first
             self.p0000_keepalive_active = False
@@ -1089,15 +1074,15 @@ class EOLTesterGUI:
             self.process_indicator_status = status
             
             if status == "IDLE":
-                self.status_indicator.config(text="● IDLE", fg="gray")
+                self.status_indicator.configure(text="● IDLE", text_color=ui.TEXT_MUTED)
             elif status == "RUNNING":
-                self.status_indicator.config(text="● RUNNING", fg="green")
+                self.status_indicator.configure(text="● RUNNING", text_color=ui.SUCCESS)
             elif status == "COMPLETED":
-                self.status_indicator.config(text="● COMPLETED", fg="blue")
+                self.status_indicator.configure(text="● COMPLETED", text_color=ui.ACCENT)
             elif status == "FAILED":
-                self.status_indicator.config(text="● FAILED", fg="red")
+                self.status_indicator.configure(text="● FAILED", text_color=ui.DANGER)
             else:
-                self.status_indicator.config(text="● UNKNOWN", fg="orange")
+                self.status_indicator.configure(text="● UNKNOWN", text_color=ui.WARNING)
                 
             print(f"Process indicator updated to: {status}")
             
@@ -1167,7 +1152,7 @@ class EOLTesterGUI:
             # Reset process control button
             if hasattr(self, 'process_control_btn'):
                 self.process_status = "LOW"
-                self.process_control_btn.config(text="Set Status HIGH", bg="#4CAF50")
+                self.process_control_btn.configure(text="Set Status HIGH", fg_color=ui.SUCCESS, hover_color=ui.SUCCESS_HOVER)
             
             # Show countdown message
             self.safe_update_message("Test completed. Restarting cycle in 2 seconds...", "blue")
@@ -1249,28 +1234,29 @@ class EOLTesterGUI:
 
     def create_first_quadrant(self):
         """Create the image display quadrant with correct dimensions."""
-        q1 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                     highlightthickness=1)
+        q1 = ui.ctk_card(self.workspace)
         q1.grid_propagate(False)  # Prevent frame from resizing
-        q1.config(width=800, height=600)  # Match model_settings.py quadrant size
+        q1.configure(width=800, height=600)  # Match model_settings.py quadrant size
 
-        # Create header frame at the top
-        header_frame = tk.Frame(q1, bg=ui.SUBTLE, height=34)
-        header_frame.pack(fill="x", side="top")
+        # Header strip, inset so the card's own rounded corners show around
+        # it. model_header's text gets swapped in and out elsewhere to show
+        # the loaded model/part - so it is built here rather than through
+        # ui.ctk_card_header(), which owns its label outright.
+        header_frame = ctk.CTkFrame(q1, corner_radius=ui.CORNER_RADIUS_SMALL,
+                                    fg_color=ui.SUBTLE, height=34)
+        header_frame.pack(fill="x", padx=6, pady=(6, ui.PAD))
         header_frame.pack_propagate(False)
 
-        tk.Label(header_frame, text="▣", bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
+        ctk.CTkLabel(header_frame, text='', fg_color=ui.SUBTLE,
+                    image=ui.icon_image('box', ui.ACCENT, 18)).pack(
+                        side="left", padx=(ui.PAD_LARGE, 0))
 
-        # Add header label
-        self.model_header = tk.Label(header_frame,
+        self.model_header = ctk.CTkLabel(header_frame,
                                     text="MODEL - PART NUMBER",
-                                    bg=ui.SUBTLE,
-                                    fg=ui.ACCENT,
+                                    fg_color=ui.SUBTLE,
+                                    text_color=ui.ACCENT,
                                     font=ui.FONT_SECTION)
         self.model_header.pack(side="left", padx=ui.PAD)
-
-        tk.Frame(q1, bg=ui.BORDER, height=1).pack(fill="x", pady=(0, ui.PAD))
 
         # Create a frame to hold the image with exact dimensions
         self.image_frame = tk.Frame(q1, bg=ui.SURFACE)
@@ -1305,30 +1291,44 @@ class EOLTesterGUI:
         # same accent blue - the monitor loop is what tells them apart,
         # switching a step to green on pass or red on fail as it completes.
         status_labels = [
-            {'text': 'AUTO', 'bg': ui.ACCENT},
-            {'text': 'HOME', 'bg': ui.ACCENT},
-            {'text': '1st PULL\n(Load Test)', 'bg': ui.ACCENT},
-            {'text': '2nd PULL\n(Length Test)', 'bg': ui.ACCENT},
-            {'text': 'TEST\nRESULT', 'bg': ui.ACCENT}
+            {'text': 'AUTO', 'bg': ui.ACCENT, 'icon': 'refresh'},
+            {'text': 'HOME', 'bg': ui.ACCENT, 'icon': 'home'},
+            {'text': '1st PULL\n(Load Test)', 'bg': ui.ACCENT, 'icon': 'download'},
+            {'text': '2nd PULL\n(Length Test)', 'bg': ui.ACCENT, 'icon': 'ruler'},
+            {'text': 'TEST\nRESULT', 'bg': ui.ACCENT, 'icon': 'document'}
         ]
 
         # Initialize process status labels dictionary
         self.process_status_labels = {}
+        # tk.PhotoImage references have to be kept alive by something, or
+        # Tk garbage-collects them and the icons go blank.
+        self._step_icons = {}
 
-        # Create and pack status labels using grid
+        # Create and pack status labels using grid. Each sits in its own
+        # cell rather than being sized by its own width/height, because a
+        # Label's width/height switch from character units to pixels the
+        # moment it is given an image - 15x5 "characters" would otherwise
+        # shrink these to a few pixels wide.
         for i, label_info in enumerate(status_labels):
+            icon_photo = ImageTk.PhotoImage(
+                icons.image(label_info['icon'], ui.TEXT_ON_ACCENT, 22))
+            self._step_icons[label_info['icon']] = icon_photo
+
+            cell = tk.Frame(status_frame, bg=ui.SURFACE)
+            cell.grid(row=0, column=i, padx=3, pady=2, sticky="nsew")
+
             label = tk.Label(
-                status_frame,
+                cell,
                 text=label_info['text'],
+                image=icon_photo,
+                compound='top',
                 bg=label_info['bg'],
                 fg=ui.TEXT_ON_ACCENT,
                 font=ui.FONT_BODY_BOLD,
                 relief="flat",
                 cursor="hand2",
-                width=15,  # Fixed width
-                height=5   # Fixed height
             )
-            label.grid(row=0, column=i, padx=3, pady=2, sticky="nsew")
+            label.pack(fill='both', expand=True)
 
             # Store reference to the label in dictionary
             label_key = label_info['text'].split()[0].lower()
@@ -1354,23 +1354,14 @@ class EOLTesterGUI:
 
     def create_second_quadrant(self):
         """Create the specifications display quadrant."""
-        q2 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                     highlightthickness=1)
+        q2 = ui.ctk_card(self.workspace)
 
         # Define camera frame dimensions
         cam_width = 120  # Width for camera frames
         cam_height = 90  # Height for camera frames
 
         # Add header
-        header_frame = tk.Frame(q2, bg=ui.SUBTLE, height=34)
-        header_frame.pack(fill="x")
-        header_frame.pack_propagate(False)
-        tk.Label(header_frame, text="▤", bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
-        tk.Label(header_frame, text="TEST SPECIFICATIONS",
-                bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
-        tk.Frame(q2, bg=ui.BORDER, height=1).pack(fill="x")
+        ui.ctk_card_header(q2, "TEST SPECIFICATIONS", icon='clipboard')
 
         # Create specifications table frame (70% of height)
         spec_frame = tk.Frame(q2, bg=ui.SURFACE)  # Add border to spec frame
@@ -1447,15 +1438,19 @@ class EOLTesterGUI:
         camera_container.grid_columnconfigure(3, weight=1)  # Text box
 
         def camera_slot(column):
-            """A bordered, empty preview box - nothing ever feeds these two
+            """A rounded, empty preview box - nothing ever feeds these two
             a real image, so the placeholder inside is all they ever show."""
-            frame = tk.Frame(camera_container, width=cam_width, height=cam_height,
-                            bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                            highlightthickness=1)
+            frame = ctk.CTkFrame(camera_container, width=cam_width, height=cam_height,
+                                 corner_radius=ui.CORNER_RADIUS_SMALL,
+                                 fg_color=ui.SURFACE, border_width=1,
+                                 border_color=ui.BORDER)
             frame.grid(row=1, column=column, padx=10, pady=(0, 5))
             frame.grid_propagate(False)
-            ui.empty_state(frame, "☐", "No image").place(
-                relx=0.5, rely=0.5, anchor='center')
+            ctk.CTkLabel(frame, text="No image", fg_color=ui.SURFACE,
+                        text_color=ui.TEXT_MUTED, font=ui.FONT_SMALL,
+                        compound='top',
+                        image=ui.icon_image('camera', ui.BORDER_STRONG, 28)).place(
+                            relx=0.5, rely=0.5, anchor='center')
             return frame
 
         # Camera 1 section
@@ -1469,30 +1464,23 @@ class EOLTesterGUI:
         self.cam2_frame = camera_slot(1)
 
         # Text box (moved to column 3 for equal spacing)
-        textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT",
-                                 bg=ui.SUBTLE, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL)
-        textbox_label.grid(row=0, column=3, pady=(0, 5))
-        self.cam_textbox = tk.Text(camera_container, width=40, height=5,
+        tk.Label(camera_container, text="LABEL SCAN RESULT", bg=ui.SUBTLE,
+                fg=ui.TEXT_MUTED, font=ui.FONT_SMALL).grid(
+                    row=0, column=3, pady=(0, 5))
+        textbox_slot = ctk.CTkFrame(camera_container, corner_radius=ui.CORNER_RADIUS_SMALL,
+                                    fg_color=ui.SURFACE, border_width=1,
+                                    border_color=ui.BORDER)
+        textbox_slot.grid(row=1, column=3, padx=10, pady=1, sticky="nsew")
+        self.cam_textbox = tk.Text(textbox_slot, width=40, height=5,
                                    bg=ui.SURFACE, fg=ui.TEXT, font=ui.FONT_BODY,
-                                   relief="solid", borderwidth=1,
-                                   highlightbackground=ui.BORDER,
-                                   highlightcolor=ui.ACCENT, padx=ui.PAD, pady=ui.PAD)
-        self.cam_textbox.grid(row=1, column=3, padx=10, pady=1, sticky="nsew")
+                                   relief="flat", borderwidth=0,
+                                   highlightthickness=0, padx=ui.PAD, pady=ui.PAD)
+        self.cam_textbox.pack(fill="both", expand=True, padx=4, pady=4)
         return q2
 
     def create_third_quadrant(self):
-        q3 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                     highlightthickness=1)
-
-        header_frame = tk.Frame(q3, bg=ui.SUBTLE, height=34)
-        header_frame.pack(fill="x")
-        header_frame.pack_propagate(False)
-        tk.Label(header_frame, text="↕", bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
-        tk.Label(header_frame, text="LOAD & LENGTH GRAPH",
-                bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
-        tk.Frame(q3, bg=ui.BORDER, height=1).pack(fill="x")
+        q3 = ui.ctk_card(self.workspace)
+        ui.ctk_card_header(q3, "LOAD & LENGTH GRAPH", icon='chart')
 
         # Add graph area directly without the labels
         self.create_graph_area(q3)
@@ -1500,18 +1488,8 @@ class EOLTesterGUI:
         return q3
 
     def create_fourth_quadrant(self):
-        q4 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                     highlightthickness=1)
-
-        caption_frame = tk.Frame(q4, bg=ui.SUBTLE, height=34)
-        caption_frame.pack(fill="x")
-        caption_frame.pack_propagate(False)
-        tk.Label(caption_frame, text="≡", bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
-        tk.Label(caption_frame, text="LOT INFORMATION",
-                bg=ui.SUBTLE, fg=ui.ACCENT,
-                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
-        tk.Frame(q4, bg=ui.BORDER, height=1).pack(fill="x")
+        q4 = ui.ctk_card(self.workspace)
+        ui.ctk_card_header(q4, "LOT INFORMATION", icon='list')
 
         # Column header strip - reduced height to 30
         header_frame = tk.Frame(q4, bg=ui.ACCENT, height=30)
@@ -1595,50 +1573,44 @@ class EOLTesterGUI:
         input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
         input_frame.columnconfigure(2, weight=1)  # ALC CODE
 
-        # Employee Code Entry
-        self.emp_entry = tk.Entry(input_frame,
+        # Employee Code Entry - a plain tk.Entry sitting in a rounded slot.
+        # It stays a plain Entry rather than becoming a CTkEntry because the
+        # validation flow elsewhere toggles it to a 'readonly' state, which
+        # CTkEntry does not support.
+        emp_slot = ctk.CTkFrame(input_frame, corner_radius=ui.CORNER_RADIUS_SMALL,
+                                fg_color=ui.SURFACE, border_width=1, border_color=ui.BORDER)
+        emp_slot.grid(row=0, column=0, padx=5, sticky="ew")
+        self.emp_entry = tk.Entry(emp_slot,
                                  bg=ui.SURFACE,
                                  fg=ui.TEXT,
                                  font=ui.FONT_BODY_BOLD,
                                  justify="center",
                                  relief="flat",
+                                 highlightthickness=0,
                                  width=15)
-        self.emp_entry.grid(row=0, column=0, padx=5, sticky="ew")
+        self.emp_entry.pack(fill="both", expand=True, padx=6, pady=6)
         self.emp_entry.insert(0, "EMP CODE")
-        self.emp_entry.configure(highlightthickness=1,
-                               highlightbackground=ui.BORDER,
-                               highlightcolor=ui.ACCENT)
 
         # Next Label Button
-        next_btn = tk.Button(input_frame,
-                            text="NEXT LABEL ➜",
-                            bg=ui.WARNING,
-                            fg=ui.TEXT_ON_ACCENT,
-                            relief="flat",
-                            font=ui.FONT_BODY_BOLD,
-                            cursor="hand2",
-                            command=self.next_label_command,
-                            pady=2)
+        next_btn = ui.ctk_button(input_frame, text="NEXT LABEL", icon='arrow_right',
+                                 kind='warning', command=self.next_label_command)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
 
-        # Add hover effect for next label button
-        next_btn.bind('<Enter>', lambda e: next_btn.configure(bg=ui.mix(ui.WARNING, '#ffffff', 0.15)))
-        next_btn.bind('<Leave>', lambda e: next_btn.configure(bg=ui.WARNING))
-
-        # ALC Code Entry (initially disabled)
-        self.alc_entry = tk.Entry(input_frame,
+        # ALC Code Entry (initially disabled), same rounded-slot treatment.
+        alc_slot = ctk.CTkFrame(input_frame, corner_radius=ui.CORNER_RADIUS_SMALL,
+                                fg_color=ui.SURFACE, border_width=1, border_color=ui.BORDER)
+        alc_slot.grid(row=0, column=2, padx=5, sticky="ew")
+        self.alc_entry = tk.Entry(alc_slot,
                                  bg=ui.SURFACE,
                                  fg=ui.TEXT,
                                  font=ui.FONT_BODY_BOLD,
                                  justify="center",
                                  relief="flat",
+                                 highlightthickness=0,
                                  width=15,
                                  state='disabled')  # Initially disabled
-        self.alc_entry.grid(row=0, column=2, padx=5, sticky="ew")
+        self.alc_entry.pack(fill="both", expand=True, padx=6, pady=6)
         self.alc_entry.insert(0, "ALC CODE")
-        self.alc_entry.configure(highlightthickness=1,
-                               highlightbackground=ui.BORDER,
-                               highlightcolor=ui.WARNING)
         
         # Bind events
         self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
@@ -1674,9 +1646,8 @@ class EOLTesterGUI:
             tk.Label(cell, text=f"{caption}:", bg=ui.SUBTLE, fg=color,
                      font=ui.FONT_BODY_BOLD).pack(side="left")
 
-            value = tk.Label(cell, text="", bg=ui.SURFACE, fg=color, width=6,
-                             highlightbackground=ui.BORDER, highlightthickness=1,
-                             anchor="center", font=ui.FONT_BODY_BOLD)
+            value = ctk.CTkLabel(cell, text="0", fg_color=ui.SURFACE, text_color=color,
+                                 width=44, corner_radius=8, font=ui.FONT_BODY_BOLD)
             value.pack(side="left", padx=(4, 0))
             self.scan_count_labels[caption] = value
 
@@ -3602,7 +3573,7 @@ class EOLTesterGUI:
             
             # Update model header
             if result['MM_MODEL_NAME']:
-                self.model_header.config(text=f"{result['MM_MODEL_NAME']} - {part_number}")
+                self.model_header.configure(text=f"{result['MM_MODEL_NAME']} - {part_number}")
             
             # Load image if path exists
             if result['MM_IMAGE_PATH']:
@@ -4079,7 +4050,7 @@ class EOLTesterGUI:
                 
                 # Update part name label
                 if hasattr(self, 'model_header'):
-                    self.model_header.config(text=f"{self.modelName} - {self.partNumber}")
+                    self.model_header.configure(text=f"{self.modelName} - {self.partNumber}")
                 
                 # Load part image
                 image_path = model_result['MM_IMAGE_PATH']
@@ -4179,8 +4150,8 @@ class EOLTesterGUI:
                 # Update UI to show test is running
                 self.process_status = "HIGH"
                 if hasattr(self, 'process_control_btn'):
-                    self.process_control_btn.config(text="STOP TESTING", bg="#f44336")
-                    self.process_control_btn.config(state='normal')
+                    self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
+                    self.process_control_btn.configure(state='normal')
                 
                 # Update process indicator
                 if hasattr(self, 'update_process_indicator'):
@@ -4435,10 +4406,10 @@ class EOLTesterGUI:
         """Count OK, NG and invalid barcode scans across the displayed rows."""
         try:
             results = [str(row.get('TD_BARCODE_SCAN_RESULT') or '') for row in rows]
-            self.ok_count_label.config(text=str(results.count('OK')))
-            self.ng_count_label.config(text=str(results.count('NG')))
-            self.invalid_count_label.config(text=str(results.count('***')))
-            self.total_count_label.config(text=str(len(rows)))
+            self.ok_count_label.configure(text=str(results.count('OK')))
+            self.ng_count_label.configure(text=str(results.count('NG')))
+            self.invalid_count_label.configure(text=str(results.count('***')))
+            self.total_count_label.configure(text=str(len(rows)))
         except Exception as e:
             print(f"Error updating scan result counters: {e}")
 
@@ -5769,7 +5740,7 @@ class EOLTesterGUI:
 
             # Store current part number and update UI
             self.current_part_number = model_result['MM_PART_NUMBER']
-            self.model_header.config(text=f"{model_result['MM_MODEL_NAME']} - {self.current_part_number}")
+            self.model_header.configure(text=f"{model_result['MM_MODEL_NAME']} - {self.current_part_number}")
             
             # Get specifications using the part number
             spec_query = """
@@ -7291,7 +7262,7 @@ class EOLTesterGUI:
             
             # Reset model header
             if hasattr(self, 'model_header'):
-                self.model_header.config(text="MODEL - PART NUMBER")
+                self.model_header.configure(text="MODEL - PART NUMBER")
             
             # Clear the results grid and its scan counters
             if hasattr(self, 'tree'):

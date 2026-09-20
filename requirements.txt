@@ -3,6 +3,9 @@
 # Image Processing
 Pillow>=9.0.0
 
+# Rounded, modern-looking widgets for the sidebar and Test console
+customtkinter>=5.2.0
+
 # Database
 mysql-connector-python>=8.0.0
 

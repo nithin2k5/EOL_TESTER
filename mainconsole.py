@@ -17,6 +17,9 @@ from login_form import prompt_login
 import config
 import db
 import ui
+import icons
+
+import customtkinter as ctk
 
 
 class PageFrame(tk.Frame):
@@ -67,97 +70,56 @@ class PageFrame(tk.Frame):
             shell.page_closed(self)
 
 
-class NavButton(tk.Frame):
-    """One entry in the navigation rail: an icon above its label.
+class NavButton(ctk.CTkButton):
+    """One entry in the navigation rail: a rounded pill, icon over label.
 
-    A button takes a single font, and at this width the rail needs a large
-    glyph over small text, so this is a frame that behaves like one.
-
-    It carries four looks - disabled, resting, hovered and current. The
-    current one is marked with a tint and a bar down its left edge rather
-    than by filling the row: every entry filled with accent reads as a wall
-    of colour, and leaves nothing to say which console is actually open.
+    Built on customtkinter so the current entry can be shown as a real
+    rounded, tinted pill (matching the reference design) rather than a
+    flat row with a marker bar down one edge. `command` runs on click;
+    `set_active` marks this as the console currently on show, tinting it
+    persistently rather than only while the pointer is over it.
     """
 
-    ICON_FONT = (ui.FONT_FAMILY, 18)
-    LABEL_FONT = (ui.FONT_FAMILY, 8, 'bold')
-    MARKER_WIDTH = 4
+    ICON_SIZE = 22
+    FONT = (ui.FONT_FAMILY, 9, 'bold')
 
     def __init__(self, master, icon, label, command, danger=False):
-        super().__init__(master, bg=ui.SURFACE)
-        self.command = command
+        self.icon_name = icon
         self.danger = danger
-        self.enabled = True
         self.active = False
-        self.hovered = False
 
-        self.marker = tk.Frame(self, bg=ui.SURFACE, width=self.MARKER_WIDTH)
-        self.marker.pack(side='left', fill='y')
+        super().__init__(
+            master, text=label, command=command, height=64,
+            corner_radius=ui.CORNER_RADIUS_SMALL, compound='top',
+            font=self.FONT, fg_color='transparent',
+            hover_color=ui.DANGER_SOFT if danger else ui.SUBTLE,
+            text_color=ui.DANGER if danger else ui.TEXT,
+            text_color_disabled=ui.TEXT_MUTED,
+        )
+        self._apply_icon(ui.DANGER if danger else ui.TEXT)
 
-        self.content = tk.Frame(self, bg=ui.SURFACE)
-        self.content.pack(side='left', fill='both', expand=True)
-
-        self.icon = tk.Label(self.content, text=icon, bg=ui.SURFACE,
-                             fg=ui.TEXT, font=self.ICON_FONT)
-        self.icon.pack(pady=(ui.PAD_LARGE, 2))
-
-        self.label = tk.Label(self.content, text=label, bg=ui.SURFACE,
-                              fg=ui.TEXT, font=self.LABEL_FONT,
-                              justify='center')
-        self.label.pack(pady=(0, ui.PAD_LARGE), padx=2)
-
-        for part in self.parts():
-            part.bind('<Button-1>', self.clicked)
-            part.bind('<Enter>', self.entered)
-            part.bind('<Leave>', self.left)
-
-        self.repaint()
-
-    def parts(self):
-        return (self, self.content, self.icon, self.label)
-
-    def look(self):
-        """The background and text colour this entry should be wearing."""
-        if not self.enabled:
-            return ui.SURFACE, ui.TEXT_MUTED
-        if self.active:
-            return ui.ACCENT_SOFT, ui.ACCENT
-        if self.hovered:
-            if self.danger:
-                return ui.DANGER_SOFT, ui.DANGER
-            return ui.SUBTLE, ui.TEXT
-        return ui.SURFACE, ui.TEXT
-
-    def repaint(self):
-        background, foreground = self.look()
-        cursor = 'hand2' if self.enabled else 'arrow'
-
-        self.config(bg=background, cursor=cursor)
-        self.content.config(bg=background, cursor=cursor)
-
-        for part in (self.icon, self.label):
-            # Background and foreground go in together: handed a background
-            # on its own, ui picks the text colour itself.
-            part.config(bg=background, fg=foreground, cursor=cursor)
-
-        self.marker.config(bg=ui.ACCENT if self.active else background)
+    def _apply_icon(self, color):
+        self.configure(image=ui.icon_image(self.icon_name, color, self.ICON_SIZE))
 
     def set_enabled(self, enabled):
         """Stand in for the `state` option a real button would take."""
-        self.enabled = enabled
+        self.configure(state='normal' if enabled else 'disabled')
         if not enabled:
-            self.active = False
-            self.hovered = False
-        self.repaint()
+            self.set_active(False)
+        self._apply_icon(ui.TEXT_MUTED if not enabled else
+                         (ui.ACCENT if self.active else
+                          (ui.DANGER if self.danger else ui.TEXT)))
 
     def set_active(self, active):
         """Mark this as the console currently on show."""
-        self.active = bool(active) and self.enabled
-        self.repaint()
-
-    def fit(self, width):
-        """Wrap the label to the width the rail actually got."""
-        self.label.config(wraplength=max(width, 40))
+        self.active = bool(active)
+        if self.active:
+            self.configure(fg_color=ui.ACCENT_SOFT, text_color=ui.ACCENT)
+            self._apply_icon(ui.ACCENT)
+        else:
+            text_color = ui.DANGER if self.danger else ui.TEXT
+            self.configure(fg_color='transparent', text_color=text_color)
+            self._apply_icon(text_color)
 
     def clicked(self, event=None):
         if self.enabled:
@@ -259,7 +221,8 @@ class MainConsole(tk.Tk):
         """The left-hand navigation rail.
 
         Each entry is one row of a single grid column, so they line up on
-        both edges and stay the same size whatever their label says.
+        both edges and stay the same size whatever their label says. A
+        rounded logo mark sits above them as the rail's visual anchor.
         """
         nav = tk.Frame(parent, bg=ui.SURFACE, highlightbackground=ui.BORDER,
                        highlightthickness=1, width=1)
@@ -269,32 +232,39 @@ class MainConsole(tk.Tk):
         nav.grid_propagate(False)
         nav.grid_columnconfigure(0, weight=1)
 
+        logo = ctk.CTkFrame(nav, width=44, height=44, corner_radius=12,
+                            fg_color=ui.ACCENT)
+        logo.grid(row=0, column=0, pady=(ui.PAD_LARGE, ui.PAD))
+        logo.grid_propagate(False)
+        ctk.CTkLabel(logo, text='', fg_color=ui.ACCENT,
+                    image=ui.icon_image('gear', ui.TEXT_ON_ACCENT, 24)).pack(
+                        expand=True)
+
         entries = (
-            ('btn_com_settings', "\u21c4", "COM Ports", self.com_port_settings_click),
-            ('btn_settings', "\u2699", "Settings", self.settings_click),
-            ('btn_test', "\u25b6", "Test", self.test_click),
-            ('btn_work_data', "\u25a4", "Work Data", self.work_data_click),
-            ('btn_admin', "\u26ca", "Admin", self.admin_click),
-            ('btn_help', "\u2753", "Help", self.user_manual_click),
-            ('btn_contact', "\u2709", "Contact", self.support_click),
+            ('btn_com_settings', 'swap', "COM\nPorts", self.com_port_settings_click),
+            ('btn_settings', 'gear', "Settings", self.settings_click),
+            ('btn_test', 'play', "Test", self.test_click),
+            ('btn_work_data', 'bars', "Work\nData", self.work_data_click),
+            ('btn_admin', 'shield', "Admin", self.admin_click),
+            ('btn_help', 'question', "Help", self.user_manual_click),
+            ('btn_contact', 'mail', "Contact", self.support_click),
         )
 
         self.nav_buttons = []
-        for row, (attribute, icon, label, command) in enumerate(entries):
+        for row, (attribute, icon, label, command) in enumerate(entries, start=1):
             button = self.nav_button(nav, icon, label, command)
             button.grid(row=row, column=0, sticky="ew", padx=6, pady=(6, 0))
             setattr(self, attribute, button)
 
         # Exit sits apart at the foot of the rail, so it is never clicked by
         # someone reaching for the console above it.
-        gap = len(entries)
+        gap = len(entries) + 1
         nav.grid_rowconfigure(gap, weight=1)
 
-        self.btn_exit = self.nav_button(nav, "\u23fb", "Exit", self.exit_click,
+        self.btn_exit = self.nav_button(nav, 'power', "Exit", self.exit_click,
                                         danger=True)
         self.btn_exit.grid(row=gap + 1, column=0, sticky="ew", padx=6, pady=6)
 
-        nav.bind('<Configure>', self.fit_nav_labels)
         return nav
 
     def nav_button(self, nav, icon, label, command, danger=False):
@@ -306,11 +276,6 @@ class MainConsole(tk.Tk):
         """Light up the rail entry whose console is on show, and only that one."""
         for button in self.nav_buttons:
             button.set_active(button is entry)
-
-    def fit_nav_labels(self, event):
-        """Wrap the labels to whatever width the rail actually got."""
-        for button in self.nav_buttons:
-            button.fit(event.width - 4 * ui.PAD)
 
     def check_last_test_date(self):
         """Compare the clock against the last recorded test.

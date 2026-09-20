@@ -15,6 +15,14 @@ whatever background a control ends up with, its text stays readable on it.
 import tkinter as tk
 from tkinter import ttk
 
+import customtkinter as ctk
+
+import icons
+
+# customtkinter defaults to following the OS light/dark setting, which would
+# make its rounded widgets drift from this module's fixed light palette.
+ctk.set_appearance_mode("light")
+
 # --------------------------------------------------------------------------
 # Palette
 # --------------------------------------------------------------------------
@@ -547,3 +555,77 @@ def scrollable(parent, bg=APP_BG, horizontal=False):
     container.body = inner
     container.canvas = canvas
     return container
+
+
+# --------------------------------------------------------------------------
+# Rounded widgets (customtkinter), for the pages redesigned toward rounded
+# cards and real icons
+# --------------------------------------------------------------------------
+#
+# Classic tk can only draw flat rectangles, so everything above translates
+# colour literals rather than round anything. Where a page specifically
+# wants the rounded look, these build on customtkinter instead - a thin
+# skin over Tk with real rounded corners and real icon images. Its widgets
+# are still ordinary Tk widgets underneath, so they mix freely with a plain
+# tk.Tk root and classic tk siblings; nothing here requires the whole app,
+# or even the whole page, to move over at once.
+
+CORNER_RADIUS = 14
+CORNER_RADIUS_SMALL = 10
+
+# fg_color, hover_color per semantic "kind" - the same meanings as the
+# palette above (primary action, success, failure, needs-attention).
+_BUTTON_KINDS = {
+    'primary': (ACCENT, ACCENT_HOVER),
+    'success': (SUCCESS, SUCCESS_HOVER),
+    'danger': (DANGER, DANGER_HOVER),
+    'warning': (WARNING, mix(WARNING, '#ffffff', 0.15)),
+    'neutral': (SUBTLE, BORDER),
+}
+
+
+def icon_image(name, color, size=28):
+    """A cached icon image (see icons.py), ready for a CTk `image=` option."""
+    return icons.ctk_image(name, color, size=size)
+
+
+def ctk_card(parent, **kwargs):
+    """A rounded white card, matching the reference design's panels."""
+    kwargs.setdefault('corner_radius', CORNER_RADIUS)
+    kwargs.setdefault('fg_color', SURFACE)
+    kwargs.setdefault('border_width', 1)
+    kwargs.setdefault('border_color', BORDER)
+    return ctk.CTkFrame(parent, **kwargs)
+
+
+def ctk_card_header(card, title, icon=None, height=34):
+    """The inset icon+title strip along the top of a ctk_card.
+
+    Inset a couple of pixels from the card's own edge, so the card's
+    rounded corners stay visible around it rather than being squared off
+    by a banner running edge to edge.
+    """
+    header = ctk.CTkFrame(card, corner_radius=CORNER_RADIUS_SMALL,
+                          fg_color=SUBTLE, height=height)
+    header.pack(fill='x', padx=6, pady=(6, 0))
+    header.pack_propagate(False)
+
+    if icon:
+        ctk.CTkLabel(header, text='', image=icon_image(icon, ACCENT, 18),
+                    fg_color=SUBTLE, width=18).pack(side='left', padx=(PAD_LARGE, 0))
+
+    ctk.CTkLabel(header, text=title, fg_color=SUBTLE, text_color=ACCENT,
+                font=FONT_SECTION).pack(side='left', padx=PAD)
+    return header
+
+
+def ctk_button(parent, text, icon=None, kind='primary', icon_size=20,
+              corner_radius=CORNER_RADIUS_SMALL, compound='left', **kwargs):
+    """A rounded button in one of the palette's meaningful colours."""
+    fg_color, hover_color = _BUTTON_KINDS[kind]
+    text_color = kwargs.pop('text_color', readable_on(fg_color))
+    image = icon_image(icon, text_color, icon_size) if icon else None
+    return ctk.CTkButton(parent, text=text, image=image, compound=compound,
+                         fg_color=fg_color, hover_color=hover_color,
+                         text_color=text_color, corner_radius=corner_radius,
+                         font=FONT_BODY_BOLD, **kwargs)
