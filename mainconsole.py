@@ -197,12 +197,18 @@ class MainConsole(tk.Tk):
             text="Choose a console from the navigation on the left.")
         self.show_placeholder()
 
-        # Create menu
-        menubar = tk.Menu(self)
+        # Create menu. A tk.Menu is drawn by the window manager rather than
+        # by the theme, so it keeps a system-light bar above a dark window
+        # unless it is coloured by hand.
+        menu_colours = dict(bg=ui.SURFACE, fg=ui.TEXT,
+                            activebackground=ui.ACCENT_SOFT,
+                            activeforeground=ui.ACCENT,
+                            borderwidth=0)
+        menubar = tk.Menu(self, **menu_colours)
         self.config(menu=menubar)
-        
+
         # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu = tk.Menu(menubar, tearoff=0, **menu_colours)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Help", command=self.user_manual_click)
         help_menu.add_command(label="Contact", command=self.support_click)

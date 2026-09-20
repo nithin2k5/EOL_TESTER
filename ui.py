@@ -1,12 +1,14 @@
 """Shared look and feel for every console.
 
-One light, industrial palette: neutral surfaces, a single blue accent, and
+One dark, industrial palette: slate surfaces, a single blue accent, and
 colour reserved for meaning - green passes, red failures, amber warnings.
 
 Pages were written with their own colour literals scattered through them,
 so rather than rewriting thousands of call sites this module translates
 those literals to palette tokens as widgets are built, and guarantees that
 whatever background a control ends up with, its text stays readable on it.
+That translation is what carries the dark theme into consoles whose own
+code still says bg='white'.
 
     import ui
     ui.apply(root)
@@ -21,42 +23,62 @@ import icons
 
 # customtkinter defaults to following the OS light/dark setting, which would
 # make its rounded widgets drift from this module's fixed light palette.
-ctk.set_appearance_mode("light")
+ctk.set_appearance_mode("dark")
 
 # --------------------------------------------------------------------------
 # Palette
 # --------------------------------------------------------------------------
+#
+# One dark, industrial palette: slate surfaces, a single blue accent, and
+# colour reserved for meaning. The status hues are brightened from their
+# light-theme values - a mid green or red that reads well on white goes
+# muddy against a dark panel.
 
-APP_BG = '#eef2f6'      # page background
-SURFACE = '#ffffff'     # panels and cards
-SUBTLE = '#f4f7fa'      # input wells, alternating rows
-BORDER = '#cbd5e1'
-BORDER_STRONG = '#94a3b8'
+APP_BG = '#12161c'      # page background
+SURFACE = '#1c222b'     # panels and cards
+SUBTLE = '#242b35'      # input wells, alternating rows, header strips
+BORDER = '#2c3542'
+BORDER_STRONG = '#3d4a5c'
 
-TEXT = '#1f2933'
-TEXT_MUTED = '#64748b'
+TEXT = '#e6e9ee'
+TEXT_MUTED = '#9aa5b4'
 TEXT_ON_ACCENT = '#ffffff'
+# The text colour for the rare control that is filled with a bright colour
+# rather than a dark one, so `readable_on` has a genuinely dark option to
+# pick when the background is light.
+TEXT_ON_LIGHT = '#0f1419'
 
-ACCENT = '#1d4ed8'
-ACCENT_HOVER = '#1e40af'
-ACCENT_ACTIVE = '#1e3a8a'
+# Two tones of the one accent. On a dark theme a blue bright enough to read
+# as text against a near-black panel is too light to carry white text when
+# it is used as a fill, so surfaces get the deeper tone and text the
+# brighter one.
+ACCENT = '#3b82f6'          # text, icons and borders on dark surfaces
+ACCENT_FILL = '#2563eb'     # filled surfaces, which carry TEXT_ON_ACCENT
+ACCENT_HOVER = '#1d4ed8'
+ACCENT_ACTIVE = '#1e40af'
 
 # Tinted backgrounds, for marking a row as selected without filling it with
 # the full accent - a whole column of solid accent reads as a wall, not a
 # list, and leaves nothing to say which entry you are actually on.
-ACCENT_SOFT = '#e6edfd'
-DANGER_SOFT = '#fdeaea'
+ACCENT_SOFT = '#1e2d45'
+DANGER_SOFT = '#3a1f22'
+SUCCESS_SOFT = '#16301f'
 
-SUCCESS = '#15803d'
-SUCCESS_HOVER = '#166534'
-DANGER = '#b91c1c'
-DANGER_HOVER = '#991b1b'
-WARNING = '#b45309'
-INFO = '#0369a1'
+# Disabled controls: dark enough to recede, light enough to still be read
+# as a control rather than a hole in the panel.
+DISABLED_BG = '#232a34'
+DISABLED_TEXT = '#5b6775'
+
+SUCCESS = '#22c55e'
+SUCCESS_HOVER = '#16a34a'
+DANGER = '#ef4444'
+DANGER_HOVER = '#dc2626'
+WARNING = '#f59e0b'
+INFO = '#38bdf8'
 
 # Row shading for result grids
-ROW_BAND = '#fef9c3'
-ROW_PLAIN = '#ffffff'
+ROW_BAND = '#2e2a1f'
+ROW_PLAIN = SURFACE
 
 # Type scale
 FONT_FAMILY = 'Segoe UI'
@@ -75,28 +97,37 @@ PAD_LARGE = 12
 # --------------------------------------------------------------------------
 
 # Colours that carry meaning keep it; the rest collapse onto the neutrals.
+# Every light literal has to land on something dark here, or a page that
+# was written with bg='white' keeps a white panel in the middle of the
+# dark theme.
 _BACKGROUND_MAP = {
     # neutrals
     'white': SURFACE, '#ffffff': SURFACE, '#fff': SURFACE,
     '#f0f0f0': SUBTLE, '#f5f5f5': SUBTLE, '#f8f9fa': SUBTLE,
-    '#e0e0e0': SUBTLE, 'lightgray': SUBTLE, 'lightgrey': SUBTLE,
-    'gray': SUBTLE, 'grey': SUBTLE, '#2b2b2b': SURFACE,
-    'pink': SURFACE, '#ffb6c1': SUBTLE, '#f5e6e8': SURFACE,
-    '#e8f6e9': SURFACE, '#e6eef5': SURFACE, '#f5f0e6': SURFACE,
+    '#e0e0e0': SUBTLE, '#e8e8e8': SUBTLE, 'lightgray': SUBTLE,
+    'lightgrey': SUBTLE, 'gray': SUBTLE, 'grey': SUBTLE,
+    '#2b2b2b': SURFACE, 'pink': SURFACE, '#ffb6c1': SUBTLE,
+    '#f5e6e8': SURFACE, '#e8f6e9': SURFACE, '#e6eef5': SURFACE,
+    '#f5f0e6': SURFACE,
     'lightyellow': ROW_BAND, '#fff9c4': ROW_BAND, '#fef9c3': ROW_BAND,
-    # accent family
-    'navy': ACCENT, 'darkblue': ACCENT, 'blue': ACCENT,
-    'deepskyblue': ACCENT, '#00bfff': ACCENT, '#1e88e5': ACCENT,
-    '#3498db': ACCENT, '#2980b9': ACCENT_HOVER, '#0d6efd': ACCENT,
-    '#2c3e50': ACCENT, '#add8e6': SUBTLE,
+    '#ffff99': ROW_BAND,
+    # accent family - as a background these are fills, so they take the
+    # deeper tone and get TEXT_ON_ACCENT written over them below.
+    'navy': ACCENT_FILL, 'darkblue': ACCENT_FILL, 'blue': ACCENT_FILL,
+    'deepskyblue': ACCENT_FILL, '#00bfff': ACCENT_FILL, '#1e88e5': ACCENT_FILL,
+    '#3498db': ACCENT_FILL, '#2980b9': ACCENT_HOVER, '#0d6efd': ACCENT_FILL,
+    '#2c3e50': ACCENT_FILL, '#add8e6': SUBTLE, 'lightblue': SUBTLE,
+    '#cce5ff': ACCENT_SOFT, '#e6f2ff': ACCENT_SOFT,
     # success family
     'green': SUCCESS, '#2ecc71': SUCCESS, '#27ae60': SUCCESS_HOVER,
     '#4caf50': SUCCESS, '#198754': SUCCESS, '#00ff00': SUCCESS,
-    '#90ee90': '#dcfce7',
+    '#45a049': SUCCESS_HOVER,
+    'lightgreen': SUCCESS_SOFT, '#90ee90': SUCCESS_SOFT,
     # danger family
     'red': DANGER, 'darkred': DANGER, '#e74c3c': DANGER,
     '#c0392b': DANGER_HOVER, '#f44336': DANGER, '#ff4d4d': DANGER,
-    '#dc3545': DANGER, '#ffcccb': '#fee2e2',
+    '#dc3545': DANGER, '#ff3333': DANGER,
+    '#ffcccb': DANGER_SOFT, '#ffe6e6': DANGER_SOFT,
     # warning family
     'yellow': WARNING, 'orange': WARNING, '#ffd700': WARNING,
     '#ffeb3b': WARNING,
@@ -104,8 +135,17 @@ _BACKGROUND_MAP = {
     # it belongs with the danger family or a failed step reads as a caution.
     '#ff4500': DANGER,
     # purple used for the edit action
-    '#9b59b6': ACCENT, '#8e44ad': ACCENT_HOVER,
+    '#9b59b6': ACCENT_FILL, '#8e44ad': ACCENT_HOVER,
     '#95a5a6': TEXT_MUTED, '#7f8c8d': TEXT_MUTED,
+}
+
+# Fills with a designated text colour, whichever way the contrast maths
+# would otherwise fall. Blue is the one that needs saying: white on the
+# accent is the convention everywhere else in this app.
+_FILL_TEXT = {
+    ACCENT_FILL: TEXT_ON_ACCENT,
+    ACCENT_HOVER: TEXT_ON_ACCENT,
+    ACCENT_ACTIVE: TEXT_ON_ACCENT,
 }
 
 _FOREGROUND_MAP = {
@@ -175,8 +215,13 @@ def _ratio(first, second):
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def readable_on(background, dark=TEXT, light=TEXT_ON_ACCENT):
-    """Pick whichever text colour reads better on this background."""
+def readable_on(background, dark=TEXT_ON_LIGHT, light=TEXT):
+    """Pick whichever text colour reads better on this background.
+
+    `dark` is the option for light backgrounds and `light` the option for
+    dark ones - on a dark theme the body text is itself light, so both
+    defaults being TEXT would leave bright fills with unreadable text.
+    """
     base = _luminance(background)
     if base is None:
         return dark
@@ -236,7 +281,7 @@ def _configure_ttk():
                     fieldbackground=SURFACE, bordercolor=BORDER,
                     lightcolor=APP_BG, darkcolor=APP_BG,
                     troughcolor=SUBTLE, font=FONT_BODY,
-                    selectbackground=ACCENT, selectforeground=TEXT_ON_ACCENT)
+                    selectbackground=ACCENT_FILL, selectforeground=TEXT_ON_ACCENT)
 
     style.configure('TFrame', background=APP_BG)
     style.configure('Surface.TFrame', background=SURFACE)
@@ -251,13 +296,13 @@ def _configure_ttk():
                     foreground=ACCENT, font=FONT_SECTION)
 
     style.configure('TButton', padding=(PAD_LARGE, PAD), relief='flat',
-                    background=ACCENT, foreground=TEXT_ON_ACCENT,
+                    background=ACCENT_FILL, foreground=TEXT_ON_ACCENT,
                     font=FONT_BODY_BOLD, borderwidth=0)
     style.map('TButton',
-              background=[('disabled', '#c7d2dd'),
+              background=[('disabled', DISABLED_BG),
                           ('pressed', ACCENT_ACTIVE),
                           ('active', ACCENT_HOVER)],
-              foreground=[('disabled', '#8996a5')])
+              foreground=[('disabled', DISABLED_TEXT)])
 
     for name, base, hover in (('Success', SUCCESS, SUCCESS_HOVER),
                               ('Danger', DANGER, DANGER_HOVER),
@@ -265,13 +310,37 @@ def _configure_ttk():
         text_colour = readable_on(base)
         style.configure(f'{name}.TButton', background=base, foreground=text_colour)
         style.map(f'{name}.TButton',
-                  background=[('disabled', '#c7d2dd'), ('active', hover)],
-                  foreground=[('disabled', '#8996a5'), ('active', readable_on(hover))])
+                  background=[('disabled', DISABLED_BG), ('active', hover)],
+                  foreground=[('disabled', DISABLED_TEXT), ('active', readable_on(hover))])
 
     style.configure('TEntry', fieldbackground=SURFACE, foreground=TEXT,
-                    bordercolor=BORDER, padding=4)
+                    bordercolor=BORDER, insertcolor=TEXT, padding=4)
+    style.map('TEntry',
+              fieldbackground=[('disabled', DISABLED_BG), ('readonly', SUBTLE)],
+              foreground=[('disabled', DISABLED_TEXT)])
+
     style.configure('TCombobox', fieldbackground=SURFACE, foreground=TEXT,
-                    bordercolor=BORDER, padding=4)
+                    bordercolor=BORDER, arrowcolor=TEXT_MUTED,
+                    selectbackground=SURFACE, selectforeground=TEXT, padding=4)
+    # Most of this app's comboboxes are state='readonly', which has its own
+    # field colour - left alone it stays the system light grey.
+    style.map('TCombobox',
+              fieldbackground=[('readonly', SURFACE), ('disabled', DISABLED_BG)],
+              foreground=[('readonly', TEXT), ('disabled', DISABLED_TEXT)],
+              selectbackground=[('readonly', SURFACE)],
+              selectforeground=[('readonly', TEXT)],
+              background=[('readonly', SUBTLE), ('active', SUBTLE)],
+              arrowcolor=[('disabled', DISABLED_TEXT)])
+    # The drop-down itself is a Tk listbox rather than a ttk widget, so it
+    # only answers to the option database.
+    for pattern, value in (('*TCombobox*Listbox.background', SURFACE),
+                           ('*TCombobox*Listbox.foreground', TEXT),
+                           ('*TCombobox*Listbox.selectBackground', ACCENT_SOFT),
+                           ('*TCombobox*Listbox.selectForeground', ACCENT)):
+        try:
+            style.master.option_add(pattern, value)
+        except (AttributeError, tk.TclError):
+            pass
 
     style.configure('Treeview', background=SURFACE, fieldbackground=SURFACE,
                     foreground=TEXT, rowheight=26, borderwidth=1,
@@ -279,7 +348,7 @@ def _configure_ttk():
     style.configure('Treeview.Heading', background=SUBTLE, foreground=TEXT,
                     font=FONT_BODY_BOLD, relief='flat', padding=(PAD, PAD))
     style.map('Treeview',
-              background=[('selected', ACCENT)],
+              background=[('selected', ACCENT_FILL)],
               foreground=[('selected', TEXT_ON_ACCENT)])
     style.map('Treeview.Heading', background=[('active', BORDER)])
 
@@ -287,7 +356,7 @@ def _configure_ttk():
     style.configure('TNotebook.Tab', background=SUBTLE, foreground=TEXT,
                     padding=[PAD_LARGE, PAD], font=FONT_BODY_BOLD)
     style.map('TNotebook.Tab',
-              background=[('selected', ACCENT)],
+              background=[('selected', ACCENT_FILL)],
               foreground=[('selected', TEXT_ON_ACCENT)])
 
     style.configure('TScrollbar', background=SUBTLE, troughcolor=APP_BG,
@@ -334,7 +403,10 @@ def _normalise(widget_class, options):
     # A control with a background but no readable text is the whole reason
     # this exists: give it one, or replace one that cannot be read.
     if takes_foreground and isinstance(background, str):
-        if not isinstance(foreground, str) or not _has_contrast(foreground, background):
+        designated = _FILL_TEXT.get(background)
+        if designated is not None:
+            options['fg'] = designated
+        elif not isinstance(foreground, str) or not _has_contrast(foreground, background):
             options['fg'] = readable_on(background)
 
     if name in _BUTTON_LIKE and isinstance(background, str):
@@ -359,6 +431,36 @@ def _normalise(widget_class, options):
         options.setdefault('highlightcolor', ACCENT)
         options.setdefault('insertbackground', TEXT)
 
+    # A disabled or readonly Entry ignores `bg` entirely and paints itself in
+    # a system light grey, which on a dark panel reads as a blank white slab.
+    # Mirror whatever background it is being given into those two states, so
+    # a page that colours an entry to mean something (a validated code going
+    # green, say) keeps that meaning once the entry is locked.
+    if name in ('Entry', 'Spinbox'):
+        well = options.get('bg', SURFACE)
+        options.setdefault('disabledbackground', well)
+        options.setdefault('readonlybackground', well)
+        options.setdefault('disabledforeground', TEXT_MUTED)
+
+    # Classic scrollbars and sliders paint their trough and thumb from
+    # their own options rather than from the background they sit on, so
+    # left alone they stay a pale system grey against a dark page.
+    if name in ('Scrollbar', 'Scale'):
+        options.setdefault('bg', SUBTLE)
+        options.setdefault('troughcolor', APP_BG)
+        options.setdefault('activebackground', BORDER_STRONG)
+        options.setdefault('highlightthickness', 0)
+        options.setdefault('borderwidth', 0)
+        if name == 'Scrollbar':
+            options.setdefault('elementborderwidth', 0)
+
+    if name == 'Menu':
+        options.setdefault('bg', SURFACE)
+        options.setdefault('fg', TEXT)
+        options.setdefault('activebackground', ACCENT_SOFT)
+        options.setdefault('activeforeground', ACCENT)
+        options.setdefault('borderwidth', 0)
+
     return options
 
 
@@ -374,7 +476,8 @@ def _patch_tk_widgets():
     # created after the patch is installed.
     for widget_class in (tk.Frame, tk.LabelFrame, tk.Label, tk.Button,
                          tk.Checkbutton, tk.Radiobutton, tk.Entry, tk.Text,
-                         tk.Listbox, tk.Canvas, tk.Spinbox, tk.Toplevel):
+                         tk.Listbox, tk.Canvas, tk.Spinbox, tk.Toplevel,
+                         tk.Scrollbar, tk.Menu, tk.Scale):
         _patch_one(widget_class)
 
 
@@ -418,10 +521,33 @@ def apply(root):
     except tk.TclError:
         pass
 
-    try:
-        root.option_add('*Font', FONT_BODY)
-    except tk.TclError:
-        pass
+    # Widgets built without any colour of their own fall back to Tk's own
+    # system defaults, which are light - on a dark theme those show up as
+    # pale grey slabs in the middle of a page. The option database gives
+    # them a dark default instead, while anything that asks for a specific
+    # colour still wins.
+    defaults = (
+        ('*Font', FONT_BODY),
+        ('*Background', APP_BG),
+        ('*Foreground', TEXT),
+        ('*selectBackground', ACCENT_SOFT),
+        ('*selectForeground', TEXT),
+        ('*troughColor', SUBTLE),
+        ('*highlightBackground', APP_BG),
+        ('*highlightColor', BORDER),
+        ('*Entry.background', SURFACE),
+        ('*Text.background', SURFACE),
+        ('*Listbox.background', SURFACE),
+        ('*Menu.background', SURFACE),
+        ('*Menu.foreground', TEXT),
+        ('*Menu.activeBackground', ACCENT_SOFT),
+        ('*Menu.activeForeground', ACCENT),
+    )
+    for pattern, value in defaults:
+        try:
+            root.option_add(pattern, value)
+        except tk.TclError:
+            pass
 
     return style
 
@@ -576,7 +702,7 @@ CORNER_RADIUS_SMALL = 10
 # fg_color, hover_color per semantic "kind" - the same meanings as the
 # palette above (primary action, success, failure, needs-attention).
 _BUTTON_KINDS = {
-    'primary': (ACCENT, ACCENT_HOVER),
+    'primary': (ACCENT_FILL, ACCENT_HOVER),
     'success': (SUCCESS, SUCCESS_HOVER),
     'danger': (DANGER, DANGER_HOVER),
     'warning': (WARNING, mix(WARNING, '#ffffff', 0.15)),
