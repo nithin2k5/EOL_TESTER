@@ -28,29 +28,30 @@ class DataConsole:
         self.load_part_numbers()
 
     def create_header(self):
-        header_frame = tk.Frame(self.root, bg="pink")
-        header_frame.pack(fill=tk.X)
-
-        header_label = tk.Label(header_frame, text="EOL (END OF LINE) TESTER", 
-                              font=("Arial", 20, "bold"), bg="pink")
-        header_label.pack(pady=10)
+        ui.page_header(self.root, "Work Data", compact=True, icon='bars')
 
     def create_input_section(self):
         self.page_scroller = ui.scrollable(self.root, horizontal=True)
         self.page_scroller.pack(fill=tk.BOTH, expand=True)
         page = self.page_scroller.body
-        
-        input_frame = tk.Frame(page, padx=10, pady=10)
+
+        filters = ui.ctk_card(page)
+        filters.pack(fill=tk.X, padx=ui.PAD_LARGE, pady=(ui.PAD_LARGE, 0))
+        ui.ctk_card_header(filters, "SEARCH FILTERS", icon='clipboard')
+
+        input_frame = tk.Frame(filters, bg=ui.SURFACE, padx=10, pady=10)
         input_frame.pack(fill=tk.X)
 
         # Part Number
-        part_label = tk.Label(input_frame, text="PART NUMBER:", font=("Arial", 12))
+        part_label = tk.Label(input_frame, text="PART NUMBER:", bg=ui.SURFACE,
+                              fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
         part_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
         self.part_combobox = ttk.Combobox(input_frame, state="readonly", width=20)
         self.part_combobox.grid(row=0, column=1, padx=5, pady=5)
 
         # Start Date Label
-        start_date_label = tk.Label(input_frame, text="START DATE:", font=("Arial", 12, "bold"))
+        start_date_label = tk.Label(input_frame, text="START DATE:", bg=ui.SURFACE,
+                                    fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
         start_date_label.grid(row=0, column=2, padx=5, pady=5, sticky="e")
 
         # Set start date to beginning of current month and end date to current date
@@ -61,10 +62,10 @@ class DataConsole:
         self.start_date_entry = DateEntry(input_frame, 
                                         width=18, 
                                         date_pattern='dd-mm-yyyy',
-                                        background='darkblue',
-                                        foreground='white',
-                                        borderwidth=2,
-                                        font=("Arial", 11),
+                                        background=ui.ACCENT_FILL,
+                                        foreground=ui.TEXT_ON_ACCENT,
+                                        borderwidth=0,
+                                        font=ui.FONT_BODY,
                                         showweeknumbers=False,
                                         showothermonthdays=True,
                                         firstweekday='sunday',
@@ -75,17 +76,18 @@ class DataConsole:
         self.start_date_entry.set_date(start_of_month)
 
         # End Date Label
-        end_date_label = tk.Label(input_frame, text="END DATE:", font=("Arial", 12, "bold"))
+        end_date_label = tk.Label(input_frame, text="END DATE:", bg=ui.SURFACE,
+                                  fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
         end_date_label.grid(row=0, column=4, padx=5, pady=5, sticky="e")
 
         # Calendar widget for end date with enhanced styling
         self.end_date_entry = DateEntry(input_frame, 
                                       width=18, 
                                       date_pattern='dd-mm-yyyy',
-                                      background='darkblue',
-                                      foreground='white',
-                                      borderwidth=2,
-                                      font=("Arial", 11),
+                                      background=ui.ACCENT_FILL,
+                                      foreground=ui.TEXT_ON_ACCENT,
+                                      borderwidth=0,
+                                      font=ui.FONT_BODY,
                                       showweeknumbers=False,
                                       showothermonthdays=True,
                                       firstweekday='sunday',
@@ -96,7 +98,8 @@ class DataConsole:
         self.end_date_entry.set_date(current_date)
 
         # Result
-        result_label = tk.Label(input_frame, text="RESULT:", font=("Arial", 12))
+        result_label = tk.Label(input_frame, text="RESULT:", bg=ui.SURFACE,
+                                fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
         result_label.grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.result_combobox = ttk.Combobox(input_frame, state="readonly", width=20, 
                                           values=["ALL", "PASS", "NG"])
@@ -104,7 +107,8 @@ class DataConsole:
         self.result_combobox.set("ALL")  # Set default value
 
         # Part Status
-        status_label = tk.Label(input_frame, text="PART STATUS:", font=("Arial", 12))
+        status_label = tk.Label(input_frame, text="PART STATUS:", bg=ui.SURFACE,
+                                fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
         status_label.grid(row=2, column=2, padx=5, pady=5, sticky="e")
         self.status_combobox = ttk.Combobox(input_frame, state="readonly", width=20,
                                           values=["ACTIVE", "INACTIVE"])
@@ -112,14 +116,14 @@ class DataConsole:
         self.status_combobox.set("ACTIVE")  # Set default value
 
         # Buttons
-        self.search_button = tk.Button(input_frame, text="Search", bg="red", 
-                                     fg="white", font=("Arial", 12),
-                                     command=self.search_records)
+        self.search_button = ui.ctk_button(input_frame, text="Search", icon='clipboard',
+                                           kind='primary', width=120,
+                                           command=self.search_records)
         self.search_button.grid(row=0, column=10, padx=10, pady=5)
 
-        self.export_button = tk.Button(input_frame, text="Export", bg="green", 
-                                     fg="white", font=("Arial", 12),
-                                     command=self.export_to_csv)
+        self.export_button = ui.ctk_button(input_frame, text="Export", icon='download',
+                                           kind='success', width=120,
+                                           command=self.export_to_csv)
         self.export_button.grid(row=0, column=11, padx=10, pady=5)
 
     def create_table(self):
@@ -127,7 +131,12 @@ class DataConsole:
                        "P1", "P2", "P3", "P4", "RESULT", "SCAN RESULT", 
                        "EMPLOYEE CODE", "SPEC DATA", "CREATED DATE"]
 
-        table_frame = tk.Frame(self.page_scroller.body, padx=10, pady=10)
+        table_card = ui.ctk_card(self.page_scroller.body)
+        table_card.pack(fill=tk.BOTH, expand=True, padx=ui.PAD_LARGE,
+                        pady=ui.PAD_LARGE)
+        ui.ctk_card_header(table_card, "RESULTS", icon='list')
+
+        table_frame = tk.Frame(table_card, bg=ui.SURFACE, padx=10, pady=10)
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
@@ -152,12 +161,13 @@ class DataConsole:
             self.result_table.column(col, width=100, anchor="center")
 
     def create_footer(self):
-        footer_frame = tk.Frame(self.root, bg="pink")
+        tk.Frame(self.root, bg=ui.BORDER, height=1).pack(fill=tk.X)
+        footer_frame = tk.Frame(self.root, bg=ui.SURFACE)
         footer_frame.pack(fill=tk.X)
 
-        footer_label = tk.Label(footer_frame, 
-                              text="Designed and developed by Nice Computers & Industrial Solutions", 
-                              font=("Arial", 10), bg="pink")
+        footer_label = tk.Label(footer_frame,
+                              text="Designed and developed by Nice Computers & Industrial Solutions",
+                              font=ui.FONT_SMALL, bg=ui.SURFACE, fg=ui.TEXT_MUTED)
         footer_label.pack(pady=5)
 
     def load_part_numbers(self):

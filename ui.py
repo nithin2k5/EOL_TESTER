@@ -359,8 +359,18 @@ def _configure_ttk():
               background=[('selected', ACCENT_FILL)],
               foreground=[('selected', TEXT_ON_ACCENT)])
 
-    style.configure('TScrollbar', background=SUBTLE, troughcolor=APP_BG,
-                    bordercolor=BORDER, arrowcolor=TEXT_MUTED)
+    # Both orientations have to be named: clam draws them through
+    # Horizontal./Vertical. prefixed styles, which do not inherit the
+    # colours set on the bare TScrollbar name.
+    for scrollbar in ('TScrollbar', 'Horizontal.TScrollbar', 'Vertical.TScrollbar'):
+        style.configure(scrollbar, background=BORDER, troughcolor=APP_BG,
+                        bordercolor=APP_BG, arrowcolor=TEXT_MUTED,
+                        darkcolor=SURFACE, lightcolor=SURFACE,
+                        gripcount=0, relief='flat')
+        style.map(scrollbar,
+                  background=[('active', BORDER_STRONG),
+                              ('disabled', APP_BG)],
+                  arrowcolor=[('disabled', DISABLED_TEXT)])
     return style
 
 
@@ -556,11 +566,12 @@ def apply(root):
 # Small building blocks pages can use directly
 # --------------------------------------------------------------------------
 
-def page_header(parent, title, right_text='', compact=False):
+def page_header(parent, title, right_text='', compact=False, icon=None):
     """A titled bar across the top of a page, with optional right-hand text.
 
     `compact` trades the display-sized title for a single line of text,
     giving back most of the bar's height to whatever sits below it.
+    `icon` names a glyph from icons.py to set beside the title.
     """
     pad = PAD if compact else PAD_LARGE
     font = FONT_SECTION if compact else FONT_TITLE
@@ -571,6 +582,14 @@ def page_header(parent, title, right_text='', compact=False):
 
     inner = tk.Frame(header, bg=SURFACE)
     inner.pack(fill='x', padx=PAD_LARGE, pady=pad)
+
+    if icon:
+        badge = ctk.CTkFrame(inner, width=30, height=30, corner_radius=8,
+                             fg_color=ACCENT_FILL)
+        badge.pack(side='left', padx=(0, PAD))
+        badge.pack_propagate(False)
+        ctk.CTkLabel(badge, text='', fg_color=ACCENT_FILL,
+                    image=icon_image(icon, TEXT_ON_ACCENT, 18)).pack(expand=True)
 
     tk.Label(inner, text=title, bg=SURFACE, fg=TEXT,
              font=font).pack(side='left')

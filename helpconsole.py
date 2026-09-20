@@ -27,13 +27,14 @@ class Page:
     """
 
     TITLE = ''
+    ICON = None
 
     def __init__(self, root):
         self.root = root
         ui.apply(root)
         self.root.title("EOL Tester - " + self.TITLE)
 
-        ui.page_header(root, self.TITLE, compact=True)
+        ui.page_header(root, self.TITLE, compact=True, icon=self.ICON)
 
         area = ui.scrollable(root)
         area.pack(fill='both', expand=True)
@@ -46,11 +47,15 @@ class Page:
     def build(self, body):
         raise NotImplementedError
 
-    def card(self, body, title):
-        """A titled card down the page. Returns the frame to fill."""
-        card = ui.section(body, title)
+    def card(self, body, title, icon=None):
+        """A titled rounded card down the page. Returns the frame to fill."""
+        card = ui.ctk_card(body)
         card.pack(fill='x', padx=ui.PAD_LARGE, pady=(ui.PAD_LARGE, 0))
-        return card.body
+        ui.ctk_card_header(card, title, icon=icon)
+
+        inner = tk.Frame(card, bg=ui.SURFACE)
+        inner.pack(fill='both', expand=True, padx=ui.PAD_LARGE, pady=ui.PAD_LARGE)
+        return inner
 
     def paragraph(self, parent, text, muted=False):
         label = tk.Label(parent, text=text, bg=ui.SURFACE,
@@ -95,6 +100,7 @@ class HelpConsole(Page):
     """What each console is for, and what has to be set before testing."""
 
     TITLE = 'Help'
+    ICON = 'question'
 
     def __init__(self, root, archive_days=None, stale_days=None):
         # Taken from the main console rather than repeated here, so the page
@@ -104,7 +110,7 @@ class HelpConsole(Page):
         super().__init__(root)
 
     def build(self, body):
-        setup = self.card(body, "Before testing can start")
+        setup = self.card(body, "Before testing can start", icon='box')
         self.paragraph(setup,
                        "A machine has to be identified and given somewhere to "
                        "archive to before it can be tested on. Until both are "
@@ -121,7 +127,7 @@ class HelpConsole(Page):
                        "Admin stays available when the others do not.",
                        muted=True)
 
-        consoles = self.card(body, "The consoles")
+        consoles = self.card(body, "The consoles", icon='list')
         self.rows(consoles, (
             ("COM Ports", "Serial ports for the PLC, load cells, LVDT, "
                           "cameras and scanners."),
@@ -135,7 +141,7 @@ class HelpConsole(Page):
                       "Asks for a login."),
         ))
 
-        login = self.card(body, "Signing in")
+        login = self.card(body, "Signing in", icon='shield')
         self.paragraph(login,
                        "Settings and Admin ask for an employee number and "
                        "password. The other consoles open without one.")
@@ -144,7 +150,7 @@ class HelpConsole(Page):
                        "Admin console. Only active employees appear in the "
                        "login list.")
 
-        startup = self.card(body, "When the application opens")
+        startup = self.card(body, "When the application opens", icon='play')
         self.bullets(startup, (
             "The system date is checked against the last recorded test. If "
             "the clock is behind it, the application will not open, because "
@@ -175,20 +181,21 @@ class ContactConsole(Page):
     """Who to call, and the details worth having ready before calling."""
 
     TITLE = 'Contact'
+    ICON = 'mail'
 
     def build(self, body):
-        support = self.card(body, "Support")
+        support = self.card(body, "Support", icon='mail')
         self.rows(support, (
             ("Company", config.get('SUPPORT_COMPANY', DEFAULT_COMPANY)),
             ("Email", config.get('SUPPORT_EMAIL', NOT_SET)),
             ("Phone", config.get('SUPPORT_PHONE', NOT_SET)),
         ))
 
-        machine = self.card(body, "This machine")
+        machine = self.card(body, "This machine", icon='gear')
         self.paragraph(machine, "Quote these when reporting a problem.")
         self.rows(machine, self.machine_details())
 
-        ready = self.card(body, "Worth having ready")
+        ready = self.card(body, "Worth having ready", icon='clipboard')
         self.bullets(ready, (
             "The part number and lot number being tested.",
             "What the last step on screen was, and what the PLC was doing.",
