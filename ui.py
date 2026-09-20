@@ -91,7 +91,10 @@ _BACKGROUND_MAP = {
     '#dc3545': DANGER, '#ffcccb': '#fee2e2',
     # warning family
     'yellow': WARNING, 'orange': WARNING, '#ffd700': WARNING,
-    '#ffeb3b': WARNING, '#ff4500': WARNING,
+    '#ffeb3b': WARNING,
+    # '#ff4500' (OrangeRed) is test_console.py's fail colour, not a warning -
+    # it belongs with the danger family or a failed step reads as a caution.
+    '#ff4500': DANGER,
     # purple used for the edit action
     '#9b59b6': ACCENT, '#8e44ad': ACCENT_HOVER,
     '#95a5a6': TEXT_MUTED, '#7f8c8d': TEXT_MUTED,
@@ -445,20 +448,51 @@ def page_header(parent, title, right_text='', compact=False):
     return header
 
 
-def section(parent, title, **kwargs):
-    """A titled card. Returns the frame to put content in."""
+def section(parent, title, icon='', **kwargs):
+    """A titled card. Returns the frame to put content in.
+
+    `icon` is a single glyph shown before the title, for pages that want a
+    little visual variety between cards without departing from the palette.
+    """
     outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER,
                      highlightthickness=1, **kwargs)
 
-    caption = tk.Label(outer, text=title, bg=SUBTLE, fg=ACCENT,
-                       font=FONT_SECTION, anchor='w', padx=PAD, pady=PAD)
+    caption = tk.Frame(outer, bg=SUBTLE)
     caption.pack(fill='x')
+
+    if icon:
+        tk.Label(caption, text=icon, bg=SUBTLE, fg=ACCENT,
+                 font=FONT_SECTION).pack(side='left', padx=(PAD, 0), pady=PAD)
+
+    tk.Label(caption, text=title, bg=SUBTLE, fg=ACCENT,
+            font=FONT_SECTION, anchor='w', padx=PAD, pady=PAD).pack(
+                side='left', fill='x', expand=True)
 
     body = tk.Frame(outer, bg=SURFACE)
     body.pack(fill='both', expand=True, padx=PAD, pady=PAD)
 
     outer.body = body
+    outer.caption = caption
     return outer
+
+
+def empty_state(parent, icon, title, subtitle='', bg=SURFACE):
+    """A centred "nothing here yet" block: a glyph, a title and a subtitle.
+
+    Returns the frame; callers that want it centred in an already-expanding
+    parent should pack/place it with expand=True themselves.
+    """
+    holder = tk.Frame(parent, bg=bg)
+
+    tk.Label(holder, text=icon, bg=bg, fg=BORDER_STRONG,
+            font=(FONT_FAMILY, 28)).pack(pady=(0, PAD))
+    tk.Label(holder, text=title, bg=bg, fg=TEXT_MUTED,
+            font=FONT_BODY_BOLD).pack()
+    if subtitle:
+        tk.Label(holder, text=subtitle, bg=bg, fg=TEXT_MUTED,
+                font=FONT_SMALL).pack(pady=(2, 0))
+
+    return holder
 
 
 def scrollable(parent, bg=APP_BG, horizontal=False):

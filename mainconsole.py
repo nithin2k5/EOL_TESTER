@@ -79,9 +79,9 @@ class NavButton(tk.Frame):
     of colour, and leaves nothing to say which console is actually open.
     """
 
-    ICON_FONT = (ui.FONT_FAMILY, 17)
+    ICON_FONT = (ui.FONT_FAMILY, 18)
     LABEL_FONT = (ui.FONT_FAMILY, 8, 'bold')
-    MARKER_WIDTH = 3
+    MARKER_WIDTH = 4
 
     def __init__(self, master, icon, label, command, danger=False):
         super().__init__(master, bg=ui.SURFACE)
@@ -99,12 +99,12 @@ class NavButton(tk.Frame):
 
         self.icon = tk.Label(self.content, text=icon, bg=ui.SURFACE,
                              fg=ui.TEXT, font=self.ICON_FONT)
-        self.icon.pack(pady=(ui.PAD, 0))
+        self.icon.pack(pady=(ui.PAD_LARGE, 2))
 
         self.label = tk.Label(self.content, text=label, bg=ui.SURFACE,
                               fg=ui.TEXT, font=self.LABEL_FONT,
                               justify='center')
-        self.label.pack(pady=(1, ui.PAD), padx=2)
+        self.label.pack(pady=(0, ui.PAD_LARGE), padx=2)
 
         for part in self.parts():
             part.bind('<Button-1>', self.clicked)
@@ -282,7 +282,7 @@ class MainConsole(tk.Tk):
         self.nav_buttons = []
         for row, (attribute, icon, label, command) in enumerate(entries):
             button = self.nav_button(nav, icon, label, command)
-            button.grid(row=row, column=0, sticky="ew", padx=3, pady=(3, 0))
+            button.grid(row=row, column=0, sticky="ew", padx=6, pady=(6, 0))
             setattr(self, attribute, button)
 
         # Exit sits apart at the foot of the rail, so it is never clicked by
@@ -292,7 +292,7 @@ class MainConsole(tk.Tk):
 
         self.btn_exit = self.nav_button(nav, "\u23fb", "Exit", self.exit_click,
                                         danger=True)
-        self.btn_exit.grid(row=gap + 1, column=0, sticky="ew", padx=3, pady=3)
+        self.btn_exit.grid(row=gap + 1, column=0, sticky="ew", padx=6, pady=6)
 
         nav.bind('<Configure>', self.fit_nav_labels)
         return nav

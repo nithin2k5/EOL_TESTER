@@ -399,11 +399,12 @@ class EOLTesterGUI:
         
         # Create the main_container first to ensure it exists before other operations
         # Create main container
-        self.main_container = tk.Frame(self.root)
+        self.main_container = tk.Frame(self.root, bg=ui.APP_BG)
         self.main_container.pack(fill="both", expand=True)
 
         # Add message label for status updates
-        self.message_label = tk.Label(self.main_container, text="Initializing...", font=("Arial", 10))
+        self.message_label = tk.Label(self.main_container, text="Initializing...",
+                                      bg=ui.APP_BG, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL)
         self.message_label.pack(fill="x", pady=2)
         
         # Make sure the settings file exists and is freshly read
@@ -449,124 +450,129 @@ class EOLTesterGUI:
         self.create_footer()
 
     def create_title_bar(self):
-        title_frame = tk.Frame(self.main_container, bg="#FFB6C1", height=40)
+        title_frame = tk.Frame(self.main_container, bg=ui.SURFACE, height=64)
         title_frame.pack(fill="x")
-        
-        # INFAC Logo (left side)
-        logo_label = tk.Label(
-            title_frame, 
-            text="INFAC\nINDIA", 
-            bg="#FFB6C1", 
-            font=("Arial", 10, "bold")
-        )
-        logo_label.pack(side="left", padx=10)
-        
+        title_frame.pack_propagate(False)
+
+        # INFAC brand mark (left side)
+        brand = tk.Frame(title_frame, bg=ui.SURFACE)
+        brand.pack(side="left", padx=ui.PAD_LARGE)
+        tk.Label(brand, text="⚙", bg=ui.SURFACE, fg=ui.ACCENT,
+                font=(ui.FONT_FAMILY, 22)).pack(side="left", padx=(0, ui.PAD))
+        tk.Label(brand, text="INFAC\nINDIA", bg=ui.SURFACE, fg=ui.TEXT,
+                font=ui.FONT_SECTION, justify="left").pack(side="left")
+
         # PLC Process Control Button
         self.create_plc_control_section(title_frame)
-        
+
         # Process Status Indicator
         self.create_process_status_indicator(title_frame)
-        
 
-        
-        # Add status indicator
+        # Test-completion indicator, separate from the process-status card
         self.status_label = tk.Label(
             title_frame,
             text="●",  # Dot indicator
-            font=("Arial", 16, "bold"),
-            bg="#FFB6C1",
-            fg="gray"  # Initial color
+            font=(ui.FONT_FAMILY, 14),
+            bg=ui.SURFACE,
+            fg=ui.TEXT_MUTED  # Initial color
         )
-        self.status_label.pack(side="left")
-        
-        # Title (center)
-        title_label = tk.Label(
-            title_frame, 
-            text="EOL (END OF LINE) TESTER",
-            font=("Arial", 16, "bold"), 
-            bg="#FFB6C1"
-        )
-        title_label.pack(pady=5)
-        
+        self.status_label.pack(side="left", padx=ui.PAD)
+
         # Machine ID (right side)
         machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
         machine_label = tk.Label(
-            title_frame, 
+            title_frame,
             text=f"Machine ID: {machine_id}",
-            bg="#FFB6C1", 
-            font=("Arial", 12, "bold")
+            bg=ui.SURFACE,
+            fg=ui.TEXT_MUTED,
+            font=ui.FONT_BODY_BOLD
         )
-        machine_label.pack(side="right", padx=20)
+        machine_label.pack(side="right", padx=ui.PAD_LARGE)
 
+        # Title, filling whatever space the cards to its left leave behind
+        title_label = tk.Label(
+            title_frame,
+            text="EOL (END OF LINE) TESTER",
+            font=(ui.FONT_FAMILY, 18, "bold"),
+            bg=ui.SURFACE,
+            fg=ui.TEXT
+        )
+        title_label.pack(side="left", fill="both", expand=True)
 
+        # A hairline separating the bar from the workspace below
+        tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x")
 
     def create_plc_control_section(self, parent_frame):
         """Create PLC process control section in the title frame"""
         try:
-            # Control frame
-            control_frame = tk.Frame(parent_frame, bg="#FFB6C1")
-            control_frame.pack(side="left", padx=20)
-            
+            # Control card
+            control_frame = tk.Frame(parent_frame, bg=ui.SUBTLE,
+                                     highlightbackground=ui.BORDER,
+                                     highlightthickness=1)
+            control_frame.pack(side="left", padx=(0, ui.PAD), pady=ui.PAD)
+
             # Control label
-            control_label = tk.Label(control_frame, text="Process Control", 
-                                   font=("Arial", 9, "bold"), bg="#FFB6C1")
-            control_label.pack()
-            
+            control_label = tk.Label(control_frame, text="Process Control",
+                                   font=ui.FONT_SMALL, bg=ui.SUBTLE,
+                                   fg=ui.TEXT_MUTED)
+            control_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
+
             # Initialize process status
             self.process_status = "LOW"  # HIGH or LOW
-            
+
             # Process control button
             self.process_control_btn = tk.Button(
                 control_frame,
                 text="START TESTING",
-                font=("Arial", 10, "bold"),
-                bg="#4CAF50",
-                fg="white",
+                font=ui.FONT_BODY_BOLD,
+                bg=ui.SUCCESS,
+                fg=ui.TEXT_ON_ACCENT,
                 width=15,
                 command=self.toggle_process_status,
                 state='disabled'  # Initially disabled until ALC code is processed
             )
-            self.process_control_btn.pack(pady=2)
-            
+            self.process_control_btn.pack(padx=ui.PAD, pady=(0, ui.PAD))
+
             # Add hover effects
-            self.process_control_btn.bind('<Enter>', 
-                lambda e: self.process_control_btn.config(bg="#45a049") 
+            self.process_control_btn.bind('<Enter>',
+                lambda e: self.process_control_btn.config(bg=ui.SUCCESS_HOVER)
                 if self.process_control_btn.cget('state') != 'disabled' else None)
-            self.process_control_btn.bind('<Leave>', 
-                lambda e: self.process_control_btn.config(bg="#4CAF50") 
+            self.process_control_btn.bind('<Leave>',
+                lambda e: self.process_control_btn.config(bg=ui.SUCCESS)
                 if self.process_control_btn.cget('state') != 'disabled' else None)
-            
+
         except Exception as e:
             print(f"Error creating PLC control section: {e}")
 
     def create_process_status_indicator(self, parent_frame):
         """Create process status indicator in the title frame"""
         try:
-            # Status frame
-            status_frame = tk.Frame(parent_frame, bg="#FFB6C1")
-            status_frame.pack(side="left", padx=20)
-            
+            # Status card
+            status_frame = tk.Frame(parent_frame, bg=ui.SUBTLE,
+                                    highlightbackground=ui.BORDER,
+                                    highlightthickness=1)
+            status_frame.pack(side="left", padx=(0, ui.PAD_LARGE), pady=ui.PAD)
+
             # Status label
-            status_label = tk.Label(status_frame, text="Process Status", 
-                                  font=("Arial", 9, "bold"), bg="#FFB6C1")
-            status_label.pack()
-            
+            status_label = tk.Label(status_frame, text="Process Status",
+                                  font=ui.FONT_SMALL, bg=ui.SUBTLE,
+                                  fg=ui.TEXT_MUTED)
+            status_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
+
             # Initialize process indicator status
             self.process_indicator_status = "IDLE"  # IDLE, RUNNING, COMPLETED, FAILED
-            
+
             # Status indicator (LED-style)
             self.status_indicator = tk.Label(
                 status_frame,
                 text="● IDLE",
-                font=("Arial", 11, "bold"),
-                bg="#FFB6C1",
-                fg="gray",
+                font=ui.FONT_BODY_BOLD,
+                bg=ui.SUBTLE,
+                fg=ui.TEXT_MUTED,
                 width=12
             )
-            self.status_indicator.pack(pady=2)
-            
+            self.status_indicator.pack(padx=ui.PAD, pady=(0, ui.PAD))
 
-            
         except Exception as e:
             print(f"Error creating process status indicator: {e}")
 
@@ -1243,114 +1249,133 @@ class EOLTesterGUI:
 
     def create_first_quadrant(self):
         """Create the image display quadrant with correct dimensions."""
-        q1 = tk.Frame(self.workspace, bg='white')
+        q1 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
+                     highlightthickness=1)
         q1.grid_propagate(False)  # Prevent frame from resizing
         q1.config(width=800, height=600)  # Match model_settings.py quadrant size
-        
+
         # Create header frame at the top
-        header_frame = tk.Frame(q1, bg="#00BFFF", height=30)
-        header_frame.pack(fill="x", side="top", pady=(0, 5))
-        
+        header_frame = tk.Frame(q1, bg=ui.SUBTLE, height=34)
+        header_frame.pack(fill="x", side="top")
+        header_frame.pack_propagate(False)
+
+        tk.Label(header_frame, text="▣", bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
+
         # Add header label
-        self.model_header = tk.Label(header_frame, 
+        self.model_header = tk.Label(header_frame,
                                     text="MODEL - PART NUMBER",
-                                    bg="#00BFFF",
-                                    font=("Arial", 12, "bold"))
-        self.model_header.pack(pady=2)
-        
+                                    bg=ui.SUBTLE,
+                                    fg=ui.ACCENT,
+                                    font=ui.FONT_SECTION)
+        self.model_header.pack(side="left", padx=ui.PAD)
+
+        tk.Frame(q1, bg=ui.BORDER, height=1).pack(fill="x", pady=(0, ui.PAD))
+
         # Create a frame to hold the image with exact dimensions
-        self.image_frame = tk.Frame(q1, bg='white')
+        self.image_frame = tk.Frame(q1, bg=ui.SURFACE)
         self.image_frame.pack(expand=True, padx=2, pady=2) # Removed fill='both' so it stays exactly 750x450
         self.image_frame.pack_propagate(False)
-        
+
         # Set exact size to match model_settings.py image dimensions
         self.image_frame.config(width=750, height=450)  # Further reduced height to ensure space for labels
-        
+
         # Create initial placeholder
-        self.image_label = tk.Label(self.image_frame, 
-                                   text="No image loaded",
-                                   bg='white',
-                                   font=('Arial', 12))
+        self.image_label = tk.Label(self.image_frame,
+                                   text="☐\n\nNo image loaded\nLoad an image to start testing",
+                                   bg=ui.SURFACE,
+                                   fg=ui.TEXT_MUTED,
+                                   justify='center',
+                                   font=ui.FONT_BODY)
         self.image_label.place(relx=0.5, rely=0.5, anchor='center')
-        
+
         # Create status labels frame with fixed height
-        status_frame = tk.Frame(q1, bg='white', height=60)  # Increased height
-        status_frame.pack(fill="x", side="bottom", pady=10, before=self.image_frame)
+        status_frame = tk.Frame(q1, bg=ui.SURFACE, height=60)  # Increased height
+        status_frame.pack(fill="x", side="bottom", pady=ui.PAD_LARGE, before=self.image_frame)
         status_frame.pack_propagate(False)  # Prevent frame from shrinking
-        
+
         # Configure grid for equal spacing
         status_frame.grid_columnconfigure(0, weight=1)
         status_frame.grid_columnconfigure(1, weight=1)
         status_frame.grid_columnconfigure(2, weight=1)
         status_frame.grid_columnconfigure(3, weight=1)
         status_frame.grid_columnconfigure(4, weight=1)
-        
-        # Define status labels with their properties
+
+        # Define status labels with their properties. They all start on the
+        # same accent blue - the monitor loop is what tells them apart,
+        # switching a step to green on pass or red on fail as it completes.
         status_labels = [
-            {'text': 'AUTO', 'bg': '#00BFFF'},
-            {'text': 'HOME', 'bg': '#00BFFF'},
-            {'text': '1st PULL\n(Load Test)', 'bg': '#00BFFF'},
-            {'text': '2nd PULL\n(Length Test)', 'bg': '#00BFFF'},
-            {'text': 'TEST\nRESULT', 'bg': '#00BFFF'}
+            {'text': 'AUTO', 'bg': ui.ACCENT},
+            {'text': 'HOME', 'bg': ui.ACCENT},
+            {'text': '1st PULL\n(Load Test)', 'bg': ui.ACCENT},
+            {'text': '2nd PULL\n(Length Test)', 'bg': ui.ACCENT},
+            {'text': 'TEST\nRESULT', 'bg': ui.ACCENT}
         ]
-        
+
         # Initialize process status labels dictionary
         self.process_status_labels = {}
-        
+
         # Create and pack status labels using grid
         for i, label_info in enumerate(status_labels):
             label = tk.Label(
                 status_frame,
                 text=label_info['text'],
                 bg=label_info['bg'],
-                fg="black",
-                font=("Arial", 10, "bold"),
-                relief="raised",
-                borderwidth=1,
+                fg=ui.TEXT_ON_ACCENT,
+                font=ui.FONT_BODY_BOLD,
+                relief="flat",
+                cursor="hand2",
                 width=15,  # Fixed width
                 height=5   # Fixed height
             )
-            label.grid(row=0, column=i, padx=2, pady=2, sticky="nsew")
-            
+            label.grid(row=0, column=i, padx=3, pady=2, sticky="nsew")
+
             # Store reference to the label in dictionary
             label_key = label_info['text'].split()[0].lower()
             self.process_status_labels[label_key] = label
-            
+
             # Also store as attribute for backward compatibility
             setattr(self, f"{label_key}_label", label)
-        
+
         # Create bottom frame for label info
-        bottom_frame = tk.Frame(q1, height=30, bg='white')
-        bottom_frame.pack(fill="x", side="bottom", pady=5)
+        bottom_frame = tk.Frame(q1, height=30, bg=ui.SURFACE)
+        bottom_frame.pack(fill="x", side="bottom", pady=ui.PAD)
         bottom_frame.pack_propagate(False)
-        
+
         # Add label info text
         self.label_info = tk.Label(bottom_frame,
                                   text="Placed Labels: None",
-                                  bg='white',
-                                  font=('Arial', 10))
+                                  bg=ui.SURFACE,
+                                  fg=ui.TEXT_MUTED,
+                                  font=ui.FONT_SMALL)
         self.label_info.pack(pady=2)
-        
+
         return q1
 
     def create_second_quadrant(self):
         """Create the specifications display quadrant."""
-        q2 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
+        q2 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
+                     highlightthickness=1)
+
         # Define camera frame dimensions
         cam_width = 120  # Width for camera frames
         cam_height = 90  # Height for camera frames
-        
+
         # Add header
-        header = tk.Label(q2, text="TEST SPECIFICATIONS",
-                         bg="#00BFFF", fg="black",
-                         font=("Arial", 12, "bold"))
-        header.pack(fill="x")
-        
+        header_frame = tk.Frame(q2, bg=ui.SUBTLE, height=34)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
+        tk.Label(header_frame, text="▤", bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
+        tk.Label(header_frame, text="TEST SPECIFICATIONS",
+                bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
+        tk.Frame(q2, bg=ui.BORDER, height=1).pack(fill="x")
+
         # Create specifications table frame (70% of height)
-        spec_frame = tk.Frame(q2, relief="solid", borderwidth=1)  # Add border to spec frame
-        spec_frame.pack(fill="both", expand=True, padx=2, pady=2)  # Add padding
-        
+        spec_frame = tk.Frame(q2, bg=ui.SURFACE)  # Add border to spec frame
+        spec_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)  # Add padding
+
         # Create specifications table with numbered ID
         columns = (
             "Description",
@@ -1361,36 +1386,37 @@ class EOLTesterGUI:
             "Actual",
             "Result"
         )
-        
+
         # Configure style for Treeview
         style = ttk.Style()
         style.configure("Custom.Treeview",
                        borderwidth=1,  # Border width
-                       relief="solid",  # Border style
-                       fieldbackground="white",  # Background color
-                       background="white",  # Row background color
-                       foreground="black",  # Text color
-                       rowheight=30)  # Increase row height to fill space better
-        
+                       relief="flat",  # Border style
+                       fieldbackground=ui.SURFACE,  # Background color
+                       background=ui.SURFACE,  # Row background color
+                       foreground=ui.TEXT,  # Text color
+                       font=ui.FONT_BODY,
+                       rowheight=28)  # Increase row height to fill space better
+
         style.configure("Custom.Treeview.Heading",
                        borderwidth=1,
-                       relief="solid",
-                       background="#e0e0e0",  # Light gray header background
-                       foreground="black",  # Header text color
-                       font=("Arial", 9, "bold"))  # Header font
-        
+                       relief="flat",
+                       background=ui.SUBTLE,  # Light header background
+                       foreground=ui.TEXT,  # Header text color
+                       font=ui.FONT_BODY_BOLD)  # Header font
+
         # Configure selection colors
         style.map("Custom.Treeview",
-                 background=[("selected", "#cce5ff")],  # Light blue for selected row
-                 foreground=[("selected", "black")])
-        
+                 background=[("selected", ui.ACCENT_SOFT)],  # Soft tint for selected row
+                 foreground=[("selected", ui.ACCENT)])
+
         # Create Treeview with custom style - LIMIT TO 8 ROWS as requested
-        self.spec_tree = ttk.Treeview(spec_frame, 
-                                     columns=columns, 
-                                     show="headings", 
+        self.spec_tree = ttk.Treeview(spec_frame,
+                                     columns=columns,
+                                     show="headings",
                                      height=8,  # Fixed at 8 rows as requested
                                      style="Custom.Treeview")
-        
+
         # Configure columns with specific widths
         column_widths = {
             "Description": 200,
@@ -1401,177 +1427,209 @@ class EOLTesterGUI:
             "Actual": 50,
             "Result": 50
         }
-        
+
         # Set up each column with borders
         for col in columns:
             self.spec_tree.heading(col, text=col)
             self.spec_tree.column(col, width=column_widths.get(col, 100), anchor='center')
-        
+
         # Pack the treeview to fill the available space without scrollbars
         self.spec_tree.pack(fill="both", expand=True)
-        
+
         # Create camera frame container (30% of height)
-        camera_container = tk.Frame(q2, bg='#f0f0f0')
+        camera_container = tk.Frame(q2, bg=ui.SUBTLE)
         camera_container.pack(fill="both", expand=True, padx=1, pady=1)
-        
+
         # Configure grid for equal spacing
         camera_container.grid_columnconfigure(0, weight=1)  # First camera
         camera_container.grid_columnconfigure(1, weight=1)  # Second camera
         camera_container.grid_columnconfigure(2, weight=1)  # Spacing
         camera_container.grid_columnconfigure(3, weight=1)  # Text box
-        
+
+        def camera_slot(column):
+            """A bordered, empty preview box - nothing ever feeds these two
+            a real image, so the placeholder inside is all they ever show."""
+            frame = tk.Frame(camera_container, width=cam_width, height=cam_height,
+                            bg=ui.SURFACE, highlightbackground=ui.BORDER,
+                            highlightthickness=1)
+            frame.grid(row=1, column=column, padx=10, pady=(0, 5))
+            frame.grid_propagate(False)
+            ui.empty_state(frame, "☐", "No image").place(
+                relx=0.5, rely=0.5, anchor='center')
+            return frame
+
         # Camera 1 section
-        cam1_label = tk.Label(camera_container, text="CAM 1", fg='black', bg='white', font=("Arial", 10, "bold"))
-        cam1_label.grid(row=0, column=0, pady=(0, 5))
-        
-        self.cam1_frame = tk.Frame(camera_container, width=cam_width, height=cam_height, 
-                                  bg='white', relief='solid', borderwidth=1)
-        self.cam1_frame.grid(row=1, column=0, padx=10)
-        self.cam1_frame.grid_propagate(False)
-        
+        tk.Label(camera_container, text="CAM 1", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
+                font=ui.FONT_SMALL).grid(row=0, column=0, pady=(0, 5))
+        self.cam1_frame = camera_slot(0)
+
         # Camera 2 section
-        cam2_label = tk.Label(camera_container, text="CAM 2", bg='white', fg='black', font=("Arial", 10, "bold"))
-        cam2_label.grid(row=0, column=1, pady=(0, 5))
-        
-        self.cam2_frame = tk.Frame(camera_container, width=cam_width, height=cam_height, 
-                                  bg='white', relief='solid', borderwidth=1)
-        self.cam2_frame.grid(row=1, column=1, padx=10)
-        self.cam2_frame.grid_propagate(False)
+        tk.Label(camera_container, text="CAM 2", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
+                font=ui.FONT_SMALL).grid(row=0, column=1, pady=(0, 5))
+        self.cam2_frame = camera_slot(1)
 
         # Text box (moved to column 3 for equal spacing)
-        textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT", bg='white', fg='black', font=("Arial", 10, "bold"))
+        textbox_label = tk.Label(camera_container, text="LABEL SCAN RESULT",
+                                 bg=ui.SUBTLE, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL)
         textbox_label.grid(row=0, column=3, pady=(0, 5))
-        self.cam_textbox = tk.Text(camera_container, width=40, height=5.5)
-        self.cam_textbox.grid(row=1, column=3, padx=10, pady=1)
+        self.cam_textbox = tk.Text(camera_container, width=40, height=5,
+                                   bg=ui.SURFACE, fg=ui.TEXT, font=ui.FONT_BODY,
+                                   relief="solid", borderwidth=1,
+                                   highlightbackground=ui.BORDER,
+                                   highlightcolor=ui.ACCENT, padx=ui.PAD, pady=ui.PAD)
+        self.cam_textbox.grid(row=1, column=3, padx=10, pady=1, sticky="nsew")
         return q2
 
     def create_third_quadrant(self):
-        q3 = tk.Frame(self.workspace, relief="groove", borderwidth=1)
-        
+        q3 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
+                     highlightthickness=1)
+
+        header_frame = tk.Frame(q3, bg=ui.SUBTLE, height=34)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
+        tk.Label(header_frame, text="↕", bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
+        tk.Label(header_frame, text="LOAD & LENGTH GRAPH",
+                bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
+        tk.Frame(q3, bg=ui.BORDER, height=1).pack(fill="x")
+
         # Add graph area directly without the labels
         self.create_graph_area(q3)
-        
+
         return q3
 
     def create_fourth_quadrant(self):
-        q4 = tk.Frame(self.workspace)
-        
-        # Header with gradient effect - reduced height to 30
-        header_frame = tk.Frame(q4, bg="#1e88e5", height=30)
+        q4 = tk.Frame(self.workspace, bg=ui.SURFACE, highlightbackground=ui.BORDER,
+                     highlightthickness=1)
+
+        caption_frame = tk.Frame(q4, bg=ui.SUBTLE, height=34)
+        caption_frame.pack(fill="x")
+        caption_frame.pack_propagate(False)
+        tk.Label(caption_frame, text="≡", bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=(ui.PAD, 0))
+        tk.Label(caption_frame, text="LOT INFORMATION",
+                bg=ui.SUBTLE, fg=ui.ACCENT,
+                font=ui.FONT_SECTION).pack(side="left", padx=ui.PAD)
+        tk.Frame(q4, bg=ui.BORDER, height=1).pack(fill="x")
+
+        # Column header strip - reduced height to 30
+        header_frame = tk.Frame(q4, bg=ui.ACCENT, height=30)
         header_frame.pack(fill="x")
         header_frame.pack_propagate(False)
-        
+
         # Default columns: LOT NUMBER, L1, L2, P1, P2, RESULT, SCAN RESULT
         self.default_columns = ["LOT NUMBER", "L1", "L2", "P1", "P2", "RESULT", "SR"]
         self.current_columns = self.default_columns.copy()
-        
+
         # Store references to header labels so we can update them later
         self.header_labels = {}
         for col in self.current_columns:
-            label = tk.Label(header_frame, 
-                           text=col, 
-                           bg="#1e88e5",     
-                           fg="white",        
-                           font=("Arial", 9, "bold"))
+            label = tk.Label(header_frame,
+                           text=col,
+                           bg=ui.ACCENT,
+                           fg=ui.TEXT_ON_ACCENT,
+                           font=ui.FONT_BODY_BOLD)
             label.pack(side="left", expand=True, fill="x", padx=2, pady=3)
             self.header_labels[col] = label
-        
+
         # Main content frame to hold grid and entry fields
-        content_frame = tk.Frame(q4, bg="#f5f5f5")
-        content_frame.pack(fill="both", expand=True, padx=4, pady=4)
-        
+        content_frame = tk.Frame(q4, bg=ui.SUBTLE)
+        content_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)
+
         # Configure grid for main content
         content_frame.grid_rowconfigure(0, weight=1)  # Treeview gets most space
         content_frame.grid_rowconfigure(1, weight=0)  # Scan counters
         content_frame.grid_rowconfigure(2, weight=0)  # Entry frame gets fixed space
         content_frame.grid_columnconfigure(0, weight=1)  # Single column takes full width
-        
+
         # Create lot number tree view with frame - in the first row
         # Set a fixed width for the grid frame to prevent expansion
-        self.grid_frame = tk.Frame(content_frame, bg="#f5f5f5", width=800)
+        self.grid_frame = tk.Frame(content_frame, bg=ui.SUBTLE, width=800)
         self.grid_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 5))
         self.grid_frame.grid_propagate(False)  # Prevent the frame from resizing
-        
+
         # Configure style for the lot number tree view
         style = ttk.Style()
         style.configure("LotTree.Treeview",
                        borderwidth=1,
-                       relief="solid",
-                       fieldbackground="#ffffff", 
-                       background="#ffffff",
+                       relief="flat",
+                       fieldbackground=ui.SURFACE,
+                       background=ui.SURFACE,
+                       foreground=ui.TEXT,
                        rowheight=25,  # Increase row height
-                       font=("Arial", 10))
-                       
+                       font=ui.FONT_BODY)
+
         style.configure("LotTree.Treeview.Heading",
                        borderwidth=1,
-                       relief="solid",
-                       background="#f0f0f0",
-                       foreground="#000000",
-                       font=("Arial", 9, "bold"))
-                       
+                       relief="flat",
+                       background=ui.SUBTLE,
+                       foreground=ui.TEXT,
+                       font=ui.FONT_BODY_BOLD)
+
         # Configure selection colors
         style.map("LotTree.Treeview",
-                 background=[("selected", "#e6f2ff")],
-                 foreground=[("selected", "#000000")])
-        
+                 background=[("selected", ui.ACCENT_SOFT)],
+                 foreground=[("selected", ui.ACCENT)])
+
         # Store the fixed width we want for our tree
         self.tree_fixed_width = 780  # Slightly less than frame width to account for padding
-        
+
         # Create Treeview with default columns
         self.create_lot_tree(self.grid_frame, self.current_columns)
-        
+
         # Scan result counters, sitting under the grid
         self.create_scan_counters(content_frame)
-        
+
         # Bottom frame for entry fields - in the third row
-        entry_frame = tk.Frame(content_frame, bg="#f5f5f5", height=50)  # Reduced height
+        entry_frame = tk.Frame(content_frame, bg=ui.SUBTLE, height=50)  # Reduced height
         entry_frame.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
         entry_frame.grid_propagate(False)  # Prevent shrinking
-        
+
         # Simplified layout with just the entry fields
-        input_frame = tk.Frame(entry_frame, bg="#f5f5f5") 
+        input_frame = tk.Frame(entry_frame, bg=ui.SUBTLE)
         input_frame.pack(fill="both", expand=True, pady=5)
-        
+
         # Configure equal column weights
         input_frame.columnconfigure(0, weight=1)  # EMP CODE
         input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
         input_frame.columnconfigure(2, weight=1)  # ALC CODE
-        
+
         # Employee Code Entry
         self.emp_entry = tk.Entry(input_frame,
-                                 bg="white",
-                                 fg="#424242",
-                                 font=("Arial", 9, "bold"),
+                                 bg=ui.SURFACE,
+                                 fg=ui.TEXT,
+                                 font=ui.FONT_BODY_BOLD,
                                  justify="center",
                                  relief="flat",
                                  width=15)
         self.emp_entry.grid(row=0, column=0, padx=5, sticky="ew")
         self.emp_entry.insert(0, "EMP CODE")
         self.emp_entry.configure(highlightthickness=1,
-                               highlightbackground="#e0e0e0",
-                               highlightcolor="#1e88e5")
-        
+                               highlightbackground=ui.BORDER,
+                               highlightcolor=ui.ACCENT)
+
         # Next Label Button
         next_btn = tk.Button(input_frame,
                             text="NEXT LABEL ➜",
-                            bg="#ffd700",
-                            fg="#000000",
+                            bg=ui.WARNING,
+                            fg=ui.TEXT_ON_ACCENT,
                             relief="flat",
-                            font=("Arial", 9, "bold"),
+                            font=ui.FONT_BODY_BOLD,
                             cursor="hand2",
                             command=self.next_label_command,
                             pady=2)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
-        
+
         # Add hover effect for next label button
-        next_btn.bind('<Enter>', lambda e: next_btn.configure(bg="#ffeb3b"))
-        next_btn.bind('<Leave>', lambda e: next_btn.configure(bg="#ffd700"))
-        
+        next_btn.bind('<Enter>', lambda e: next_btn.configure(bg=ui.mix(ui.WARNING, '#ffffff', 0.15)))
+        next_btn.bind('<Leave>', lambda e: next_btn.configure(bg=ui.WARNING))
+
         # ALC Code Entry (initially disabled)
         self.alc_entry = tk.Entry(input_frame,
-                                 bg="white",
-                                 fg="black",
-                                 font=("Arial", 9, "bold"),
+                                 bg=ui.SURFACE,
+                                 fg=ui.TEXT,
+                                 font=ui.FONT_BODY_BOLD,
                                  justify="center",
                                  relief="flat",
                                  width=15,
@@ -1579,8 +1637,8 @@ class EOLTesterGUI:
         self.alc_entry.grid(row=0, column=2, padx=5, sticky="ew")
         self.alc_entry.insert(0, "ALC CODE")
         self.alc_entry.configure(highlightthickness=1,
-                               highlightbackground="#e0e0e0",
-                               highlightcolor="#ffd700")
+                               highlightbackground=ui.BORDER,
+                               highlightcolor=ui.WARNING)
         
         # Bind events
         self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
@@ -1595,30 +1653,30 @@ class EOLTesterGUI:
         
     def create_scan_counters(self, parent_frame):
         """Build the OK / NG / invalid / total strip shown under the results grid."""
-        counter_frame = tk.Frame(parent_frame, bg="#f5f5f5", height=28)
+        counter_frame = tk.Frame(parent_frame, bg=ui.SUBTLE, height=30)
         counter_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 4))
         counter_frame.grid_propagate(False)
 
         definitions = [
-            ("OK", "#2e7d32"),
-            ("NG", "#c62828"),
-            ("INVALID", "#ef6c00"),
-            ("TOTAL", "#1565c0"),
+            ("OK", ui.SUCCESS),
+            ("NG", ui.DANGER),
+            ("INVALID", ui.WARNING),
+            ("TOTAL", ui.ACCENT),
         ]
 
         self.scan_count_labels = {}
         for column, (caption, color) in enumerate(definitions):
             counter_frame.columnconfigure(column, weight=1)
 
-            cell = tk.Frame(counter_frame, bg="#f5f5f5")
+            cell = tk.Frame(counter_frame, bg=ui.SUBTLE)
             cell.grid(row=0, column=column, sticky="ew", padx=4)
 
-            tk.Label(cell, text=f"{caption}:", bg="#f5f5f5", fg=color,
-                     font=("Arial", 9, "bold")).pack(side="left")
+            tk.Label(cell, text=f"{caption}:", bg=ui.SUBTLE, fg=color,
+                     font=ui.FONT_BODY_BOLD).pack(side="left")
 
-            value = tk.Label(cell, text="", bg="#ffffff", fg=color, width=6,
-                             relief="solid", borderwidth=1, anchor="center",
-                             font=("Arial", 9, "bold"))
+            value = tk.Label(cell, text="", bg=ui.SURFACE, fg=color, width=6,
+                             highlightbackground=ui.BORDER, highlightthickness=1,
+                             anchor="center", font=ui.FONT_BODY_BOLD)
             value.pack(side="left", padx=(4, 0))
             self.scan_count_labels[caption] = value
 
@@ -1997,9 +2055,10 @@ class EOLTesterGUI:
             print(f"Error drawing graphs: {e}")
 
     def create_footer(self):
+        tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x", side="bottom")
         footer = tk.Label(self.main_container,
                         text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
-                        bg="#FFB6C1", height=2)
+                        bg=ui.SURFACE, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL, height=2)
         footer.pack(fill="x", side="bottom")
 
     # Label drag and drop functionality
