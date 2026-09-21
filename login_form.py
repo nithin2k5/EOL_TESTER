@@ -10,8 +10,9 @@ import config
 import db
 
 # Employee number of the support account, whose password lives in .env as a
-# hash rather than in the EMPLOYEE_INFO table. The account still needs a row
-# in EMPLOYEE_INFO so that it appears in the dropdown.
+# hash rather than in the EMPLOYEE_INFO table. It is checked before the table
+# is consulted, so it works even when EMPLOYEE_INFO has no row for it - which
+# is the point, since it is what gets you in when the table is the problem.
 SERVICE_ACCOUNT_USER = config.get('SERVICE_ACCOUNT_USER', '')
 SERVICE_ACCOUNT_PASSWORD_HASH = config.get('SERVICE_ACCOUNT_PASSWORD_HASH', '')
 
@@ -29,7 +30,6 @@ class LoginForm(tk.Toplevel):
         self.authenticated = False
         self.user_name = None
         self._passwords = {}   # employee number -> stored password value
-        self._numbers = {}     # combobox display text -> employee number
 
         machine_id = config.get('MACHINE_ID', '')
         title = "Login"
@@ -52,7 +52,7 @@ class LoginForm(tk.Toplevel):
 
         self.transient(parent)
         self.grab_set()
-        self.cb_employee.focus_set()
+        self.txt_employee.focus_set()
 
     def setup_ui(self):
         container = ttk.Frame(self, padding=20)
@@ -61,16 +61,18 @@ class LoginForm(tk.Toplevel):
         header = ttk.Label(container, text="EMPLOYEE LOGIN", font=('Arial', 14, 'bold'))
         header.grid(row=0, column=0, columnspan=2, pady=(0, 15))
 
-        ttk.Label(container, text="Employee :").grid(row=1, column=0, sticky='w', pady=5)
-        self.cb_employee = ttk.Combobox(container, state='readonly', width=35)
-        self.cb_employee.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
-        self.cb_employee.bind('<<ComboboxSelected>>', self.employee_selected)
+        ttk.Label(container, text="Employee Number :").grid(row=1, column=0, sticky='w', pady=5)
+        self.employee_var = tk.StringVar()
+        self.employee_var.trace_add('write', self.input_changed)
+        self.txt_employee = ttk.Entry(container, width=35, textvariable=self.employee_var)
+        self.txt_employee.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
+        self.txt_employee.bind('<Return>', lambda event: self.txt_password.focus_set())
 
         ttk.Label(container, text="Password :").grid(row=2, column=0, sticky='w', pady=5)
         self.password_var = tk.StringVar()
-        self.password_var.trace_add('write', self.password_changed)
+        self.password_var.trace_add('write', self.input_changed)
         self.txt_password = ttk.Entry(container, show='*', width=35,
-                                      textvariable=self.password_var, state='disabled')
+                                      textvariable=self.password_var)
         self.txt_password.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
         self.txt_password.bind('<Return>', lambda event: self.enter_click())
 
@@ -100,15 +102,14 @@ class LoginForm(tk.Toplevel):
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
     def load_employees(self):
-        """Fill the dropdown with active employees. False means we cannot log in."""
+        """Pre-load active employees into memory. False means database is unreachable."""
         try:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT EMPLOYEE_FULL_NAME, EMPLOYEE_NUMBER, PASSWORD
+                SELECT EMPLOYEE_NUMBER, PASSWORD
                 FROM EMPLOYEE_INFO
                 WHERE IS_ACTIVE = TRUE
-                ORDER BY EMPLOYEE_NUMBER
             """)
             rows = cursor.fetchall()
             cursor.close()
@@ -118,31 +119,24 @@ class LoginForm(tk.Toplevel):
                                  f"Failed to load employee list: {err}", parent=self)
             return False
 
-        for full_name, number, password in rows:
-            display = f"{number} - {full_name}"
-            self._numbers[display] = number
+        for number, password in rows:
             self._passwords[number] = password
 
-        if not self._numbers:
+        if not self._passwords and not SERVICE_ACCOUNT_USER:
             messagebox.showwarning("Login",
                                    "There are no active employees to log in with.",
                                    parent=self)
             return False
 
-        self.cb_employee['values'] = list(self._numbers)
         return True
 
-    def employee_selected(self, event=None):
-        self.password_var.set('')
-        self.txt_password.config(state='normal')
-        self.txt_password.focus_set()
-
-    def password_changed(self, *args):
+    def input_changed(self, *args):
+        has_employee = len(self.employee_var.get().strip()) > 0
         has_password = len(self.password_var.get().strip()) > 0
-        self.btn_enter.config(state='normal' if has_password else 'disabled')
+        self.btn_enter.config(state='normal' if (has_employee and has_password) else 'disabled')
 
     def selected_employee_number(self):
-        return self._numbers.get(self.cb_employee.get())
+        return self.employee_var.get().strip()
 
     def stored_password_for(self, employee_number):
         """The value to check against, taking the service account into account."""
@@ -155,18 +149,19 @@ class LoginForm(tk.Toplevel):
             return
 
         employee_number = self.selected_employee_number()
-        if employee_number is None:
+        if not employee_number:
             return
 
-        if auth.verify_password(self.password_var.get(),
-                                self.stored_password_for(employee_number)):
+        stored_password = self.stored_password_for(employee_number)
+
+        if stored_password and auth.verify_password(self.password_var.get(), stored_password):
             self.authenticated = True
             self.user_name = employee_number
             self.grab_release()
             self.destroy()
         else:
             messagebox.showerror("INVALID LOGIN",
-                                 "Entered Password is Incorrect!!", parent=self)
+                                 "Invalid Employee Number or Password!!", parent=self)
             self.password_var.set('')
             self.txt_password.focus_set()
 

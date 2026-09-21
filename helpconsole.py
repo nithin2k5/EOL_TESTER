@@ -147,8 +147,8 @@ class HelpConsole(Page):
                        "password. The other consoles open without one.")
         self.paragraph(login,
                        "Employee accounts are added and deactivated in the "
-                       "Admin console. Only active employees appear in the "
-                       "login list.")
+                       "Admin console. A deactivated account is refused at "
+                       "the login.")
 
         startup = self.card(body, "When the application opens", icon='play')
         self.bullets(startup, (
