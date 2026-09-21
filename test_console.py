@@ -1,5 +1,4 @@
 import tkinter as tk
-import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import os
@@ -17,11 +16,11 @@ import random
 import sys
 import queue
 import re
+import math
 
 import config
 import db
 import ui
-import icons
 import customtkinter as ctk
 
 class EOLTesterGUI:
@@ -404,10 +403,11 @@ class EOLTesterGUI:
         self.main_container = tk.Frame(self.root, bg=ui.APP_BG)
         self.main_container.pack(fill="both", expand=True)
 
-        # Add message label for status updates
-        self.message_label = tk.Label(self.main_container, text="Initializing...",
-                                      bg=ui.APP_BG, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL)
-        self.message_label.pack(fill="x", pady=2)
+        # The machine status line. This is what an operator looks at first
+        # when the line stops, so it is a filled, iconed strip rather than a
+        # word of coloured text - legible from standing distance at the cell.
+        self.message_label = ui.StatusBanner(self.main_container)
+        self.message_label.pack(fill="x", padx=ui.PAD, pady=(ui.PAD, 0))
         
         # Make sure the settings file exists and is freshly read
         self.ensure_settings_file_exists()
@@ -452,9 +452,8 @@ class EOLTesterGUI:
         self.create_footer()
 
     def create_title_bar(self):
-        title_frame = tk.Frame(self.main_container, bg=ui.SURFACE, height=64)
+        title_frame = tk.Frame(self.main_container, bg=ui.SURFACE)
         title_frame.pack(fill="x")
-        title_frame.pack_propagate(False)
 
         # INFAC brand mark (left side)
         brand = tk.Frame(title_frame, bg=ui.SURFACE)
@@ -474,16 +473,6 @@ class EOLTesterGUI:
         # Process Status Indicator
         self.create_process_status_indicator(title_frame)
 
-        # Test-completion indicator, separate from the process-status card
-        self.status_label = tk.Label(
-            title_frame,
-            text="●",  # Dot indicator
-            font=(ui.FONT_FAMILY, 14),
-            bg=ui.SURFACE,
-            fg=ui.TEXT_MUTED  # Initial color
-        )
-        self.status_label.pack(side="left", padx=ui.PAD)
-
         # Machine ID (right side)
         machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
         machine_label = tk.Label(
@@ -495,7 +484,7 @@ class EOLTesterGUI:
         )
         machine_label.pack(side="right", padx=ui.PAD_LARGE)
 
-        # Title, filling whatever space the cards to its left leave behind
+        # Title, absolutely centered in the bar
         title_label = tk.Label(
             title_frame,
             text="EOL (END OF LINE) TESTER",
@@ -503,7 +492,7 @@ class EOLTesterGUI:
             bg=ui.SURFACE,
             fg=ui.TEXT
         )
-        title_label.pack(side="left", fill="both", expand=True)
+        title_label.place(relx=0.5, rely=0.5, anchor="center")
 
         # A hairline separating the bar from the workspace below
         tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x")
@@ -1209,34 +1198,27 @@ class EOLTesterGUI:
             self.safe_update_message(f"Error in cycle restart: {e}", "red")
 
     def create_quadrants(self):
-        """Update the create_quadrants method to remove borders"""
-        # Configure grid weights for equal space
-        self.workspace.grid_columnconfigure(0, weight=1)  # First column
-        self.workspace.grid_columnconfigure(1, weight=1)  # Second column
-        self.workspace.grid_rowconfigure(0, weight=1)     # First row
-        self.workspace.grid_rowconfigure(1, weight=1)     # Second row
+        # Configure grid weights for equal space and responsive layout
+        self.workspace.grid_columnconfigure(0, weight=1, uniform='quad')  # First column
+        self.workspace.grid_columnconfigure(1, weight=1, uniform='quad')  # Second column
+        self.workspace.grid_rowconfigure(0, weight=1, uniform='quad')     # First row
+        self.workspace.grid_rowconfigure(1, weight=1, uniform='quad')     # Second row
         
-        # Create quadrants without borders
+        # Create quadrants
         self.q1 = self.create_first_quadrant()
         self.q2 = self.create_second_quadrant()
         self.q3 = self.create_third_quadrant()
         self.q4 = self.create_fourth_quadrant()
         
-        # Place quadrants with minimal spacing
-        self.q1.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-        self.q2.grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-        self.q3.grid(row=1, column=0, sticky="nsew", padx=1, pady=1)
-        self.q4.grid(row=1, column=1, sticky="nsew", padx=1, pady=1)
-        
-        # Prevent resizing
-        for quadrant in [self.q1, self.q2, self.q3, self.q4]:
-            quadrant.grid_propagate(False)
+        # Place quadrants with consistent spacing
+        self.q1.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self.q2.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
+        self.q3.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
+        self.q4.grid(row=1, column=1, sticky="nsew", padx=4, pady=4)
 
     def create_first_quadrant(self):
         """Create the image display quadrant with correct dimensions."""
         q1 = ui.ctk_card(self.workspace)
-        q1.grid_propagate(False)  # Prevent frame from resizing
-        q1.configure(width=800, height=600)  # Match model_settings.py quadrant size
 
         # Header strip, inset so the card's own rounded corners show around
         # it. model_header's text gets swapped in and out elsewhere to show
@@ -1258,13 +1240,9 @@ class EOLTesterGUI:
                                     font=ui.FONT_SECTION)
         self.model_header.pack(side="left", padx=ui.PAD)
 
-        # Create a frame to hold the image with exact dimensions
+        # Create a frame to hold the image
         self.image_frame = tk.Frame(q1, bg=ui.SURFACE)
-        self.image_frame.pack(expand=True, padx=2, pady=2) # Removed fill='both' so it stays exactly 750x450
-        self.image_frame.pack_propagate(False)
-
-        # Set exact size to match model_settings.py image dimensions
-        self.image_frame.config(width=750, height=450)  # Further reduced height to ensure space for labels
+        self.image_frame.pack(expand=True, fill="both", padx=ui.PAD_LARGE, pady=ui.PAD)
 
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame,
@@ -1300,35 +1278,13 @@ class EOLTesterGUI:
 
         # Initialize process status labels dictionary
         self.process_status_labels = {}
-        # tk.PhotoImage references have to be kept alive by something, or
-        # Tk garbage-collects them and the icons go blank.
-        self._step_icons = {}
 
-        # Create and pack status labels using grid. Each sits in its own
-        # cell rather than being sized by its own width/height, because a
-        # Label's width/height switch from character units to pixels the
-        # moment it is given an image - 15x5 "characters" would otherwise
-        # shrink these to a few pixels wide.
+        # One grid cell each, all of equal weight, so the five stay the
+        # same size whatever their labels say.
         for i, label_info in enumerate(status_labels):
-            icon_photo = ImageTk.PhotoImage(
-                icons.image(label_info['icon'], ui.TEXT_ON_ACCENT, 22))
-            self._step_icons[label_info['icon']] = icon_photo
-
-            cell = tk.Frame(status_frame, bg=ui.SURFACE)
-            cell.grid(row=0, column=i, padx=3, pady=2, sticky="nsew")
-
-            label = tk.Label(
-                cell,
-                text=label_info['text'],
-                image=icon_photo,
-                compound='top',
-                bg=label_info['bg'],
-                fg=ui.TEXT_ON_ACCENT,
-                font=ui.FONT_BODY_BOLD,
-                relief="flat",
-                cursor="hand2",
-            )
-            label.pack(fill='both', expand=True)
+            label = ui.StepLamp(status_frame, label_info['text'],
+                                label_info['icon'], color=label_info['bg'])
+            label.grid(row=0, column=i, padx=4, pady=2, sticky="nsew")
 
             # Store reference to the label in dictionary
             label_key = label_info['text'].split()[0].lower()
@@ -1363,9 +1319,8 @@ class EOLTesterGUI:
         # Add header
         ui.ctk_card_header(q2, "TEST SPECIFICATIONS", icon='clipboard')
 
-        # Create specifications table frame (70% of height)
+        # Create specifications table frame
         spec_frame = tk.Frame(q2, bg=ui.SURFACE)  # Add border to spec frame
-        spec_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)  # Add padding
 
         # Create specifications table with numbered ID
         columns = (
@@ -1389,12 +1344,8 @@ class EOLTesterGUI:
                        font=ui.FONT_BODY,
                        rowheight=28)  # Increase row height to fill space better
 
-        style.configure("Custom.Treeview.Heading",
-                       borderwidth=1,
-                       relief="flat",
-                       background=ui.SUBTLE,  # Light header background
-                       foreground=ui.TEXT,  # Header text color
-                       font=ui.FONT_BODY_BOLD)  # Header font
+        # Header band, selection colours and fonts are inherited from the
+        # base Treeview style in ui.py, so every grid in the app matches.
 
         # Configure selection colors
         style.map("Custom.Treeview",
@@ -1424,12 +1375,15 @@ class EOLTesterGUI:
             self.spec_tree.heading(col, text=col)
             self.spec_tree.column(col, width=column_widths.get(col, 100), anchor='center')
 
-        # Pack the treeview to fill the available space without scrollbars
+        # Pack the treeview inside spec_frame
         self.spec_tree.pack(fill="both", expand=True)
 
-        # Create camera frame container (30% of height)
+        # Create camera frame container (fixed height at bottom)
         camera_container = tk.Frame(q2, bg=ui.SUBTLE)
-        camera_container.pack(fill="both", expand=True, padx=1, pady=1)
+        camera_container.pack(fill="x", side="bottom", padx=1, pady=1)
+        
+        # Pack spec_frame after camera_container so it takes the remaining space
+        spec_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)
 
         # Configure grid for equal spacing
         camera_container.grid_columnconfigure(0, weight=1)  # First camera
@@ -1491,25 +1445,9 @@ class EOLTesterGUI:
         q4 = ui.ctk_card(self.workspace)
         ui.ctk_card_header(q4, "LOT INFORMATION", icon='list')
 
-        # Column header strip - reduced height to 30
-        header_frame = tk.Frame(q4, bg=ui.ACCENT, height=30)
-        header_frame.pack(fill="x")
-        header_frame.pack_propagate(False)
-
         # Default columns: LOT NUMBER, L1, L2, P1, P2, RESULT, SCAN RESULT
         self.default_columns = ["LOT NUMBER", "L1", "L2", "P1", "P2", "RESULT", "SR"]
         self.current_columns = self.default_columns.copy()
-
-        # Store references to header labels so we can update them later
-        self.header_labels = {}
-        for col in self.current_columns:
-            label = tk.Label(header_frame,
-                           text=col,
-                           bg=ui.ACCENT,
-                           fg=ui.TEXT_ON_ACCENT,
-                           font=ui.FONT_BODY_BOLD)
-            label.pack(side="left", expand=True, fill="x", padx=2, pady=3)
-            self.header_labels[col] = label
 
         # Main content frame to hold grid and entry fields
         content_frame = tk.Frame(q4, bg=ui.SUBTLE)
@@ -1522,10 +1460,8 @@ class EOLTesterGUI:
         content_frame.grid_columnconfigure(0, weight=1)  # Single column takes full width
 
         # Create lot number tree view with frame - in the first row
-        # Set a fixed width for the grid frame to prevent expansion
-        self.grid_frame = tk.Frame(content_frame, bg=ui.SUBTLE, width=800)
+        self.grid_frame = tk.Frame(content_frame, bg=ui.SUBTLE)
         self.grid_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 5))
-        self.grid_frame.grid_propagate(False)  # Prevent the frame from resizing
 
         # Configure style for the lot number tree view
         style = ttk.Style()
@@ -1538,12 +1474,9 @@ class EOLTesterGUI:
                        rowheight=25,  # Increase row height
                        font=ui.FONT_BODY)
 
-        style.configure("LotTree.Treeview.Heading",
-                       borderwidth=1,
-                       relief="flat",
-                       background=ui.SUBTLE,
-                       foreground=ui.TEXT,
-                       font=ui.FONT_BODY_BOLD)
+        # The heading row is this panel's column header - it used to have a
+        # second blue strip drawn above it saying the same things. Its
+        # appearance comes from the base Treeview style in ui.py.
 
         # Configure selection colors
         style.map("LotTree.Treeview",
@@ -1593,7 +1526,7 @@ class EOLTesterGUI:
 
         # Next Label Button
         next_btn = ui.ctk_button(input_frame, text="NEXT LABEL", icon='arrow_right',
-                                 kind='warning', command=self.next_label_command)
+                                 kind='primary', command=self.next_label_command)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
 
         # ALC Code Entry (initially disabled), same rounded-slot treatment.
@@ -1607,10 +1540,13 @@ class EOLTesterGUI:
                                  justify="center",
                                  relief="flat",
                                  highlightthickness=0,
-                                 width=15,
-                                 state='disabled')  # Initially disabled
+                                 width=15)
         self.alc_entry.pack(fill="both", expand=True, padx=6, pady=6)
+        # The placeholder has to go in before the box is disabled - Tk
+        # silently ignores insert() on a disabled Entry, which is why this
+        # well used to come up blank and unlabelled.
         self.alc_entry.insert(0, "ALC CODE")
+        self.alc_entry.config(state='disabled')
         
         # Bind events
         self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
@@ -1807,16 +1743,6 @@ class EOLTesterGUI:
             self.tree.destroy()
             self.create_lot_tree(self.grid_frame, new_columns)
             
-            # Update header frame labels
-            # First hide all labels
-            for label in self.header_labels.values():
-                label.pack_forget()
-            
-            # Then show only the labels for current columns
-            for col in new_columns:
-                if col in self.header_labels:
-                    self.header_labels[col].pack(side="left", expand=True, fill="x")
-            
             # Store new columns
             self.current_columns = new_columns
             
@@ -1858,37 +1784,39 @@ class EOLTesterGUI:
             self.safe_update_message(f"Error displaying details: {str(e)}", "red")
 
     def create_graph_area(self, parent):
-        # Create main graph container with black background
-        graph_container = tk.Frame(parent, bg="black")
-        graph_container.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Configure grid weights for reduced height
-        graph_container.grid_rowconfigure(0, weight=0)  # Title row for Load graph
-        graph_container.grid_rowconfigure(1, weight=1)  # Load graph
-        graph_container.grid_rowconfigure(2, weight=0)  # Title row for Length graph
-        graph_container.grid_rowconfigure(3, weight=1)  # Length graph
-        graph_container.grid_columnconfigure(0, weight=1)  # Ensure full width
-        
-        # Load Graph Title
-        tk.Label(graph_container, text="LOAD GRAPH", 
-                 bg="black", fg="white", anchor="w",
-                 font=("Arial", 10)).grid(row=0, column=0, sticky="w", padx=5)
-        
-        # Load Graph Canvas with reduced height
-        self.load_canvas = tk.Canvas(graph_container, bg="black", 
-                                   highlightthickness=0, height=100)  # Reduced height
-        self.load_canvas.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 10))
-        
-        # Length Graph Title
-        tk.Label(graph_container, text="LENGTH GRAPH", 
-                 bg="black", fg="white", anchor="w",
-                 font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=5)
-        
-        # Length Graph Canvas with reduced height
-        self.length_canvas = tk.Canvas(graph_container, bg="black", 
-                                     highlightthickness=0, height=100)  # Reduced height
-        self.length_canvas.grid(row=3, column=0, sticky="ew", padx=5, pady=(0, 5))
-        
+        """The two trend charts, stacked, sharing the card's surface."""
+        graph_container = tk.Frame(parent, bg=ui.CHART_SURFACE)
+        graph_container.pack(fill="both", expand=True, padx=ui.PAD_LARGE,
+                             pady=(0, ui.PAD))
+
+        # A title row and a plot row per chart; only the plots take height.
+        graph_container.grid_rowconfigure(0, weight=0)
+        graph_container.grid_rowconfigure(1, weight=1)
+        graph_container.grid_rowconfigure(2, weight=0)
+        graph_container.grid_rowconfigure(3, weight=1)
+        graph_container.grid_columnconfigure(0, weight=1)
+
+        def chart_title(row, text, unit):
+            strip = tk.Frame(graph_container, bg=ui.CHART_SURFACE)
+            strip.grid(row=row, column=0, sticky="ew", pady=(0, 2))
+            tk.Label(strip, text=text, bg=ui.CHART_SURFACE, fg=ui.TEXT,
+                     font=ui.FONT_BODY_BOLD).pack(side="left")
+            # The unit belongs on the chart, not in an operator's head.
+            tk.Label(strip, text=unit, bg=ui.CHART_SURFACE, fg=ui.TEXT_MUTED,
+                     font=ui.FONT_SMALL).pack(side="left", padx=(ui.PAD, 0))
+
+        def plot(row):
+            canvas = tk.Canvas(graph_container, bg=ui.CHART_SURFACE,
+                               highlightthickness=0, height=100)
+            canvas.grid(row=row, column=0, sticky="nsew", pady=(0, ui.PAD_LARGE))
+            return canvas
+
+        chart_title(0, "LOAD GRAPH", "kgf, by sample")
+        self.load_canvas = plot(1)
+
+        chart_title(2, "LENGTH GRAPH", "mm deviation, by sample")
+        self.length_canvas = plot(3)
+
         # Bind resize events
         self.load_canvas.bind('<Configure>', lambda e: self.draw_load_graph())
         self.length_canvas.bind('<Configure>', lambda e: self.draw_length_graph())
@@ -1904,8 +1832,29 @@ class EOLTesterGUI:
         }
         return [name for name in names if optional.get(name, True)]
 
+    # The y-axis is divided into this many bands, so the scale has to land
+    # on a step that divides cleanly by it.
+    Y_DIVISIONS = 5
+
+    @staticmethod
+    def nice_step(rough, divisions):
+        """A round step at least `rough`/divisions - 1, 2, 2.5 or 5 x 10^n.
+
+        An axis read off raw data bounds is labelled 12.04, 26.41, 40.77;
+        snapping the step first gives 10, 20, 30, which is what an operator
+        can actually compare a reading against.
+        """
+        span = rough / divisions
+        if span <= 0:
+            return 1.0
+        magnitude = 10 ** math.floor(math.log10(span))
+        for multiple in (1, 2, 2.5, 5, 10):
+            if span <= multiple * magnitude:
+                return multiple * magnitude
+        return 10 * magnitude
+
     def series_bounds(self, names):
-        """Y-axis range covering the plotted points, padded a little."""
+        """Y-axis range covering the plotted points, snapped to round ticks."""
         values = [value for name in names for value in self.chart_series.get(name, [])]
         values = [v for v in values if v is not None]
         if not values:
@@ -1915,10 +1864,15 @@ class EOLTesterGUI:
         if low == high:
             # A flat line still needs a band to sit in.
             padding = abs(low) * 0.1 or 1.0
-            return low - padding, high + padding
+            low, high = low - padding, high + padding
+        else:
+            padding = (high - low) * 0.1
+            low, high = low - padding, high + padding
 
-        padding = (high - low) * 0.1
-        return low - padding, high + padding
+        step = self.nice_step(high - low, self.Y_DIVISIONS)
+        low = math.floor(low / step) * step
+        high = low + step * self.Y_DIVISIONS
+        return low, high
 
     def draw_graph(self, canvas, names, colors, default_labels):
         """Draw one chart: grid, y-axis scale, plotted series and legend."""
@@ -1933,10 +1887,10 @@ class EOLTesterGUI:
         if width <= 1 or height <= 1:
             return
 
-        left_margin = 40
-        right_margin = 100  # Extra space for legend
-        top_margin = 20
-        bottom_margin = 30
+        left_margin = 52
+        right_margin = 74   # room for the legend
+        top_margin = 12
+        bottom_margin = 26
 
         graph_width = width - (left_margin + right_margin)
         graph_height = height - (top_margin + bottom_margin)
@@ -1950,30 +1904,46 @@ class EOLTesterGUI:
         point_count = max((len(self.chart_series.get(n, [])) for n in names), default=0)
         span = max(point_count - 1, 1)
 
-        # Vertical grid lines, labelled with the sample number.
+        baseline = height - bottom_margin
+        plot_right = width - right_margin
+
+        # Grid: hairline, solid and one step off the surface. The dashed
+        # grey ruling drew more attention than the traces in front of it.
         for i in range(9):
             x = left_margin + (i * graph_width / 8)
-            canvas.create_line(x, top_margin, x, height - bottom_margin,
-                               fill="gray", dash=(1, 2))
+            canvas.create_line(x, top_margin, x, baseline, fill=ui.CHART_GRID)
             if point_count:
                 first = self.dataPointX - point_count + 1
                 label = str(int(first + round(i * span / 8)))
             else:
                 label = str(i + 1)
-            canvas.create_text(x, height - bottom_margin + 10, text=label, fill="white")
+            canvas.create_text(x, baseline + 12, text=label,
+                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
 
         # Horizontal grid lines, labelled from the data when there is any.
-        divisions = 5
+        divisions = self.Y_DIVISIONS
         for i in range(divisions + 1):
-            y = height - (bottom_margin + (i * graph_height / divisions))
-            canvas.create_line(left_margin, y, width - right_margin, y,
-                               fill="gray", dash=(1, 2))
+            y = baseline - (i * graph_height / divisions)
+            canvas.create_line(left_margin, y, plot_right, y, fill=ui.CHART_GRID)
             if bounds:
                 low, high = bounds
-                label = f"{low + (high - low) * i / divisions:.2f}"
+                value = low + (high - low) * i / divisions
+                # Whole numbers lose the trailing ".00"; fine steps keep
+                # enough places to stay distinct from their neighbours.
+                step = (high - low) / divisions
+                places = 0 if step >= 1 else (1 if step >= 0.1 else 2)
+                label = f"{value:,.{places}f}"
             else:
                 label = str(default_labels[i])
-            canvas.create_text(left_margin - 15, y, text=label, fill="white")
+            canvas.create_text(left_margin - 6, y, text=label, anchor="e",
+                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
+
+        # The two axes themselves, a shade stronger than the grid, so the
+        # plot reads as a framed area rather than as loose ruling.
+        canvas.create_line(left_margin, top_margin, left_margin, baseline,
+                           fill=ui.CHART_AXIS)
+        canvas.create_line(left_margin, baseline, plot_right, baseline,
+                           fill=ui.CHART_AXIS)
 
         # Plot each series.
         if bounds and point_count > 1:
@@ -1994,27 +1964,42 @@ class EOLTesterGUI:
                     coordinates.extend((x, y))
 
                 if len(coordinates) >= 4:
-                    canvas.create_line(*coordinates, fill=colors[name], width=2)
+                    # A casing in the surface colour under each trace, so
+                    # that where two cross the upper one stays readable.
+                    canvas.create_line(*coordinates, fill=ui.CHART_SURFACE,
+                                       width=6, capstyle="round",
+                                       joinstyle="round")
+                    canvas.create_line(*coordinates, fill=colors[name], width=2,
+                                       capstyle="round", joinstyle="round")
 
         # Legend, showing only the series this part reports.
-        legend_x = width - right_margin + 20
-        legend_y = top_margin + 20
+        legend_x = plot_right + 18
+        legend_y = top_margin + 10
         for name in names:
-            canvas.create_line(legend_x, legend_y, legend_x + 20, legend_y,
-                               fill=colors[name], width=2)
-            canvas.create_text(legend_x + 30, legend_y, text=name, fill="white", anchor="w")
-            legend_y += 20
+            canvas.create_line(legend_x, legend_y, legend_x + 18, legend_y,
+                               fill=colors[name], width=3, capstyle="round")
+            # The label wears a text token and the swatch beside it carries
+            # the identity, so the pair never depends on colour alone.
+            canvas.create_text(legend_x + 26, legend_y, text=name, anchor="w",
+                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
+            legend_y += 18
+
+    # Categorical slots in fixed order, so L1 and P1 keep their colour
+    # whether or not the part reports L2-L4. Colour follows the channel,
+    # never its position among whichever ones happen to be on show.
+    LOAD_COLORS = dict(zip(['L1', 'L2', 'L3', 'L4'], ui.SERIES))
+    LENGTH_COLORS = dict(zip(['P1', 'P2', 'P3', 'P4'], ui.SERIES))
 
     def draw_load_graph(self):
         self.draw_graph(self.load_canvas,
                         ['L1', 'L2', 'L3', 'L4'],
-                        {'L1': 'cyan', 'L2': 'orange', 'L3': 'red', 'L4': 'blue'},
+                        self.LOAD_COLORS,
                         [0, 20, 40, 60, 80, 100])
 
     def draw_length_graph(self):
         self.draw_graph(self.length_canvas,
                         ['P1', 'P2', 'P3', 'P4'],
-                        {'P1': 'blue', 'P2': 'orange', 'P3': 'red', 'P4': 'white'},
+                        self.LENGTH_COLORS,
                         [-5, -3, -1, 1, 3, 5])
 
     def redraw_graphs(self):
@@ -2380,15 +2365,16 @@ class EOLTesterGUI:
                 # Ensure it's placed correctly if it was previously packed
                 self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             else:
-                self.image_label = tk.Label(self.image_frame, image=self.photo, bg='white')
+                self.image_label = tk.Label(self.image_frame, image=self.photo, bg=ui.SURFACE)
                 self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             
             # Update status
-            self.status_label.config(text=f"Image loaded: {os.path.basename(image_path)}")
+            self.safe_update_message(
+                f"Image loaded: {os.path.basename(image_path)}", "green")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load image: {str(e)}")
-            self.status_label.config(text="Failed to load image")
+            self.safe_update_message("Failed to load image", "red")
 
     def setup_barcode_listener(self):
         """Alternative approach using tkinter bindings"""
@@ -2795,7 +2781,7 @@ class EOLTesterGUI:
             # Enable part number entry (ALC entry)
             if hasattr(self, 'alc_entry'):
                 self.alc_entry.config(state='normal')
-                self.alc_entry.config(bg='white')
+                self.alc_entry.config(bg=ui.SURFACE)
             
             # Enable other essential controls
             if hasattr(self, 'cam_textbox'):
@@ -2932,7 +2918,7 @@ class EOLTesterGUI:
                         # Stop blinking if it was blinking
                         self.stop_label_blinking(f"{label_name}_label")
                     elif color == 'RED':
-                        label_obj.config(bg="#FF0000")  # Bright red
+                        label_obj.config(bg=ui.DANGER)  # Bright red
                         # Stop blinking if it was blinking
                         self.stop_label_blinking(f"{label_name}_label")
                     else:
@@ -3272,7 +3258,7 @@ class EOLTesterGUI:
         try:
             if hasattr(self, 'root') and self.root.winfo_exists():
                 if hasattr(self, 'message_label') and self.message_label and self.message_label.winfo_exists():
-                    self.message_label.config(text=message, fg=color)
+                    self.message_label.show(message, color)
                 else:
                     print(f"Cannot display message '{message}' - message_label not ready")
             else:
@@ -3293,8 +3279,8 @@ class EOLTesterGUI:
             # Check if message_label exists
             if not hasattr(self, 'message_label'):
                 print("Error: message_label does not exist. Creating it now.")
-                self.message_label = tk.Label(self.main_container, text="Ready", font=("Arial", 10))
-                self.message_label.pack(fill="x", pady=2)
+                self.message_label = ui.StatusBanner(self.main_container)
+                self.message_label.pack(fill="x", padx=ui.PAD, pady=(ui.PAD, 0))
                 
             self.safe_update_message("System ready. PLC functionality removed.", "green")
             
@@ -3673,7 +3659,7 @@ class EOLTesterGUI:
                 self.image_label.destroy()
             
             # Create new image label with exact same dimensions
-            self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
+            self.image_label = tk.Label(self.image_frame, image=photo, bg=ui.SURFACE)
             self.image_label.image = photo  # Keep a reference
             self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             

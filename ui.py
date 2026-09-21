@@ -80,6 +80,28 @@ INFO = '#38bdf8'
 ROW_BAND = '#2e2a1f'
 ROW_PLAIN = SURFACE
 
+# --------------------------------------------------------------------------
+# Chart tokens
+# --------------------------------------------------------------------------
+#
+# Trend charts used to be drawn on a pure black canvas with saturated
+# primaries - which is how an oscilloscope looks, not how a panel in this
+# app looks, and a black slab in the middle of a slate page is the one
+# thing on screen that reads as broken. They now sit on the same surface
+# as everything else.
+#
+# SERIES is a categorical palette: identity, not magnitude, so the slots
+# are assigned in fixed order and never cycled. These four are validated
+# against CHART_SURFACE for lightness, chroma, contrast and colour-vision
+# separation - re-run the check before changing one:
+#
+#     node validate_palette.js "#3987e5,#d95926,#199e70,#c98500" #          --mode dark --surface "#1c222b"
+#
+CHART_SURFACE = SURFACE      # the canvas the plot is drawn on
+CHART_GRID = BORDER          # hairline grid, one step off the surface
+CHART_AXIS = BORDER_STRONG   # the axis rules themselves
+SERIES = ('#3987e5', '#d95926', '#199e70', '#c98500')
+
 # Type scale
 FONT_FAMILY = 'Segoe UI'
 FONT_BODY = (FONT_FAMILY, 10)
@@ -107,6 +129,7 @@ _BACKGROUND_MAP = {
     '#e0e0e0': SUBTLE, '#e8e8e8': SUBTLE, 'lightgray': SUBTLE,
     'lightgrey': SUBTLE, 'gray': SUBTLE, 'grey': SUBTLE,
     '#2b2b2b': SURFACE, 'pink': SURFACE, '#ffb6c1': SUBTLE,
+    'black': SURFACE, '#000000': SURFACE,
     '#f5e6e8': SURFACE, '#e8f6e9': SURFACE, '#e6eef5': SURFACE,
     '#f5f0e6': SURFACE,
     'lightyellow': ROW_BAND, '#fff9c4': ROW_BAND, '#fef9c3': ROW_BAND,
@@ -126,7 +149,7 @@ _BACKGROUND_MAP = {
     # danger family
     'red': DANGER, 'darkred': DANGER, '#e74c3c': DANGER,
     '#c0392b': DANGER_HOVER, '#f44336': DANGER, '#ff4d4d': DANGER,
-    '#dc3545': DANGER, '#ff3333': DANGER,
+    '#dc3545': DANGER, '#ff3333': DANGER, '#ff0000': DANGER,
     '#ffcccb': DANGER_SOFT, '#ffe6e6': DANGER_SOFT,
     # warning family
     'yellow': WARNING, 'orange': WARNING, '#ffd700': WARNING,
@@ -155,13 +178,16 @@ _FOREGROUND_MAP = {
     '#999999': TEXT_MUTED, '#666666': TEXT_MUTED,
     'gray': TEXT_MUTED, 'grey': TEXT_MUTED, 'lightgray': TEXT_MUTED,
     'green': SUCCESS, '#00ff00': SUCCESS, '#4caf50': SUCCESS,
+    '#198754': SUCCESS, '#2ecc71': SUCCESS, '#27ae60': SUCCESS,
     'red': DANGER, 'darkred': DANGER, '#ff0000': DANGER,
     'navy': ACCENT, 'blue': ACCENT, 'darkblue': ACCENT,
     'orange': WARNING, 'yellow': WARNING,
 }
 
-# Backgrounds that must survive untouched - the chart canvases rely on them.
-_KEEP_BACKGROUND = {'black', '#000000'}
+# Black used to be preserved here for the chart canvases. They draw on
+# CHART_SURFACE now, so a literal black background is just an unconverted
+# light-theme leftover and maps onto the palette like any other.
+_KEEP_BACKGROUND = set()
 
 _NAMED_RGB = {
     'white': (255, 255, 255), 'black': (0, 0, 0), 'red': (255, 0, 0),
@@ -345,12 +371,16 @@ def _configure_ttk():
     style.configure('Treeview', background=SURFACE, fieldbackground=SURFACE,
                     foreground=TEXT, rowheight=26, borderwidth=1,
                     bordercolor=BORDER, font=FONT_BODY)
-    style.configure('Treeview.Heading', background=SUBTLE, foreground=TEXT,
-                    font=FONT_BODY_BOLD, relief='flat', padding=(PAD, PAD))
+    # A filled header band, so the column names read as a header rather
+    # than as a slightly different first row. Every grid inherits this;
+    # the dotted style names below it derive from this one.
+    style.configure('Treeview.Heading', background=ACCENT_FILL,
+                    foreground=TEXT_ON_ACCENT, font=FONT_BODY_BOLD,
+                    relief='flat', borderwidth=0, padding=(PAD, PAD))
     style.map('Treeview',
               background=[('selected', ACCENT_FILL)],
               foreground=[('selected', TEXT_ON_ACCENT)])
-    style.map('Treeview.Heading', background=[('active', BORDER)])
+    style.map('Treeview.Heading', background=[('active', ACCENT)])
 
     style.configure('TNotebook', background=APP_BG, tabmargins=[2, 5, 2, 0])
     style.configure('TNotebook.Tab', background=SUBTLE, foreground=TEXT,
@@ -774,3 +804,155 @@ def ctk_button(parent, text, icon=None, kind='primary', icon_size=20,
                          fg_color=fg_color, hover_color=hover_color,
                          text_color=text_color, corner_radius=corner_radius,
                          font=FONT_BODY_BOLD, **kwargs)
+
+
+# --------------------------------------------------------------------------
+# Status banner
+# --------------------------------------------------------------------------
+#
+# The one line on a machine page that says what the equipment is doing, and
+# the first thing an operator looks at when something stops. As a bare
+# coloured word on the page background it was easy to miss from arm's
+# length; filled, iconed and set in bold it reads across the cell.
+#
+# Severity is passed as the colour word the pages already use, so existing
+# calls keep working - "red" means a fault, not merely red text.
+
+_LEVELS = {
+    'danger':  (DANGER,  DANGER_SOFT,  'alert'),
+    'warning': (WARNING, ROW_BAND,     'alert'),
+    'success': (SUCCESS, SUCCESS_SOFT, 'check'),
+    'info':    (ACCENT,  ACCENT_SOFT,  'info'),
+    'idle':    (TEXT_MUTED, SUBTLE,    'info'),
+}
+
+_LEVEL_WORDS = {
+    'red': 'danger', 'darkred': 'danger', DANGER: 'danger',
+    'orange': 'warning', 'yellow': 'warning', WARNING: 'warning',
+    'green': 'success', SUCCESS: 'success',
+    'blue': 'info', 'navy': 'info', ACCENT: 'info',
+    'black': 'idle', 'gray': 'idle', 'grey': 'idle', TEXT_MUTED: 'idle',
+}
+
+
+def level_for(color):
+    """The severity a page means by the colour word it passed."""
+    if not isinstance(color, str):
+        return 'idle'
+    value = color.strip().lower()
+    if value in _LEVELS:
+        return value
+    return _LEVEL_WORDS.get(value, 'info')
+
+
+class StatusBanner(ctk.CTkFrame):
+    """A filled strip carrying the current machine message.
+
+    `show(message, colour)` takes the same colour words the pages already
+    pass to their message label, so it is a drop-in for one.
+    """
+
+    def __init__(self, parent, **kwargs):
+        kwargs.setdefault('corner_radius', CORNER_RADIUS_SMALL)
+        kwargs.setdefault('fg_color', SUBTLE)
+        kwargs.setdefault('height', 34)
+        super().__init__(parent, **kwargs)
+        self.pack_propagate(False)
+
+        self._icon = ctk.CTkLabel(self, text='', width=18, fg_color='transparent')
+        self._icon.pack(side='left', padx=(PAD_LARGE, 0))
+
+        self._text = ctk.CTkLabel(self, text='', fg_color='transparent',
+                                  font=FONT_BODY_BOLD, anchor='w')
+        self._text.pack(side='left', fill='x', expand=True, padx=PAD)
+
+        self.show('Initializing...', 'idle')
+
+    def show(self, message, color='info'):
+        level = level_for(color)
+        accent, fill, icon = _LEVELS[level]
+        self.configure(fg_color=fill)
+        self._icon.configure(image=icon_image(icon, accent, 16))
+        self._text.configure(text=message, text_color=accent)
+
+    # A page that still treats this as its old tk.Label keeps working.
+    def config(self, cnf=None, **kw):
+        if cnf:
+            kw = dict(cnf, **kw)
+        text = kw.pop('text', None)
+        color = kw.pop('fg', kw.pop('foreground', None))
+        if text is not None or color is not None:
+            self.show(text if text is not None else self._text.cget('text'),
+                      color or 'info')
+        if kw:
+            super().configure(**kw)
+
+    configure = config
+
+
+# --------------------------------------------------------------------------
+# Step lamp
+# --------------------------------------------------------------------------
+#
+# One stage of the test cycle: AUTO, HOME, the two pulls, the result. These
+# are indicators, not controls - the monitoring loop recolours them as each
+# stage passes or fails, and nothing happens if you click one.
+#
+# They used to be flat square tk.Labels with a hand cursor, which in an app
+# where every real button is a rounded pill made a row of five of them read
+# as a button bar. The colour now lives on a rounded frame, and the icon and
+# text are redrawn in whatever reads against it.
+#
+# The monitoring loop addresses these as `lamp.config(bg=...)` and reads the
+# colour back with `cget('bg')`, so both are kept working rather than
+# rewritten across the dozen call sites that use them.
+
+class StepLamp(ctk.CTkFrame):
+
+    def __init__(self, parent, text, icon, color=ACCENT_FILL, icon_size=22,
+                 **kwargs):
+        kwargs.setdefault('corner_radius', CORNER_RADIUS_SMALL)
+        super().__init__(parent, fg_color=color, **kwargs)
+
+        self._icon_name = icon
+        self._icon_size = icon_size
+        self._color = color
+
+        self._label = ctk.CTkLabel(self, text=text, compound='top',
+                                   fg_color='transparent',
+                                   font=FONT_BODY_BOLD)
+        self._label.pack(expand=True, fill='both', padx=PAD, pady=PAD)
+        self.set_color(color)
+
+    def set_color(self, color):
+        """Light this lamp in `color`, keeping icon and text legible on it."""
+        color = map_background(color)
+        ink = _FILL_TEXT.get(color) or readable_on(color)
+        self._color = color
+        self.configure(fg_color=color)
+        self._label.configure(text_color=ink,
+                              image=icon_image(self._icon_name, ink,
+                                               self._icon_size))
+
+    # -- the tk.Label surface the monitoring loop still speaks -------------
+
+    def config(self, cnf=None, **kw):
+        if cnf:
+            kw = dict(cnf, **kw)
+        background = kw.pop('bg', kw.pop('background', None))
+        # fg is derived from the background, so a caller setting one is
+        # telling us something we have already worked out.
+        kw.pop('fg', None)
+        kw.pop('foreground', None)
+        kw.pop('cursor', None)
+        if background is not None:
+            self.set_color(background)
+        if kw:
+            super().configure(**kw)
+
+    configure = config
+
+    def cget(self, key):
+        if key in ('bg', 'background'):
+            return self._color
+        return super().cget(key)

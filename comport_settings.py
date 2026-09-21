@@ -76,40 +76,11 @@ class ComPortSettings:
         self.load_device_values()
 
     def setup_ui(self):
-        # Header with border lines
-        header_frame = tk.Frame(self.root, bg='#f0f0f0')
-        header_frame.pack(fill=tk.X, padx=5)
-        
-        # Top border line
-        tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
-        
-        # Header content frame
-        header_content = tk.Frame(header_frame, bg='#f0f0f0')
-        header_content.pack(fill=tk.X, pady=5)
-        
-        # Title (Center)
-        title_label = tk.Label(
-            header_content, 
-            text="COM PORT SETTINGS",
-            bg='#f0f0f0',
-            fg='#2c3e50',
-            font=('Arial', 28, 'bold')
-        )
-        title_label.pack(expand=True)
-        
-        # Machine ID Label (Right side)
-        machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
-        machine_label = tk.Label(
-            header_content, 
-            text=f"Machine ID: {machine_id}",
-            bg='#f0f0f0',
-            fg='#2c3e50',
-            font=('Arial', 12, 'bold')
-        )
-        machine_label.pack(side=tk.RIGHT, padx=20)
-        
-        # Bottom border line
-        tk.Canvas(header_frame, height=2, bg='#2c3e50').pack(fill=tk.X)
+        # The same page header every other console uses.
+        machine_id = config.get('MACHINE_ID', 'Not Set')
+        ui.page_header(self.root, "COM Port Settings",
+                       right_text=f"Machine ID: {machine_id}",
+                       compact=True, icon='swap')
 
         # Main content frame
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
@@ -232,7 +203,7 @@ class ComPortSettings:
         buttons_frame.pack(side='left', padx=2)
         
         # Test Button
-        self.test_button = tk.Button(buttons_frame, text="TEST", bg='darkred', fg='white', 
+        self.test_button = tk.Button(buttons_frame, text="TEST", bg=ui.ACCENT_FILL, fg='white', 
                               width=8, font=('Arial', 9, 'bold'),
                                     command=self.read_plc_data)
         self.test_button.pack(side='left', padx=2)
@@ -534,7 +505,7 @@ class ComPortSettings:
         test_button = tk.Button(
             frame, 
             text="TEST", 
-            bg='darkred', 
+            bg=ui.ACCENT_FILL, 
             fg='white', 
             width=8, 
             font=('Arial', 9, 'bold'),
@@ -906,7 +877,7 @@ class ComPortSettings:
         top_frame.pack(fill='x', padx=5, pady=5)
         
         # Test Button
-        self.test_tcp_button = tk.Button(top_frame, text="TEST", bg='darkred', fg='white', 
+        self.test_tcp_button = tk.Button(top_frame, text="TEST", bg=ui.ACCENT_FILL, fg='white', 
                               width=8, font=('Arial', 9, 'bold'),
                                     command=self.read_modbus_tcp_data)
         self.test_tcp_button.pack(side='left', padx=5)

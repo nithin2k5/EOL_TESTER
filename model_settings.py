@@ -112,13 +112,13 @@ class WorkspaceApp:
         self.quadrants = []
         
         # First quadrant (Image Display)
-        first_quadrant = tk.Frame(self.workspace_frame, bg='white')
+        first_quadrant = tk.Frame(self.workspace_frame, bg=ui.SURFACE)
         first_quadrant.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         first_quadrant.grid_propagate(False)
         first_quadrant.config(width=800, height=600)  # This sets the overall quadrant size
 
         # Image frame within first quadrant - MATCH test_console.py EXACTLY
-        self.image_frame = tk.Frame(first_quadrant, bg='white')
+        self.image_frame = tk.Frame(first_quadrant, bg=ui.SURFACE)
         self.image_frame.pack(expand=True, padx=2, pady=2)  # Removed fill='both' to keep it exactly 750x450
         self.image_frame.pack_propagate(False)  # Match test_console.py
         self.image_frame.config(width=750, height=450)  # Match test_console.py image dimensions
@@ -126,7 +126,7 @@ class WorkspaceApp:
         # Create coordinate display label - positioned in first_quadrant, not image_frame
         self.coord_label = tk.Label(first_quadrant, 
                                   text="Coordinates: ", 
-                                  bg='white',
+                                  bg=ui.SURFACE,
                                   font=('Arial', 10))
         self.coord_label.place(relx=0.02, rely=0.95)
         
@@ -134,10 +134,10 @@ class WorkspaceApp:
         self.second_quadrant = tk.Frame(self.workspace_frame,
                                       relief="groove",
                                       borderwidth=1,
-                                      bg='white',
+                                      bg=ui.SURFACE,
                                       width=self.min_quadrant_size[0],
                                       height=self.min_quadrant_size[1])
-        self.second_quadrant.grid(row=0, column=1, sticky="nsew")
+        self.second_quadrant.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         self.second_quadrant.grid_propagate(False)
         
         # Add both quadrants to the list
@@ -146,7 +146,7 @@ class WorkspaceApp:
         
         # Create bottom row container
         bottom_container = tk.Frame(self.workspace_frame)
-        bottom_container.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        bottom_container.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
         
         # Configure main grid weights
         self.workspace_frame.grid_rowconfigure(0, weight=1)
@@ -351,7 +351,7 @@ class WorkspaceApp:
         second_quadrant = self.quadrants[1]
         
         # Create main container with padding
-        main_container = tk.Frame(second_quadrant, bg='white')
+        main_container = tk.Frame(second_quadrant, bg=ui.SURFACE)
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # Load combobox options from files
@@ -370,11 +370,11 @@ class WorkspaceApp:
         header_label.pack(fill=tk.X, pady=(0, 5))
         
         # Create left frame for input fields
-        left_frame = tk.Frame(main_container, bg='white')
+        left_frame = tk.Frame(main_container, bg=ui.SURFACE)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         
         # Create right frame for buttons
-        button_frame = tk.Frame(main_container, bg='white')
+        button_frame = tk.Frame(main_container, bg=ui.SURFACE)
         button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         
         # Create textboxes for each field
@@ -974,7 +974,7 @@ class WorkspaceApp:
                     self.image_label.destroy()
                 
                 # Create new image label - MATCH test_console.py EXACTLY
-                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
+                self.image_label = tk.Label(self.image_frame, image=photo, bg=ui.SURFACE)
                 self.image_label.image = photo  # Keep a reference
                 self.image_label.place(x=0, y=0, relwidth=1, relheight=1)  # Match test_console.py line 3661
                 
@@ -1784,7 +1784,7 @@ class WorkspaceApp:
         
         # Clear textboxes and restore to editable state
         for key, entry in self.textboxes.items():
-            entry.config(state='normal', bg='white')
+            entry.config(state='normal', bg=ui.SURFACE)
             entry.delete(0, 'end')
             
             # Set appropriate placeholder based on field
@@ -2162,7 +2162,7 @@ class WorkspaceApp:
                     self.image_label.destroy()
                 
                 # Create new image label - MATCH test_console.py EXACTLY
-                self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
+                self.image_label = tk.Label(self.image_frame, image=photo, bg=ui.SURFACE)
                 self.image_label.image = photo  # Keep a reference
                 self.image_label.place(x=0, y=0, relwidth=1, relheight=1)  # Match test_console.py line 3661
                 
@@ -2383,7 +2383,7 @@ class WorkspaceApp:
                 entry.config(state='readonly', bg='#ffe6e6')  # Light red to indicate locked
                 print(f"Part Number field locked: {entry.get()}")
             elif key != "Image File Path":  # Keep Image File Path readonly
-                entry.config(state='normal', bg='white')
+                entry.config(state='normal', bg=ui.SURFACE)
                 if entry.get() in ["Enter " + key.lower(), "No image selected"]:
                     entry.delete(0, tk.END)
                 entry.config(fg='black')

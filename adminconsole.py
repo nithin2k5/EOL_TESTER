@@ -397,18 +397,18 @@ class AdminConsole:
             self.add_icon = self.edit_icon = self.save_icon = self.delete_icon = self.clear_icon = None
 
         # Header
-        header_frame = tk.Frame(self.root, bg='pink', height=80)
+        header_frame = tk.Frame(self.root, bg=ui.SURFACE, height=80)
         header_frame.pack(fill=tk.X, padx=5, pady=5)
         
         # INFAC INDIA logo placeholder (left side)
-        logo_label = tk.Label(header_frame, text="INFAC\nINDIA", bg='pink', font=('Arial', 12, 'bold'))
+        logo_label = tk.Label(header_frame, text="INFAC\nINDIA", bg=ui.SURFACE, font=('Arial', 12, 'bold'))
         logo_label.pack(side=tk.LEFT, padx=20)
         
         # EOL TESTER title (center)
         title_label = tk.Label(
             header_frame, 
             text="EOL (END OF LINE) TESTER",
-            bg='pink',
+            bg=ui.SURFACE,
             font=('Arial', 24, 'bold')
         )
         title_label.pack(expand=True)
@@ -418,15 +418,15 @@ class AdminConsole:
         self.page_scroller = ui.scrollable(self.root)
         self.page_scroller.pack(fill=tk.BOTH, expand=True)
         
-        content_frame = tk.Frame(self.page_scroller.body, bg='white')
+        content_frame = tk.Frame(self.page_scroller.body, bg=ui.SURFACE)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         # Top section container
-        top_container = tk.Frame(content_frame, bg='white')
+        top_container = tk.Frame(content_frame, bg=ui.SURFACE)
         top_container.pack(fill=tk.X, padx=10, pady=10)
 
         # Left side - Entry fields (70% of width)
-        left_frame = tk.Frame(top_container, bg='white')
+        left_frame = tk.Frame(top_container, bg=ui.SURFACE)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Fields configuration
@@ -440,7 +440,7 @@ class AdminConsole:
         ]
 
         # Create a frame for organizing entry fields in a grid layout
-        entries_frame = tk.Frame(left_frame, bg='white')
+        entries_frame = tk.Frame(left_frame, bg=ui.SURFACE)
         entries_frame.pack(anchor='w', padx=20)
 
         self.entries = {}
@@ -455,14 +455,14 @@ class AdminConsole:
         
         for i, field in enumerate(fields):
             # Create frame for each row
-            row_frame = tk.Frame(entries_frame, bg='white')
+            row_frame = tk.Frame(entries_frame, bg=ui.SURFACE)
             row_frame.pack(fill=tk.X, pady=5)
             
             # Label with fixed width
             label = tk.Label(
                 row_frame, 
                 text=field,
-                bg='white',
+                bg=ui.SURFACE,
                 fg='black',
                 font=('Arial', 10, 'bold'),
                 width=20,
@@ -475,11 +475,11 @@ class AdminConsole:
                 row_frame,
                 font=('Arial', 10),
                 width=40,
-                bg='white',
+                bg=ui.SURFACE,
                 fg='#999999',  # Start with gray placeholder color
                 relief='solid',
                 bd=1,
-                insertbackground='black'
+                insertbackground=ui.TEXT
             )
             entry.pack(side=tk.LEFT, padx=5)
             self.entries[field] = entry
@@ -498,7 +498,7 @@ class AdminConsole:
         self.create_backup_path_section(entries_frame)
 
         # Right side - Buttons frame (30% of width)
-        right_frame = tk.Frame(top_container, bg='white')
+        right_frame = tk.Frame(top_container, bg=ui.SURFACE)
         right_frame.pack(side=tk.RIGHT, padx=20)
 
         # Configure treeview style
@@ -537,7 +537,7 @@ class AdminConsole:
 
         # Create buttons vertically with spacing and updated hover colors
         for text, color, command, icon in buttons:
-            btn_frame = tk.Frame(right_frame, bg='white')
+            btn_frame = tk.Frame(right_frame, bg=ui.SURFACE)
             btn_frame.pack(pady=5)
             
             btn = tk.Button(
@@ -545,7 +545,7 @@ class AdminConsole:
                 text=" " + text,
                 command=command,
                 bg=color,
-                fg='white',
+                fg=ui.TEXT_ON_ACCENT,
                 font=('Arial', 10, 'bold'),
                 width=15,
                 height=2,
@@ -571,7 +571,7 @@ class AdminConsole:
             btn.bind('<Leave>', lambda e, b=btn, c=color: b.configure(bg=c))
 
         # Treeview section
-        tree_frame = tk.Frame(content_frame, bg='white')
+        tree_frame = tk.Frame(content_frame, bg=ui.SURFACE)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(20, 10))
 
         # Configure columns
@@ -615,7 +615,7 @@ class AdminConsole:
         footer = tk.Label(
             self.root,
             text=footer_text,
-            bg='pink',
+            bg=ui.SURFACE,
             font=('Arial', 8)
         )
         footer.pack(side=tk.BOTTOM, pady=5)
@@ -684,7 +684,7 @@ class AdminConsole:
             photo = ImageTk.PhotoImage(image)
             
             # Create label and display image
-            image_label = tk.Label(self.image_frame, image=photo, bg='white')
+            image_label = tk.Label(self.image_frame, image=photo, bg=ui.SURFACE)
             image_label.image = photo  # Keep a reference
             image_label.pack(fill=tk.BOTH, expand=True)
             
@@ -698,13 +698,13 @@ class AdminConsole:
         backup_frame.pack(fill=tk.X, pady=10, padx=5)
         
         # Machine ID
-        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame = tk.Frame(backup_frame, bg=ui.SURFACE)
         row_frame.pack(fill=tk.X, pady=5)
         
         label = tk.Label(
             row_frame, 
             text="MACHINE ID :",
-            bg='white',
+            bg=ui.SURFACE,
             fg='black',
             font=('Arial', 10, 'bold'),
             width=20,
@@ -718,7 +718,7 @@ class AdminConsole:
             row_frame,
             textvariable=self.machine_id_var,
             width=40,
-            bg='white',
+            bg=ui.SURFACE,
             fg='black',
             font=('Arial', 9)
         )
@@ -730,7 +730,7 @@ class AdminConsole:
             text="Save ID",
             command=self.save_machine_id,
             bg='#3498db',
-            fg='white',
+            fg=ui.TEXT_ON_ACCENT,
             font=('Arial', 9, 'bold'),
             relief='raised',
             bd=2,
@@ -743,13 +743,13 @@ class AdminConsole:
         save_machine_id_btn.bind('<Leave>', lambda e: save_machine_id_btn.configure(bg='#3498db'))
 
         # Primary Backup Path
-        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame = tk.Frame(backup_frame, bg=ui.SURFACE)
         row_frame.pack(fill=tk.X, pady=5)
         
         label = tk.Label(
             row_frame, 
             text="PRIMARY BACKUP PATH :",
-            bg='white',
+            bg=ui.SURFACE,
             fg='black',
             font=('Arial', 10, 'bold'),
             width=20,
@@ -777,13 +777,13 @@ class AdminConsole:
         self.primary_path_entry.bind('<Button-1>', lambda e: self.browse_backup_path('primary'))
         
         # Secondary Backup Path
-        row_frame = tk.Frame(backup_frame, bg='white')
+        row_frame = tk.Frame(backup_frame, bg=ui.SURFACE)
         row_frame.pack(fill=tk.X, pady=5)
         
         label = tk.Label(
             row_frame, 
             text="SECONDARY BACKUP PATH :",
-            bg='white',
+            bg=ui.SURFACE,
             fg='black',
             font=('Arial', 10, 'bold'),
             width=20,
@@ -816,7 +816,7 @@ class AdminConsole:
             text="Backup Now",
             command=self.create_backup,
             bg='#2ecc71',
-            fg='white',
+            fg=ui.TEXT_ON_ACCENT,
             font=('Arial', 10, 'bold'),
             relief='raised',
             bd=2,

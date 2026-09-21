@@ -121,18 +121,6 @@ class NavButton(ctk.CTkButton):
             self.configure(fg_color='transparent', text_color=text_color)
             self._apply_icon(text_color)
 
-    def clicked(self, event=None):
-        if self.enabled:
-            self.command()
-
-    def entered(self, event=None):
-        self.hovered = True
-        self.repaint()
-
-    def left(self, event=None):
-        self.hovered = False
-        self.repaint()
-
 
 class MainConsole(tk.Tk):
     # Records older than this are written out to the archive folders.

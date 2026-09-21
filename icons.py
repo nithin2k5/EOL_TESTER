@@ -269,13 +269,51 @@ def _list(size, color):
     return img
 
 
+def _alert(size, color):
+    """Fault or caution: the standard warning triangle with a bang."""
+    img, d = _canvas(size)
+    m = size * 0.1
+    w = max(2, size // 12)
+    d.polygon([(size / 2, m), (size - m, size - m * 1.4), (m, size - m * 1.4)],
+              outline=color, width=w)
+    bar_top, bar_bottom = size * 0.38, size * 0.66
+    d.line([(size / 2, bar_top), (size / 2, bar_bottom)], fill=color, width=w)
+    dot = max(1, size // 14)
+    d.ellipse([size / 2 - dot, size * 0.75 - dot,
+               size / 2 + dot, size * 0.75 + dot], fill=color)
+    return img
+
+
+def _check(size, color):
+    """Pass: a bare tick, no surrounding circle, so it reads at 16px."""
+    img, d = _canvas(size)
+    d.line([(size * 0.18, size * 0.52), (size * 0.42, size * 0.76),
+            (size * 0.84, size * 0.24)],
+           fill=color, width=max(2, size // 8), joint="curve")
+    return img
+
+
+def _info(size, color):
+    """Neutral or in-progress: a lower-case i in a ring."""
+    img, d = _canvas(size)
+    m = size * 0.08
+    w = max(2, size // 12)
+    d.ellipse([m, m, size - m, size - m], outline=color, width=w)
+    dot = max(1, size // 16)
+    d.ellipse([size / 2 - dot, size * 0.3 - dot,
+               size / 2 + dot, size * 0.3 + dot], fill=color)
+    d.line([(size / 2, size * 0.45), (size / 2, size * 0.72)],
+           fill=color, width=w)
+    return img
+
+
 _DRAWERS = {
     'refresh': _refresh, 'home': _home, 'download': _download, 'ruler': _ruler,
     'document': _document, 'camera': _camera, 'barcode': _barcode,
     'arrow_right': _arrow_right, 'gear': _gear, 'swap': _swap, 'play': _play,
     'bars': _bars, 'shield': _shield, 'question': _question, 'mail': _mail,
     'power': _power, 'box': _box, 'clipboard': _clipboard, 'chart': _chart,
-    'list': _list,
+    'list': _list, 'alert': _alert, 'check': _check, 'info': _info,
 }
 
 
