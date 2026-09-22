@@ -42,29 +42,27 @@ BORDER_STRONG = '#464646'
 
 TEXT = '#f2f2f0'
 TEXT_MUTED = '#a3a3a0'
-# The ink written over a filled accent. Yellow is a light fill, so this is
-# dark - white on yellow is the single most common way a yellow theme ends
-# up unreadable.
-TEXT_ON_ACCENT = '#0a0a06'
-# The text colour for any control filled with a bright colour rather than a
-# dark one, so `readable_on` has a genuinely dark option to pick.
-TEXT_ON_LIGHT = '#0a0a06'
+TEXT_ON_ACCENT = '#ffffff'
+# The text colour for the rare control that is filled with a bright colour
+# rather than a dark one, so `readable_on` has a genuinely dark option to
+# pick when the background is light.
+TEXT_ON_LIGHT = '#0f1419'
 
-# Two tones of the one accent. Yellow is light to begin with, so unlike a
-# blue accent both tones carry dark ink; the deeper tone is for fills and
-# the brighter one for text, icons and borders on black.
-ACCENT = '#facc15'          # text, icons and borders on dark surfaces
-ACCENT_FILL = '#eab308'     # filled surfaces, which carry TEXT_ON_ACCENT
-ACCENT_HOVER = '#facc15'    # a dark theme brightens on hover
-ACCENT_ACTIVE = '#ca8a04'   # and deepens on press
+# Two tones of the one accent. On a dark theme a blue bright enough to read
+# as text against a near-black panel is too light to carry white text when
+# it is used as a fill, so surfaces get the deeper tone and text the
+# brighter one.
+ACCENT = '#3b82f6'          # text, icons and borders on dark surfaces
+ACCENT_FILL = '#2563eb'     # filled surfaces, which carry TEXT_ON_ACCENT
+ACCENT_HOVER = '#1d4ed8'
+ACCENT_ACTIVE = '#1e40af'
 
 # Tinted backgrounds, for marking a row as selected without filling it with
 # the full accent - a whole column of solid accent reads as a wall, not a
 # list, and leaves nothing to say which entry you are actually on.
-ACCENT_SOFT = '#2b2408'
+ACCENT_SOFT = '#15263f'
 DANGER_SOFT = '#2e1315'
 SUCCESS_SOFT = '#0e2617'
-INFO_SOFT = '#0c2430'
 
 # Disabled controls: dark enough to recede, light enough to still be read
 # as a control rather than a hole in the panel.
@@ -75,12 +73,8 @@ SUCCESS = '#22c55e'
 SUCCESS_HOVER = '#16a34a'
 DANGER = '#ef4444'
 DANGER_HOVER = '#dc2626'
-# Amber has moved to orange now that the accent is yellow. A caution state
-# that is the same colour as every button and header is not a caution
-# state, and on a machine page that distinction has to survive a glance.
-WARNING = '#f97316'
-WARNING_HOVER = '#ea580c'
-INFO = '#38bdf8'
+WARNING = '#f59e0b'
+WARNING_HOVER = '#d97706'
 
 # Row shading for result grids
 ROW_BAND = '#1c1810'
@@ -179,7 +173,7 @@ _FILL_TEXT = {
 }
 
 _FOREGROUND_MAP = {
-    'white': TEXT, '#ffffff': TEXT,
+    'white': TEXT_ON_ACCENT, '#ffffff': TEXT_ON_ACCENT,
     'black': TEXT, '#000000': TEXT, '#1a1a1a': TEXT, '#2b2b2b': TEXT,
     '#333333': TEXT, '#424242': TEXT, '#2c3e50': TEXT,
     '#999999': TEXT_MUTED, '#666666': TEXT_MUTED,
@@ -828,11 +822,9 @@ def ctk_button(parent, text, icon=None, kind='primary', icon_size=20,
 
 _LEVELS = {
     'danger':  (DANGER,  DANGER_SOFT,  'alert'),
-    'warning': (WARNING, '#2a1708',    'alert'),
+    'warning': (WARNING, ROW_BAND,     'alert'),
     'success': (SUCCESS, SUCCESS_SOFT, 'check'),
-    # Info stays clear of the yellow/orange caution family, so an ordinary
-    # progress message never reads as something needing attention.
-    'info':    (INFO,    INFO_SOFT,    'info'),
+    'info':    (ACCENT,  ACCENT_SOFT,  'info'),
     'idle':    (TEXT_MUTED, SUBTLE,    'info'),
 }
 
@@ -840,7 +832,7 @@ _LEVEL_WORDS = {
     'red': 'danger', 'darkred': 'danger', DANGER: 'danger',
     'orange': 'warning', 'yellow': 'warning', WARNING: 'warning',
     'green': 'success', SUCCESS: 'success',
-    'blue': 'info', 'navy': 'info', INFO: 'info', ACCENT: 'info',
+    'blue': 'info', 'navy': 'info', ACCENT: 'info',
     'black': 'idle', 'gray': 'idle', 'grey': 'idle', TEXT_MUTED: 'idle',
 }
 
