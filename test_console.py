@@ -1471,7 +1471,8 @@ class EOLTesterGUI:
         # Configure equal column weights
         input_frame.columnconfigure(0, weight=1)  # EMP CODE
         input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
-        input_frame.columnconfigure(2, weight=1)  # ALC CODE
+        input_frame.columnconfigure(2, weight=1)  # NEXT MODEL button
+        input_frame.columnconfigure(3, weight=1)  # ALC CODE
 
         # Employee Code Entry - a plain tk.Entry sitting in a rounded slot.
         # It stays a plain Entry rather than becoming a CTkEntry because the
@@ -1496,10 +1497,17 @@ class EOLTesterGUI:
                                  kind='primary', command=self.next_label_command)
         next_btn.grid(row=0, column=1, padx=5, sticky="ew")
 
+        # Next Model Button - ends the run on this part so another can be
+        # loaded. Kept as an attribute because next_model_command() disables
+        # it while the closing NG cable check is outstanding.
+        self.next_model_btn = ui.ctk_button(input_frame, text="NEXT MODEL", icon='refresh',
+                                            kind='neutral', command=self.next_model_command)
+        self.next_model_btn.grid(row=0, column=2, padx=5, sticky="ew")
+
         # ALC Code Entry (initially disabled), same rounded-slot treatment.
         alc_slot = ctk.CTkFrame(input_frame, corner_radius=ui.CORNER_RADIUS_SMALL,
                                 fg_color=ui.SURFACE, border_width=1, border_color=ui.BORDER)
-        alc_slot.grid(row=0, column=2, padx=5, sticky="ew")
+        alc_slot.grid(row=0, column=3, padx=5, sticky="ew")
         self.alc_entry = tk.Entry(alc_slot,
                                  bg=ui.SURFACE,
                                  fg=ui.TEXT,
@@ -2314,7 +2322,41 @@ class EOLTesterGUI:
             traceback.print_exc()
 
     def next_model_command(self):
-        messagebox.showinfo("Next Model", "Moving to next model")
+        """Finish with this part so a different one can be loaded.
+
+        Moving to another model closes out the current part, and the machine
+        is not allowed to simply stop: the operator has to pull a known-bad
+        cable through first, which proves the rig still reports a failure.
+        So this breaks the running check loop, clears the readings, and
+        restarts the loop in ending-validation mode, where validate_ng_cable()
+        waits for that failure before the part is released.
+        """
+        if not messagebox.askyesno("Confirm Move",
+                                   "Do you really want to move on to a different part?"):
+            return
+
+        try:
+            self.breakLoop = True
+
+            # One closing validation at a time - the button comes back when
+            # the next part is loaded and the page resets.
+            if getattr(self, 'next_model_btn', None):
+                self.next_model_btn.configure(state='disabled')
+
+            self.endingNGCableValidation = True
+
+            self.reset_dgv_spec_data()
+            self.reset_test_parameters()
+
+            # After the resets, not before: reset_test_parameters() blanks the
+            # status line, so setting the prompt first would wipe the one
+            # instruction the operator needs here.
+            self.safe_update_message("Please Validate NG Cable...", "blue")
+
+            self.start_check_async()
+        except Exception as e:
+            print(f"Error starting next model: {e}")
+            messagebox.showerror("Next Model", f"Could not start the next model: {e}")
 
     def alc_code_command(self):
         messagebox.showinfo("ALC Code", "Opening ALC Code dialog")
@@ -5289,11 +5331,36 @@ class EOLTesterGUI:
             print(f"Error checking traceability duplicate: {e}")
             return False
 
+    def reset_dgv_spec_data(self):
+        """Blank the measured half of the specification grid.
+
+        The Description/Device/Unit/Min/Max columns describe the part and
+        stay put; Actual and Result belong to the test that just ran, so a
+        new part must not start out showing the previous one's readings.
+        """
+        if not hasattr(self, 'spec_tree') or not self.spec_tree:
+            return
+
+        try:
+            for item in self.spec_tree.get_children():
+                values = list(self.spec_tree.item(item, "values"))
+                if len(values) >= 7:
+                    values[-2] = ""  # Actual
+                    values[-1] = ""  # Result
+                    self.spec_tree.item(item, values=values, tags=('neutral',))
+        except Exception as e:
+            print(f"Error resetting specification grid: {e}")
+
     def reset_test_parameters(self):
         """Reset test parameters for next cycle"""
         # Reset message
         self.safe_update_message("", "black")
-        
+
+        # Put the step lamps back to their waiting colour. Without this a
+        # finished cycle leaves AUTO/HOME/PULL1/PULL2/TESTRESULT showing the
+        # last run's pass and fail colours into the next part.
+        self.reset_process_status_labels()
+
         # Reset load cell values
         self.loadcell01Value = 0.0
         self.loadcell02Value = 0.0
@@ -7113,14 +7180,14 @@ class EOLTesterGUI:
             self.stop_all_label_blinking()
             
             # Clear specification tree results
-            if hasattr(self, 'spec_tree') and self.spec_tree:
-                for item in self.spec_tree.get_children():
-                    values = list(self.spec_tree.item(item, "values"))
-                    if len(values) >= 7:
-                        values[-2] = ""  # Clear Actual column
-                        values[-1] = ""  # Clear Result column
-                        self.spec_tree.item(item, values=values, tags=('neutral',))
-            
+            self.reset_dgv_spec_data()
+
+            # A new part may be loaded from here, so the closing NG cable
+            # check is over and the button that starts it comes back.
+            if getattr(self, 'next_model_btn', None):
+                self.next_model_btn.configure(state='normal')
+            self.endingNGCableValidated = False
+
             # Generate new LOT number for next cycle
             if (hasattr(self, 'current_part_number') and self.current_part_number and 
                 self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
