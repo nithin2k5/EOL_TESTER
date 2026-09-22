@@ -435,7 +435,7 @@ class EOLTesterGUI:
         # Main container and message label are already created in setup_window
         # Do not recreate them here
         
-        # Title bar with INFAC logo
+        # Process control bar
         self.create_title_bar()
         
         # Main workspace
@@ -455,44 +455,11 @@ class EOLTesterGUI:
         title_frame = tk.Frame(self.main_container, bg=ui.SURFACE)
         title_frame.pack(fill="x")
 
-        # INFAC brand mark (left side)
-        brand = tk.Frame(title_frame, bg=ui.SURFACE)
-        brand.pack(side="left", padx=ui.PAD_LARGE)
-        logo = ctk.CTkFrame(brand, width=36, height=36, corner_radius=10,
-                            fg_color=ui.ACCENT)
-        logo.pack(side="left", padx=(0, ui.PAD))
-        logo.pack_propagate(False)
-        ctk.CTkLabel(logo, text='', fg_color=ui.ACCENT,
-                    image=ui.icon_image('gear', ui.TEXT_ON_ACCENT, 20)).pack(expand=True)
-        tk.Label(brand, text="INFAC\nINDIA", bg=ui.SURFACE, fg=ui.TEXT,
-                font=ui.FONT_SECTION, justify="left").pack(side="left")
-
         # PLC Process Control Button
         self.create_plc_control_section(title_frame)
 
         # Process Status Indicator
         self.create_process_status_indicator(title_frame)
-
-        # Machine ID (right side)
-        machine_id = config.get('MACHINE_ID', 'Not Set')  # Get from settings file
-        machine_label = tk.Label(
-            title_frame,
-            text=f"Machine ID: {machine_id}",
-            bg=ui.SURFACE,
-            fg=ui.TEXT_MUTED,
-            font=ui.FONT_BODY_BOLD
-        )
-        machine_label.pack(side="right", padx=ui.PAD_LARGE)
-
-        # Title, absolutely centered in the bar
-        title_label = tk.Label(
-            title_frame,
-            text="EOL (END OF LINE) TESTER",
-            font=(ui.FONT_FAMILY, 18, "bold"),
-            bg=ui.SURFACE,
-            fg=ui.TEXT
-        )
-        title_label.place(relx=0.5, rely=0.5, anchor="center")
 
         # A hairline separating the bar from the workspace below
         tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x")
