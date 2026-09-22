@@ -65,6 +65,10 @@ class WorkspaceApp:
         
         self.setup_ui()
 
+        # The form opens closed: nothing is being added or edited yet, so
+        # the fields are read-only until NEW is pressed or a part is picked.
+        self.disable_components()
+
     def setup_ui(self):
         # The page is laid out at fixed sizes and is taller and wider than a
         # smaller screen, so it scrolls rather than losing the edges.
@@ -236,6 +240,7 @@ class WorkspaceApp:
             command=lambda: self.on_add_button_click(self.spec_entries.values(), self.spec_tree)
         )
         add_btn.pack(side=tk.LEFT, padx=5)
+        self.spec_add_btn = add_btn
 
         remove_btn = tk.Button(
             button_frame, 
@@ -250,6 +255,7 @@ class WorkspaceApp:
             command=lambda: self.on_remove_button_click(self.spec_tree)
         )
         remove_btn.pack(side=tk.LEFT, padx=5)
+        self.spec_remove_btn = remove_btn
 
         # Specifications Treeview
         columns = ('description', 'device', 'unit', 'master_min', 'master_max', 'normal_min', 'normal_max')
@@ -440,6 +446,11 @@ class WorkspaceApp:
             ("DELETE", "#e74c3c", "#c0392b", "white")   # Bright Red
         ]
         
+        # Held by name so enable_components()/disable_components() can drive
+        # them - which button is live is what tells the operator whether the
+        # form is waiting for a new part, an edit, or a selection.
+        self.action_buttons = {}
+
         for text, bg_color, active_bg, fg_color in buttons:
             btn = tk.Button(
                 button_frame,
@@ -455,7 +466,7 @@ class WorkspaceApp:
                 font=('Arial', 10, 'bold')  # Make text bold
             )
             btn.pack(pady=5)
-            
+
             # Update the button commands
             if text == "SAVE":
                 btn.config(command=self.save_specifications_to_db)
@@ -464,9 +475,11 @@ class WorkspaceApp:
             elif text == "DELETE":
                 btn.config(command=self.delete_record)
             elif text == "NEW":
-                btn.config(command=self.reset_form)
+                btn.config(command=self.new_part)
             elif text == "EDIT":
                 btn.config(command=self.edit_record)
+
+            self.action_buttons[text] = btn
 
     def on_entry_focus_in(self, event, entry, placeholder):
         """Handle entry field focus in - remove placeholder text"""
@@ -1818,7 +1831,11 @@ class WorkspaceApp:
         
         # Update the part list view
         self.update_part_list_view()
-        
+
+        # Cleared means nothing is being worked on, so the form closes back
+        # down and NEW is the way in again.
+        self.disable_components()
+
         print("Form cleared - Ready for new entry")
 
     def load_label_positions(self, part_number):
@@ -2013,7 +2030,12 @@ class WorkspaceApp:
         # Store the currently selected part number (but don't enter edit mode)
         self.current_selected_part = part_number
         self.edit_mode = False  # Explicitly set to view mode
-        
+
+        # Viewing a part is not yet editing it, so the fields stay closed -
+        # but there is now something to act on, so EDIT and DELETE open up.
+        self._set_button_state("EDIT", True)
+        self._set_button_state("DELETE", True)
+
         try:
             conn = mysql.connector.connect(**self.db_config)
             cursor = conn.cursor(dictionary=True)  # Use dictionary cursor for easier access
@@ -2321,15 +2343,113 @@ class WorkspaceApp:
             conn.close()
             
             messagebox.showinfo("Success", "Record deleted successfully!")
-            
+
             # Reset all form fields
             self.reset_form()
-            
+
+            # The part that was being worked on is gone, so the form closes
+            # back down rather than sitting open over a deleted record.
+            self.disable_components()
+
             # Update the part list view
             self.update_part_list_view()
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Failed to delete record: {err}")
+
+    # ----------------------------------------------------------------------
+    # Form state
+    # ----------------------------------------------------------------------
+    #
+    # The form is a small state machine with three states, and which buttons
+    # are live is what tells them apart:
+    #
+    #   idle  - nothing chosen. Only NEW is available, plus EDIT and DELETE
+    #           once a part has been picked out of the parts list.
+    #   ADD   - entering a part that does not exist yet. Everything is open.
+    #   EDIT  - amending a part that does. Same, except the part number is
+    #           the record's identity and stays locked.
+    #
+    # Without this, every button is live at all times and SAVE has to guess
+    # from edit_mode whether it was meant to insert or update.
+
+    def _set_button_state(self, name, enabled):
+        """Enable or disable one of the named action buttons, if it exists."""
+        button = getattr(self, 'action_buttons', {}).get(name)
+        if button:
+            button.config(state='normal' if enabled else 'disabled')
+
+    def _set_spec_buttons_state(self, add_enabled, remove_enabled):
+        """Enable or disable the specification grid's ADD and REMOVE."""
+        if getattr(self, 'spec_add_btn', None):
+            self.spec_add_btn.config(state='normal' if add_enabled else 'disabled')
+        if getattr(self, 'spec_remove_btn', None):
+            self.spec_remove_btn.config(state='normal' if remove_enabled else 'disabled')
+
+    def enable_components(self, action):
+        """Open the form up for an ADD or an EDIT."""
+        if action == "ADD":
+            # A new part: every field is the operator's to fill in.
+            for key, entry in self.textboxes.items():
+                if key != "Image File Path":  # stays readonly, filled by Browse
+                    entry.config(state='normal')
+            for combo in self.second_quad_combos.values():
+                combo.config(state='normal')
+            for entry in self.spec_entries.values():
+                entry.config(state='normal')
+
+            self.clear_label_details()
+
+            self._set_button_state("NEW", False)
+            self._set_button_state("EDIT", False)
+            self._set_button_state("DELETE", False)
+            self._set_button_state("SAVE", True)
+            self._set_button_state("CLEAR", True)
+            # Nothing in the grid yet, so there is nothing to remove.
+            self._set_spec_buttons_state(add_enabled=True, remove_enabled=False)
+
+        elif action == "EDIT":
+            # An existing part: the part number is the record's identity and
+            # edit_record() locks it, so it is deliberately left alone here.
+            for key, entry in self.textboxes.items():
+                if key not in ("Part Number", "Image File Path"):
+                    entry.config(state='normal')
+            for combo in self.second_quad_combos.values():
+                combo.config(state='normal')
+            for entry in self.spec_entries.values():
+                entry.config(state='normal')
+
+            self._set_button_state("NEW", False)
+            self._set_button_state("EDIT", False)
+            self._set_button_state("DELETE", False)
+            self._set_button_state("SAVE", True)
+            self._set_button_state("CLEAR", True)
+            self._set_spec_buttons_state(add_enabled=True, remove_enabled=True)
+
+    def disable_components(self):
+        """Close the form back down to the idle state.
+
+        Where the form lands after start-up, and after a save, a delete or a
+        clear: the fields are read-only and NEW is the only way back in.
+        """
+        for key, entry in self.textboxes.items():
+            entry.config(state='readonly' if key == "Image File Path" else 'disabled')
+        for combo in self.second_quad_combos.values():
+            combo.config(state='disabled')
+        for entry in self.spec_entries.values():
+            entry.config(state='disabled')
+
+        self._set_button_state("NEW", True)
+        self._set_button_state("EDIT", False)
+        self._set_button_state("DELETE", False)
+        self._set_button_state("SAVE", False)
+        self._set_button_state("CLEAR", False)
+        self._set_spec_buttons_state(add_enabled=False, remove_enabled=False)
+
+    def new_part(self):
+        """NEW: clear the form out and open it for a part that does not exist yet."""
+        self.reset_form()
+        self.enable_components("ADD")
 
     def on_reset_button_click(self):
         """Handle reset button click"""
@@ -2375,7 +2495,11 @@ class WorkspaceApp:
         # Set edit mode flag
         self.edit_mode = True
         print(f"Edit mode enabled for part number: {self.current_selected_part}")
-        
+
+        # Open the form for an edit: SAVE and CLEAR become available, NEW and
+        # DELETE step aside until this edit is finished.
+        self.enable_components("EDIT")
+
         # Enable all textboxes for editing (except Part Number and Image File Path)
         for key, entry in self.textboxes.items():
             if key == "Part Number":
