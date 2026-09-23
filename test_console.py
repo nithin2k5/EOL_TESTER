@@ -209,6 +209,8 @@ class EOLTesterGUI:
         
         # Initialize test flow variables
         self.rcvdTestRslt = False
+        self.awaiting_result_clear = False
+        self.plc_status_loop_running = False
         self.loadcell01Value = 0.0
         self.loadcell02Value = 0.0
         self.loadcell03Value = 0.0
@@ -2076,118 +2078,81 @@ class EOLTesterGUI:
         messagebox.showinfo("2nd Pull", "Performing length test")
 
     def test_result_command(self):
-        """Automatically process test results, save to database, disconnect PLC, wait 2s, reconnect, and reset for next test"""
+        """Score and record the test the PLC just finished.
+
+        The tail of start_CheckAsync in TestConsole.cs: every spec row is
+        judged against its limits, then the result either settles an NG
+        cable check or is saved as a production part.
+        """
         try:
             print("=== TEST COMPLETION DETECTED ===")
-            
-            # Auto-generate lot number for test results
-            if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
-                if (hasattr(self, 'current_part_number') and self.current_part_number and 
-                    self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
-                    lot_number = self.generate_lot_number()
-                    self.current_lot_number = lot_number
-                    print(f"Auto-generated LOT number {lot_number}")
-                else:
-                    self.safe_update_message("Cannot save test results - missing required data", "red")
-                    print("ERROR: Cannot save test results - missing part number or employee code")
-                    return
-            else:
-                lot_number = self.current_lot_number
-            
-            # Get part number
-            part_number = getattr(self, 'current_part_number', None)
-            
-            if not part_number:
-                self.safe_update_message("Cannot save test results - missing part number", "red")
+
+            # With no part loaded there is nothing to score or save against.
+            if not getattr(self, 'current_part_number', None):
+                print("No part loaded - ignoring PLC result")
+                self.rcvdTestRslt = False
                 return
-            
-            print(f"Test complete for LOT: {lot_number}, Part: {part_number}")
-            
-            # Save test results - FORCE SAVE
-            print(f"[*] FORCING TEST RESULT SAVE FOR LOT: {lot_number}")
-            
-            # Try multiple save methods to ensure data is saved
-            save_success = False
-            
-            # Method 1: Try the standard save
-            try:
-                self.save_current_test_results(lot_number, part_number)
-                save_success = True
-                print("[OK] Standard save method completed")
-            except Exception as e:
-                print(f"[ERROR] Standard save failed: {e}")
-            
-            # Method 2: Force save with minimal data if standard fails
-            if not save_success:
-                try:
-                    print("🔄 Attempting force save with minimal data...")
-                    self.force_save_test_completion(lot_number, part_number)
-                    save_success = True
-                    print("[OK] Force save method completed")
-                except Exception as e:
-                    print(f"[ERROR] Force save failed: {e}")
-            
-            if save_success:
-                print(f"🎉 TEST DATA SAVE CONFIRMED FOR LOT: {lot_number}")
+
+            self.score_spec_rows()
+
+            if self.startingNGCableValidation:
+                # The operator ran the known-bad cable, so a failure is the
+                # proof the rig still catches one. Nothing is saved.
+                if self.failCounter > 0:
+                    self.safe_update_message("NG Validation successful, continue to testing...", "green")
+                    self.startingNGCableValidation = False
+                else:
+                    self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
+            elif self.endingNGCableValidation:
+                if self.failCounter > 0:
+                    self.safe_update_message("NG Validation successful.", "green")
+                    self.endingNGCableValidated = True
+                    self.endingNGCableValidation = False
+                    self.write_program_selection_to_plc(False)
+                else:
+                    self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
+                    self.endingNGCableValidated = False
             else:
-                print(f"⚠️ WARNING: Could not save test data for LOT: {lot_number}")
-            
-            # Simple reset and start next iteration from scratch
-            self.start_next_iteration_from_scratch(lot_number)
-            
+                self.complete_test_cycle()
+
         except Exception as e:
             print(f"Error in test_result_command: {e}")
             traceback.print_exc()
             self.safe_update_message(f"Error processing test results: {e}", "red")
 
-    def start_next_iteration_from_scratch(self, previous_lot):
-        """Start next iteration from scratch - simple and clean"""
-        try:
-            print("=== STARTING NEXT ITERATION FROM SCRATCH ===")
-            
-            # Increment lot number
-            if previous_lot:
-                try:
-                    # Extract and increment lot number
-                    date_part = previous_lot[:6]
-                    machine_part = previous_lot[6:9] 
-                    increment_part = previous_lot[-8:]
-                    new_increment = int(increment_part) + 1
-                    new_increment_str = f"{new_increment:08d}"
-                    new_lot = f"{date_part}{machine_part}{new_increment_str}"
-                    self.current_lot_number = new_lot
-                    print(f"New LOT: {new_lot}")
-                except:
-                    self.current_lot_number = self.generate_lot_number()
+        self.root.after(1200, self.prepare_next_cycle)
+
+    def score_spec_rows(self):
+        """Fill Actual and Result on every spec row and count passes and fails."""
+        self.failCounter = 0
+        self.passCounter = 0
+
+        for item in self.spec_tree.get_children():
+            device = str(self.spec_tree.item(item, "values")[1])
+            value = self.get_actual_value_for_device(device)
+            shown = f"{value:.1f}" if device.startswith("L") else f"{value:.2f}"
+            self.update_specification_result(device, shown)
+
+            if self.spec_tree.item(item, "values")[-1] == "PASS":
+                self.passCounter += 1
             else:
-                self.current_lot_number = self.generate_lot_number()
-            
-            # Reset ALL variables to start fresh
-            self.process_status_index = 0
-            self.current_process_step = 0
-            self.test_result_saved = False
-            self.last_test_result_pass_state = False
-            self.last_test_result_ng_state = False
-            if hasattr(self, 'step_start_time'):
-                delattr(self, 'step_start_time')
-            
-            # Clear UI
-            if hasattr(self, 'spec_tree') and self.spec_tree:
-                for item in self.spec_tree.get_children():
-                    values = list(self.spec_tree.item(item, "values"))
-                    if len(values) >= 7:
-                        values[-2] = ""  # Clear Actual
-                        values[-1] = ""  # Clear Result
-                        self.spec_tree.item(item, values=values, tags=('neutral',))
-            
-            # PLC reset functionality removed
-            
-            print(f"=== ITERATION STARTED FROM SCRATCH - LOT: {self.current_lot_number} ===")
-            self.safe_update_message(f"ITERATION STARTED - LOT: {self.current_lot_number}", "green")
-            
+                self.failCounter += 1
+
+    def prepare_next_cycle(self):
+        """Clear the finished test and hand the machine the next part."""
+        try:
+            self.reset_test_parameters()
+            self.reset_dgv_spec_data()
+            self.write_machine_on_to_plc()
+
+            if self.endingNGCableValidated:
+                # The closing check passed, so this part is done with.
+                self.endingNGCableValidated = False
+                self.execute_cycle_restart()
         except Exception as e:
-            print(f"Error starting next iteration: {e}")
-            
+            print(f"Error preparing next cycle: {e}")
+            traceback.print_exc()
+
     # PLC functionality removed
             
     def auto_reset_for_next_test(self):
@@ -3055,25 +3020,26 @@ class EOLTesterGUI:
         Matches testconsole.cs ReadCoils() method logic with improved error handling:
         - Read coils individually
         - Return dictionary of address:value pairs
-        - Fallback to simulation mode when PLC unavailable
+        - Return an empty dict when the PLC cannot be read. Never invent
+          coil states: a made-up TESTRESULT would be saved as a real test.
         - Better connection health monitoring
         """
         try:
             # Check if PLC is connected with better error handling
             if not hasattr(self, 'plc_client') or not self.plc_client:
-                print("⚠️ PLC client not initialized - using simulation mode")
-                return self.get_simulated_process_status()
+                print("⚠️ PLC client not initialized - no status read")
+                return {}
             
             # Check socket status with detailed error reporting
             try:
                 if not self.plc_client.is_socket_open():
                     print("⚠️ PLC socket closed - attempting reconnection")
                     if not self.connect_to_plc():
-                        print("⚠️ PLC reconnection failed - using simulation mode")
-                        return self.get_simulated_process_status()
+                        print("⚠️ PLC reconnection failed - no status read")
+                        return {}
             except Exception as e:
-                print(f"⚠️ PLC socket check failed: {e} - using simulation mode")
-                return self.get_simulated_process_status()
+                print(f"⚠️ PLC socket check failed: {e} - no status read")
+                return {}
             
             # Read from PLC
             status_values = {}
@@ -3083,8 +3049,8 @@ class EOLTesterGUI:
                 self.load_process_addresses()
             
             if not hasattr(self, 'process_addresses') or not self.process_addresses:
-                print("⚠️ No process addresses loaded - using simulation mode")
-                return self.get_simulated_process_status()
+                print("⚠️ No process addresses loaded - no status read")
+                return {}
             
             station_id = int(config.get('PLC_STATION_ID', '1'))
             
@@ -3130,66 +3096,22 @@ class EOLTesterGUI:
                         self.plc_communication_errors += 1
                         print(f"⚠️ Error reading PLC address {address}: {e}")
                 
-                # If too many errors, switch to simulation mode
+                # Too many failed reads: this snapshot is not trustworthy
                 if self.plc_communication_errors >= 5:
-                    print("⚠️ Too many PLC communication errors - switching to simulation mode")
-                    return self.get_simulated_process_status()
+                    print("⚠️ Too many PLC communication errors - discarding this read")
+                    return {}
                 
             except Exception as e:
                 print(f"Error reading PLC coils: {e}")
                 self.plc_communication_errors += 1
-                return self.get_simulated_process_status()
+                return {}
             
             return status_values
                 
         except Exception as e:
             print(f"Error in read_process_status_values: {e}")
             self.plc_communication_errors += 1
-            return self.get_simulated_process_status()
-
-    def get_simulated_process_status(self):
-        """Get simulated process status values for testing when PLC is not connected"""
-        try:
-            # Initialize simulation counter if not exists
-            if not hasattr(self, 'simulation_step_counter'):
-                self.simulation_step_counter = 0
-            
-            # Simulate process progression through steps
-            simulated_status = {}
-            
-            # Load process addresses for simulation
-            if not hasattr(self, 'process_addresses'):
-                self.load_process_addresses()
-            
-            if hasattr(self, 'process_addresses') and self.process_addresses:
-                # Reset all to False first
-                for addr in self.process_addresses:
-                    if addr.strip():
-                        simulated_status[addr.strip()] = False
-                
-                # Simulate step progression
-                step_count = len([addr for addr in self.process_addresses if addr.strip()])
-                if step_count > 0:
-                    current_step = (self.simulation_step_counter // 10) % step_count  # Change step every 10 cycles
-                    active_address = [addr for addr in self.process_addresses if addr.strip()][current_step]
-                    simulated_status[active_address] = True
-                    
-                    self.simulation_step_counter += 1
-                    
-                    # Print simulation status for debugging
-                    if self.simulation_step_counter % 50 == 0:  # Print every 50 cycles
-                        print(f"📺 Simulation mode: Step {current_step+1}/{step_count} - {active_address}")
-                    
-                    # Simulate test completion after all steps
-                    if current_step >= step_count - 1 and (self.simulation_step_counter % 10) == 0:
-                        # Generate test values when simulation completes
-                        self.generate_test_values()
-            
-            return simulated_status
-            
-        except Exception as e:
-            print(f"Error in simulated process status: {e}")
-        return {}
+            return {}
 
     def load_hold_register_addresses(self):
         """Load hold register addresses from HoldRegistersRead.txt file"""
@@ -4296,9 +4218,10 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error loading model label details: {e}")
 
-    def write_program_selection_to_plc(self):
+    def write_program_selection_to_plc(self, value=True):
         """
-        Write program selection to PLC
+        Write program selection to PLC. False releases the program once the
+        closing NG cable check has passed.
         Returns: bool - Success status
         """
         try:
@@ -4308,12 +4231,12 @@ class EOLTesterGUI:
             # Convert hex address to int (remove 'M' prefix)
             if self.programSelectionPLCAddress.startswith('M'):
                 coil_address = int(self.programSelectionPLCAddress[1:], 16)
-                result = self.plc_client.write_coil(coil_address, True, device_id=self.plc_station_id)
+                result = self.plc_client.write_coil(coil_address, value, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error writing program selection to PLC: {result}")
                     return False
                 else:
-                    print(f"✅ Program selection written: {self.programSelectionPLCAddress}")
+                    print(f"✅ Program selection written: {self.programSelectionPLCAddress} = {value}")
                     return True
             return False
         except Exception as e:
@@ -4708,7 +4631,9 @@ class EOLTesterGUI:
             self.set_label_color('test', 'green', persistent=True)
             print("🟢 TEST label set to GREEN (test process started - persistent)")
             
-            # Initialize test state flags
+            # Initialize test state flags. Readings taken while the machine
+            # sat idle must not count as this test's peaks.
+            self.reset_measurements()
             self.rcvdTestRslt = False  # flag for test completion
             self.noOfValues = 0        # counter for loadcell values
             
@@ -4742,8 +4667,11 @@ class EOLTesterGUI:
                 self.plc_read_thread = threading.Thread(target=self._plc_read_worker, daemon=True)
                 self.plc_read_thread.start()
             
-            # Start GUI update loop
-            self.monitor_plc_status()
+            # Start GUI update loop. Only one may run: every test start comes
+            # through here, and a second loop would see each result twice.
+            if not self.plc_status_loop_running:
+                self.plc_status_loop_running = True
+                self.monitor_plc_status()
         except Exception as e:
             print(f"Error starting PLC status monitoring: {e}")
     
@@ -4780,14 +4708,19 @@ class EOLTesterGUI:
         try:
             if not hasattr(self, 'plc_client') or not self.plc_client:
                 return
-            
+
+            # Once the PLC has reported a result the readings are frozen for
+            # scoring, as ReadInputRegisters stops on rcvdTestRslt.
+            if self.rcvdTestRslt:
+                return
+
             # Load register addresses if not loaded
             if not hasattr(self, 'hold_register_addresses') or not self.hold_register_addresses:
                 self.load_hold_register_addresses()
-            
+
             if not self.hold_register_addresses:
                 return
-            
+
             station_id = int(config.get('PLC_STATION_ID', '1'))
             register_data = {}
             
@@ -4817,9 +4750,15 @@ class EOLTesterGUI:
                     )
                     
                     if not result.isError():
-                        value = result.registers[0] if result.registers else 0
-                        register_data[reg_addr_str] = value
-                        
+                        raw = result.registers[0] if result.registers else 0
+                        register_data[reg_addr_str] = raw
+
+                        # Registers hold signed 16-bit values scaled by the
+                        # PLC: load in tenths, position in hundredths
+                        # (TestConsole.cs ReadInputRegisters).
+                        signed = raw - 0x10000 if raw >= 0x8000 else raw
+                        value = signed / 10.0 if i < 4 else signed / 100.0
+
                         # Map to device names (L1-L4, P1-P4)
                         if i < 4:
                             device_name = f"L{i+1}"
@@ -4865,8 +4804,9 @@ class EOLTesterGUI:
         """
         try:
             if not hasattr(self, 'status_monitoring_active') or not self.status_monitoring_active:
+                self.plc_status_loop_running = False
                 return
-            
+
             # Get PLC status from queue (non-blocking - prevents GUI freeze)
             status_values = {}
             try:
@@ -4954,24 +4894,34 @@ class EOLTesterGUI:
                             # Only revert to blue if not persistent (before test starts)
                             self.test_label.config(bg="#00BFFF")  # DeepSkyBlue
                     
-                    # Check if test result received
+                    # Check if test result received. A result coil the PLC
+                    # still holds from the test just scored is not a new
+                    # result, so wait until both drop before accepting another.
                     if test_ok_result or test_ng_result:
-                        if not getattr(self, 'rcvdTestRslt', False):
+                        if (not getattr(self, 'rcvdTestRslt', False)
+                                and not self.awaiting_result_clear):
                             self.rcvdTestRslt = True
+                            self.awaiting_result_clear = True
                             print("✅ Test result received from PLC")
                             # Handle test completion
                             self.root.after(500, self.test_result_command)
+                    else:
+                        self.awaiting_result_clear = False
             
             # Continue monitoring loop (a 200ms pause)
             # Use 200ms delay to match the reference flow
             if self.status_monitoring_active:
                 self.root.after(200, self.monitor_plc_status)
-            
+            else:
+                self.plc_status_loop_running = False
+
         except Exception as e:
             print(f"Error in monitor_plc_status: {e}")
             # Continue monitoring despite errors
             if hasattr(self, 'status_monitoring_active') and self.status_monitoring_active:
                 self.root.after(200, self.monitor_plc_status)
+            else:
+                self.plc_status_loop_running = False
 
     def monitor_test_execution(self):
         """Monitor test execution with real PLC data"""
@@ -5149,99 +5099,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error saving test results: {e}")
 
-    def simulate_test_process(self):
-        """Simulate the complete EOL testing process"""
-        try:
-            print("Simulating EOL test process...")
-            
-            # Generate simulated test values
-            self.generate_simulated_test_values()
-            
-            # Process test results
-            self.process_simulated_test_results()
-            
-            # If starting NG cable validation
-            if self.startingNGCableValidation:
-                if self.failCounter > 0:
-                    self.safe_update_message("NG Validation successful, continue to testing...", "green")
-                    self.startingNGCableValidation = False
-                    # Continue with normal testing
-                    self.root.after(2000, self.simulate_test_process)
-                else:
-                    self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
-                    # Reset and retry
-                    self.reset_test_parameters()
-                    self.root.after(3000, self.simulate_test_process)
-            else:
-                # Normal test processing
-                self.complete_test_cycle()
-                
-        except Exception as e:
-            print(f"Error in test process simulation: {e}")
-
-    def generate_simulated_test_values(self):
-        """Generate simulated test values for demonstration"""
-        import random
-        
-        # Generate load cell values (simulate real sensor data)
-        self.L1MaxValue = random.uniform(10.0, 50.0)
-        if self.columnL2:
-            self.L2MaxValue = random.uniform(10.0, 50.0)
-        if self.columnL3:
-            self.L3MaxValue = random.uniform(10.0, 50.0)
-        if self.columnL4:
-            self.L4MaxValue = random.uniform(10.0, 50.0)
-        
-        # Generate pressure values
-        self.P01Value = random.uniform(-2.0, 2.0)
-        self.P02Value = random.uniform(-2.0, 2.0)
-        if self.columnP3:
-            self.P03Value = random.uniform(-2.0, 2.0)
-        if self.columnP4:
-            self.P04Value = random.uniform(-2.0, 2.0)
-        
-        # Simulate camera result
-        self.cam1Result = "PASS" if random.random() > 0.1 else "NG"
-
-    def process_simulated_test_results(self):
-        """Process simulated test results against specifications"""
-        self.failCounter = 0
-        self.passCounter = 0
-        
-        if not hasattr(self, 'spec_tree'):
-            return
-        
-        # Process each specification in the tree
-        for item in self.spec_tree.get_children():
-            values = self.spec_tree.item(item)['values']
-            if len(values) >= 5:
-                device = values[1]
-                min_val = float(values[3]) if values[3] != "N/A" else 0.0
-                max_val = float(values[4]) if values[4] != "N/A" else 100.0
-                
-                # Get actual value based on device
-                actual_value = self.get_actual_value_for_device(device)
-                
-                # Determine result
-                if min_val <= actual_value <= max_val:
-                    result = "PASS"
-                    self.passCounter += 1
-                    result_color = "blue"
-                else:
-                    result = "NG"
-                    self.failCounter += 1
-                    result_color = "red"
-                
-                # Update tree with results
-                updated_values = list(values)
-                updated_values[5] = f"{actual_value:.2f}"  # Actual value
-                updated_values[6] = result  # Result
-                self.spec_tree.item(item, values=updated_values)
-                
-                # Update result color (if possible)
-                if result == "NG":
-                    self.spec_tree.set(item, "Result", result)
-
     def get_actual_value_for_device(self, device):
         """Get actual value for a specific device"""
         device_map = {
@@ -5279,12 +5136,6 @@ class EOLTesterGUI:
             
             # Update charts and displays
             self.update_charts()
-            
-            # Reset for next test
-            self.reset_test_parameters()
-            
-            # Continue testing cycle
-            self.root.after(5000, self.simulate_test_process)
             
         except Exception as e:
             print(f"Error completing test cycle: {e}")
@@ -5371,6 +5222,18 @@ class EOLTesterGUI:
         # last run's pass and fail colours into the next part.
         self.reset_process_status_labels()
 
+        self.reset_measurements()
+
+        # Reset counters
+        self.failCounter = 0
+        self.passCounter = 0
+
+        # Reset flags
+        self.rcvdTestRslt = False
+        self.cam1Result = ""
+
+    def reset_measurements(self):
+        """Zero the readings so the next test's peaks start from nothing."""
         # Reset load cell values
         self.loadcell01Value = 0.0
         self.loadcell02Value = 0.0
@@ -5388,14 +5251,6 @@ class EOLTesterGUI:
         self.P02Value = 0.0
         self.P03Value = 0.0
         self.P04Value = 0.0
-        
-        # Reset counters
-        self.failCounter = 0
-        self.passCounter = 0
-        
-        # Reset flags
-        self.rcvdTestRslt = False
-        self.cam1Result = ""
 
     def save_testing_data(self, status):
         """Save testing data to database"""
@@ -5448,8 +5303,26 @@ class EOLTesterGUI:
             """
             
             cursor.execute(insert_query, base_values)
+
+            # The Data Console reports from TBL_TEST_RESULTS, so the same test
+            # goes there too, in the same transaction. Devices this part does
+            # not use stay NULL.
+            measured = dict(zip(base_columns, base_values))
+            devices = ['L1', 'L2', 'L3', 'L4', 'P1', 'P2', 'P3', 'P4']
+            cursor.execute("""
+                INSERT INTO TBL_TEST_RESULTS
+                (LOT_NUMBER, PART_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4,
+                 RESULT, CREATED_BY, EMP_CODE, SPEC_DATA)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                self.lotNo, self.partNumber,
+                *(measured.get(d) for d in devices),
+                "PASS" if status == "OK" else "NG",
+                self.current_employee_id, self.current_employee_id,
+                json.dumps({d: measured[d] for d in devices if d in measured}),
+            ))
             connection.commit()
-            
+
             print(f"Test data saved: {status} - Lot: {self.lotNo}, Traceability: {self.traceabilityCode}")
             
             # Update or insert part running serial
@@ -5586,33 +5459,13 @@ class EOLTesterGUI:
             # Enable barcode scan input (simulated)
             self.printedLabelScanDataInput_Received = False
             
-            # Wait for scan input with timeout
+            # Wait for scan input with timeout. There is no scanner input
+            # yet, so an unscanned label is recorded as '***' - never as a
+            # made-up OK.
             self.root.after(self.printedLabelScanDataInput_WaitTime, self.check_barcode_scan_timeout)
-            
-            # In real implementation, this would enable a text input field for barcode scanner
-            # For simulation, we'll automatically generate a scan result after delay
-            self.root.after(2000, self.simulate_barcode_scan)
             
         except Exception as e:
             print(f"Error waiting for barcode scan: {e}")
-
-    def simulate_barcode_scan(self):
-        """Simulate barcode scan for demonstration"""
-        try:
-            # Simulate successful scan 90% of the time
-            import random
-            scan_successful = random.random() > 0.1
-            
-            if scan_successful:
-                # Simulate scanned data containing traceability code
-                scanned_data = f"LABEL_{self.traceabilityCode}_END"
-                self.process_barcode_scan_result(scanned_data)
-            else:
-                # Simulate scan failure
-                print("Simulated barcode scan failure")
-                
-        except Exception as e:
-            print(f"Error simulating barcode scan: {e}")
 
     def check_barcode_scan_timeout(self):
         """Check if barcode scan timed out"""
@@ -7010,41 +6863,6 @@ class EOLTesterGUI:
             else:
                 print("No spec tree found")
             
-            # If no spec tree data, use PLC register data if available
-            if not has_result:
-                print("No spec tree data found - checking PLC register data")
-                
-                # Try to get data from latest PLC register readings
-                if hasattr(self, 'latest_register_data') and self.latest_register_data:
-                    print(f"Using PLC register data: {self.latest_register_data}")
-                    # Map register addresses to device names
-                    for i, reg_addr in enumerate(self.hold_register_addresses[:8]):
-                        if reg_addr in self.latest_register_data:
-                            value = self.latest_register_data[reg_addr]
-                            if i < 4:
-                                device_name = f"L{i+1}"
-                                values_dict[device_name] = value
-                                # Use max values if available
-                                max_value = getattr(self, f"L{i+1}MaxValue", value)
-                                if max_value > value:
-                                    values_dict[device_name] = max_value
-                            elif i < 8:
-                                device_name = f"P{i-3}"
-                                values_dict[device_name] = value
-                            has_result = True
-                
-                # If still no data, generate basic test completion data
-                if not has_result:
-                    print("No PLC data available - generating test completion record")
-                    # Use current max values if they were set
-                    values_dict["L1"] = getattr(self, 'L1MaxValue', 100.0)
-                    values_dict["L2"] = getattr(self, 'L2MaxValue', 200.0)
-                    values_dict["P1"] = getattr(self, 'P01Value', 50.0)
-                    values_dict["P2"] = getattr(self, 'P02Value', 75.0)
-                    has_result = True
-                    
-                all_devices_pass = True  # Assume pass for now
-            
             # Save to database
             if has_result:
                 overall_result = "PASS" if all_devices_pass else "FAIL"
@@ -7086,48 +6904,6 @@ class EOLTesterGUI:
             print(f"[ERROR] ERROR SAVING TEST RESULTS: {e}")
             traceback.print_exc()
             self.safe_update_message(f"Error saving test results: {e}", "red")
-
-    def force_save_test_completion(self, lot_number, part_number):
-        """Force save test completion with minimal data"""
-        try:
-            print(f"🔧 FORCE SAVING TEST COMPLETION")
-            
-            # Get employee code
-            emp_code = getattr(self, 'current_employee_id', None) or (self.emp_entry.get() if hasattr(self, 'emp_entry') else "TEST_USER")
-            
-            # Create minimal test completion record
-            values_dict = {
-                "LOT NUMBER": lot_number,
-                "PART NUMBER": part_number,
-                "EMP_CODE": emp_code,
-                "L1": 100.0,    # Default test values
-                "L2": 200.0,
-                "L3": 150.0,
-                "L4": 250.0,
-                "P1": 50.0,
-                "P2": 75.0,
-                "P3": 60.0,
-                "P4": 80.0,
-                "OVERALL_RESULT": "PASS"
-            }
-            
-            print(f"Force save data: {values_dict}")
-            
-            # Direct database save
-            success = self.save_lot_data_to_database(values_dict)
-            
-            if success:
-                print(f"🎉 FORCE SAVE SUCCESSFUL for LOT: {lot_number}")
-                self.safe_update_message(f"Test completion saved: {lot_number}", "green")
-                return True
-            else:
-                print(f"[ERROR] FORCE SAVE FAILED for LOT: {lot_number}")
-                return False
-                
-        except Exception as e:
-            print(f"[ERROR] ERROR IN FORCE SAVE: {e}")
-            traceback.print_exc()
-            return False
 
     # PLC functionality removed
 
