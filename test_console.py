@@ -554,7 +554,52 @@ class EOLTesterGUI:
             style.map(f"{name}.Heading", background=[('active', '#33CCFF')])
 
     def create_title_bar(self):
-        ui.title_bar(self.main_container, "EOL (END OF LINE) TESTER")
+        bar = ui.title_bar(self.main_container, "EOL (END OF LINE) TESTER")
+
+        # Starts a PLC test cycle on the loaded part, beside the machine ID
+        self.start_button = tk.Button(bar, text="START", bg=ui.SUCCESS, fg=ui.TEXT_ON_DARK,
+                                      activebackground=ui.SUCCESS_HOVER,
+                                      activeforeground=ui.TEXT_ON_DARK,
+                                      font=(self.FONT, 14, 'bold'), relief='raised', bd=1,
+                                      padx=18, cursor='hand2', command=self.start_test_click)
+        self.start_button.pack(side='right', padx=(0, 4), pady=8)
+
+    def start_test_click(self):
+        """Start a PLC test cycle on the loaded part.
+
+        Writes the part's program-select coil and Machine On, then watches
+        the PLC as for any cycle, so the result is scored and saved as usual.
+        """
+        if not self.employee_validation_complete:
+            messagebox.showwarning("Start Test", "Enter your employee code first.")
+            return
+        if not getattr(self, 'current_part_number', None):
+            messagebox.showwarning("Start Test", "Scan an ALC code to load a part first.")
+            return
+        try:
+            connected = bool(self.plc_client) and self.plc_client.is_socket_open()
+        except Exception:
+            connected = False
+        if not connected:
+            messagebox.showerror("Start Test", "The PLC is not connected.")
+            return
+
+        failed = []
+        if not self.write_program_selection_to_plc():
+            failed.append(f"Program Select ({self.programSelectionPLCAddress or 'not set'})")
+        if not self.write_machine_on_to_plc():
+            failed.append(f"Machine On ({self.machineOnPLCCoilAddress or 'not set'})")
+        if failed:
+            messagebox.showerror(
+                "Start Test",
+                "The test was not started. Could not write:\n\n"
+                + "\n".join(f"  - {item}" for item in failed)
+                + "\n\nCoil addresses must be M coils, e.g. M1000.")
+            return
+
+        self.log_operator_action("TEST_START", "Started from the START button")
+        self.safe_update_message("Test started - waiting for the PLC...", "blue")
+        self.start_check_async()
 
     def create_footer(self):
         bar = tk.Frame(self.main_container, bg=self.FOOTER_PINK, height=34)
