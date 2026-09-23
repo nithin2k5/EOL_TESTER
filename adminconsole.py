@@ -396,22 +396,9 @@ class AdminConsole:
             # Set icons to None for fallback to text-only buttons
             self.add_icon = self.edit_icon = self.save_icon = self.delete_icon = self.clear_icon = None
 
-        # Header
-        header_frame = tk.Frame(self.root, bg=ui.SURFACE, height=80)
-        header_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        # INFAC INDIA logo placeholder (left side)
-        logo_label = tk.Label(header_frame, text="INFAC\nINDIA", bg=ui.SURFACE, font=('Arial', 12, 'bold'))
-        logo_label.pack(side=tk.LEFT, padx=20)
-        
-        # EOL TESTER title (center)
-        title_label = tk.Label(
-            header_frame, 
-            text="EOL (END OF LINE) TESTER",
-            bg=ui.SURFACE,
-            font=('Arial', 24, 'bold')
-        )
-        title_label.pack(expand=True)
+        # The pink title bar and footer every console carries
+        ui.page_header(self.root, "Admin")
+        ui.footer_bar(self.root)
 
         # Main content frame, inside a scroller so nothing falls off a
         # shorter screen.
@@ -464,7 +451,7 @@ class AdminConsole:
                 text=field,
                 bg=ui.SURFACE,
                 fg='black',
-                font=('Arial', 10, 'bold'),
+                font=(ui.FONT_FAMILY, 10, 'bold'),
                 width=20,
                 anchor='e'
             )
@@ -473,7 +460,7 @@ class AdminConsole:
             # Entry with specified width
             entry = tk.Entry(
                 row_frame,
-                font=('Arial', 10),
+                font=(ui.FONT_FAMILY, 10),
                 width=40,
                 bg=ui.SURFACE,
                 fg='#999999',  # Start with gray placeholder color
@@ -514,25 +501,26 @@ class AdminConsole:
         
         style.configure(
             "Custom.Treeview.Heading",
-            background=ui.SUBTLE,
-            foreground=ui.TEXT,
+            background=ui.SKY,
+            foreground=ui.TEXT_ON_ACCENT,
             relief="flat",
             font=ui.FONT_BODY_BOLD
         )
-        
+        style.map("Custom.Treeview.Heading", background=[('active', ui.ACCENT_HOVER)])
+
         # Map selected row colors
         style.map('Custom.Treeview',
-            background=[('selected', ui.ACCENT)],
-            foreground=[('selected', ui.TEXT_ON_ACCENT)]
+            background=[('selected', ui.ACCENT_SOFT)],
+            foreground=[('selected', ui.TEXT)]
         )
 
         # Updated buttons configuration with distinct colors
         buttons = [
-            ("ADD", "#2ecc71", self.add_record, self.add_icon),      # Green
-            ("EDIT", "#e67e22", self.edit_record, self.edit_icon),   # Orange
-            ("SAVE", "#3498db", self.save_record, self.save_icon),   # Blue
-            ("DELETE", "#e74c3c", self.delete_record, self.delete_icon),  # Red
-            ("CLEAR", "#95a5a6", self.clear_entries, self.clear_icon)     # Gray
+            ("ADD", ui.SUCCESS, self.add_record, self.add_icon),
+            ("EDIT", ui.WARNING, self.edit_record, self.edit_icon),
+            ("SAVE", ui.SKY, self.save_record, self.save_icon),
+            ("DELETE", ui.DANGER, self.delete_record, self.delete_icon),
+            ("CLEAR", ui.SILVER, self.clear_entries, self.clear_icon)
         ]
 
         # Create buttons vertically with spacing and updated hover colors
@@ -545,8 +533,8 @@ class AdminConsole:
                 text=" " + text,
                 command=command,
                 bg=color,
-                fg=ui.TEXT_ON_ACCENT,
-                font=('Arial', 10, 'bold'),
+                fg=ui.readable_on(color),
+                font=(ui.FONT_FAMILY, 11, 'bold'),
                 width=15,
                 height=2,
                 relief='raised',
@@ -560,11 +548,11 @@ class AdminConsole:
             
             # Custom hover colors for each button
             hover_colors = {
-                "#2ecc71": "#27ae60",  # Darker green
-                "#e67e22": "#d35400",  # Darker orange
-                "#3498db": "#2980b9",  # Darker blue
-                "#e74c3c": "#c0392b",  # Darker red
-                "#95a5a6": "#7f8c8d"   # Darker gray
+                ui.SUCCESS: ui.SUCCESS_HOVER,
+                ui.WARNING: ui.WARNING_HOVER,
+                ui.SKY: ui.ACCENT_HOVER,
+                ui.DANGER: ui.DANGER_HOVER,
+                ui.SILVER: ui.BORDER,
             }
             
             btn.bind('<Enter>', lambda e, b=btn, c=hover_colors[color]: b.configure(bg=c))
@@ -609,16 +597,6 @@ class AdminConsole:
         # Pack treeview and scrollbar
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Footer
-        footer_text = "Powered By: IRACRAT TECHNOLOGIES. Contact: INFO@IRACRAT.COM, (+91) 99623 44614."
-        footer = tk.Label(
-            self.root,
-            text=footer_text,
-            bg=ui.SURFACE,
-            font=('Arial', 8)
-        )
-        footer.pack(side=tk.BOTTOM, pady=5)
 
         # Bind treeview selection event
         self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
@@ -706,8 +684,8 @@ class AdminConsole:
             text="MACHINE ID :",
             bg=ui.SURFACE,
             fg='black',
-            font=('Arial', 10, 'bold'),
-            width=20,
+            font=(ui.FONT_FAMILY, 10, 'bold'),
+            width=24,
             anchor='e'
         )
         label.pack(side=tk.LEFT, padx=5)
@@ -720,7 +698,7 @@ class AdminConsole:
             width=40,
             bg=ui.SURFACE,
             fg='black',
-            font=('Arial', 9)
+            font=(ui.FONT_FAMILY, 9)
         )
         self.machine_id_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
@@ -729,9 +707,9 @@ class AdminConsole:
             row_frame,
             text="Save ID",
             command=self.save_machine_id,
-            bg='#3498db',
+            bg=ui.SKY,
             fg=ui.TEXT_ON_ACCENT,
-            font=('Arial', 9, 'bold'),
+            font=(ui.FONT_FAMILY, 10, 'bold'),
             relief='raised',
             bd=2,
             padx=10
@@ -739,8 +717,8 @@ class AdminConsole:
         save_machine_id_btn.pack(side=tk.LEFT, padx=5)
         
         # Add hover effect for save button
-        save_machine_id_btn.bind('<Enter>', lambda e: save_machine_id_btn.configure(bg='#2980b9'))
-        save_machine_id_btn.bind('<Leave>', lambda e: save_machine_id_btn.configure(bg='#3498db'))
+        save_machine_id_btn.bind('<Enter>', lambda e: save_machine_id_btn.configure(bg=ui.ACCENT_HOVER))
+        save_machine_id_btn.bind('<Leave>', lambda e: save_machine_id_btn.configure(bg=ui.SKY))
 
         # Primary Backup Path
         row_frame = tk.Frame(backup_frame, bg=ui.SURFACE)
@@ -751,8 +729,8 @@ class AdminConsole:
             text="PRIMARY BACKUP PATH :",
             bg=ui.SURFACE,
             fg='black',
-            font=('Arial', 10, 'bold'),
-            width=20,
+            font=(ui.FONT_FAMILY, 10, 'bold'),
+            width=24,
             anchor='e'
         )
         label.pack(side=tk.LEFT, padx=5)
@@ -768,7 +746,7 @@ class AdminConsole:
             width=40,
             bg='#f0f0f0',  # Light gray background
             fg='#666666' if primary_default.startswith('Click') else '#000000',  # Gray for placeholder, black for path
-            font=('Arial', 9),
+            font=(ui.FONT_FAMILY, 9),
             state='readonly'  # Make read-only, only clickable
         )
         self.primary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
@@ -785,8 +763,8 @@ class AdminConsole:
             text="SECONDARY BACKUP PATH :",
             bg=ui.SURFACE,
             fg='black',
-            font=('Arial', 10, 'bold'),
-            width=20,
+            font=(ui.FONT_FAMILY, 10, 'bold'),
+            width=24,
             anchor='e'
         )
         label.pack(side=tk.LEFT, padx=5)
@@ -802,7 +780,7 @@ class AdminConsole:
             width=40,
             bg='#f0f0f0',  # Light gray background
             fg='#666666' if secondary_default.startswith('Click') else '#000000',  # Gray for placeholder, black for path
-            font=('Arial', 9),
+            font=(ui.FONT_FAMILY, 9),
             state='readonly'  # Make read-only, only clickable
         )
         self.secondary_path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
@@ -815,9 +793,9 @@ class AdminConsole:
             backup_frame,
             text="Backup Now",
             command=self.create_backup,
-            bg='#2ecc71',
-            fg=ui.TEXT_ON_ACCENT,
-            font=('Arial', 10, 'bold'),
+            bg=ui.SUCCESS,
+            fg=ui.TEXT_ON_DARK,
+            font=(ui.FONT_FAMILY, 11, 'bold'),
             relief='raised',
             bd=2,
             padx=20,
@@ -826,8 +804,8 @@ class AdminConsole:
         backup_btn.pack(pady=10)
         
         # Add hover effects for backup button
-        backup_btn.bind('<Enter>', lambda e: backup_btn.configure(bg='#27ae60'))
-        backup_btn.bind('<Leave>', lambda e: backup_btn.configure(bg='#2ecc71'))
+        backup_btn.bind('<Enter>', lambda e: backup_btn.configure(bg=ui.SUCCESS_HOVER))
+        backup_btn.bind('<Leave>', lambda e: backup_btn.configure(bg=ui.SUCCESS))
 
         # Add hover effects for text entries
         def on_enter(event):
