@@ -843,21 +843,28 @@ class EOLTesterGUI:
         """Execute the actual cycle restart"""
         try:
             print("🔄 EXECUTING CYCLE RESTART")
-            
-            # Keep employee ID validated (don't require re-validation)
-            # Only prompt for new part number
+            released_by = self.current_employee_id
             
             # Clear current part number to force new selection
             if hasattr(self, 'current_part_number'):
                 delattr(self, 'current_part_number')
-            
-            # Clear ALC entry for new part number input
-            if hasattr(self, 'alc_entry'):
-                self.alc_entry.delete(0, tk.END)
-                self.alc_entry.insert(0, "ALC CODE")
-                self.alc_entry.config(fg='gray')
-                self.alc_entry.focus()
-            
+
+            # The next part starts with a fresh login, as at startup: whoever
+            # closed out this part is not necessarily who runs the next one.
+            self.current_employee_id = None
+            self.employee_validation_complete = False
+            self.employee_validated = False
+            self.emp_entry.configure(state='normal', bg='white')
+            self.emp_entry.delete(0, tk.END)
+            self.emp_entry.focus_set()
+
+            # The ALC box waits, disabled, for that login. The placeholder has
+            # to go in first - Tk ignores insert() on a disabled Entry.
+            self.alc_entry.configure(state='normal')
+            self.alc_entry.delete(0, tk.END)
+            self.alc_entry.insert(0, "ALC CODE")
+            self.alc_entry.configure(state='disabled')
+
             # Reset spec tree
             if hasattr(self, 'spec_tree'):
                 for item in self.spec_tree.get_children():
@@ -880,11 +887,11 @@ class EOLTesterGUI:
                 self.next_model_btn.configure(state='normal')
 
             # Show ready message
-            self.safe_update_message(f"Cycle restarted. Employee {self.current_employee_id} - Enter new Part Number", "green")
+            self.safe_update_message("Part released - scan employee code to load the next part", "green")
             
-            # Log the restart completion
-            self.log_operator_action("CYCLE_RESTART_COMPLETED", "Ready for new part number", 
-                                   getattr(self, 'current_employee_id', None))
+            # Log the restart completion against the operator who released it
+            self.log_operator_action("CYCLE_RESTART_COMPLETED", "Part released, operator logged out",
+                                     released_by)
             
             print("[*] CYCLE RESTART COMPLETED - READY FOR NEW PART NUMBER")
             
