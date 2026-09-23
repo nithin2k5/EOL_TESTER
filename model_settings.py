@@ -919,7 +919,10 @@ class WorkspaceApp:
         """Update and save label positions to database"""
         positions = {}
         for label_text, label_widget in self.placed_labels.items():
-            positions[label_text] = {
+            # Key by the bare number ("1"), not "L1" - that is the format both
+            # load_label_positions and the Test console read back.
+            label_num = label_text.lstrip('L')
+            positions[label_num] = {
                 'x': label_widget.winfo_x(),
                 'y': label_widget.winfo_y(),
                 'text': label_widget.cget('text')  # Store the label text as well
