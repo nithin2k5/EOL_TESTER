@@ -1209,7 +1209,11 @@ class EOLTesterGUI:
 
         # Create a frame to hold the image
         self.image_frame = tk.Frame(q1, bg=ui.SURFACE)
-        self.image_frame.pack(expand=True, fill="both", padx=ui.PAD_LARGE, pady=ui.PAD)
+        # Pinned to 750x450 to match model_settings.py: label coordinates are
+        # stored as absolute pixels against this canvas, so it must not stretch.
+        self.image_frame.pack(expand=True, padx=ui.PAD_LARGE, pady=ui.PAD)
+        self.image_frame.pack_propagate(False)
+        self.image_frame.config(width=750, height=450)
 
         # Create initial placeholder
         self.image_label = tk.Label(self.image_frame,
