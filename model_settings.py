@@ -308,7 +308,8 @@ class WorkspaceApp:
         self.tree.bind('<Double-1>', self.on_double_click)
         
         # Add tooltip to show editing instructions
-        tooltip_text = "Double-click ON/OFF status to edit (only for placed labels)"
+        tooltip_text = ("Double-click ON or OFF text to edit (placed labels only). "
+                        "The Test console shows the OFF text until the sensor turns on.")
         tooltip = tk.Label(frame, text=tooltip_text, bg='lightyellow')
         tooltip.pack(pady=(0, 5))
         
@@ -719,77 +720,34 @@ class WorkspaceApp:
         # Get label text from the selected item
         label_text = self.tree.item(item)['values'][0]
         
-        # Handle OFF status name editing (column #3)
-        if label_text in self.placed_labels and column == '#3':
+        # ON text (column #2) and OFF text (column #3) are free text. The OFF
+        # text is also the caption shown here, as it is what the Test console
+        # shows until the sensor turns on.
+        if label_text in self.placed_labels and column in ('#2', '#3'):
+            col_idx = int(column[1]) - 1
             x, y, w, h = self.tree.bbox(item, column)
-            
-            # Create entry widget for name editing
+
             entry = tk.Entry(self.tree)
             entry.place(x=x, y=y, width=w, height=h)
-            
-            # Get current value
-            current_values = self.tree.item(item)['values']
-            current_name = current_values[2] if len(current_values) > 2 else ''
-            entry.insert(0, current_name)
-            
-            def update_label_name(event=None):
-                new_name = entry.get()
-                
-                # Update the label text and size on the image
-                if label_text in self.placed_labels:
-                    label_widget = self.placed_labels[label_text]
-                    if new_name:
-                        # Update label with just the new name
-                        label_widget.config(text=new_name)
-                        # Adjust label size
-                        label_widget.config(width=len(new_name) + 2)
-                        
-                        # Update tree view with the new name
-                        values = list(self.tree.item(item)['values'])
-                        values[2] = new_name  # Update OFF status column
-                        self.tree.item(item, values=tuple(values))
-                    else:
-                        # If no name entered, revert to original label number
-                        label_widget.config(text=label_text)
-                        label_widget.config(width=len(label_text) + 2)
-                
-                entry.destroy()
-            
-            entry.bind('<Return>', update_label_name)
-            entry.bind('<FocusOut>', update_label_name)
-            entry.focus()
-        
-        # Handle ON/OFF status editing (columns #2 and #3)
-        elif label_text in self.placed_labels and column in ('#2', '#3'):
-            x, y, w, h = self.tree.bbox(item, column)
-            
-            # Create combobox for status selection
-            combo = ttk.Combobox(self.tree, values=['ON', 'OFF'], width=8)
-            combo.place(x=x, y=y, width=w, height=h)
-            
-            # Get current value
-            current_value = self.tree.item(item)['values'][int(column[1])-1]
-            combo.set(current_value if current_value else 'OFF')
-            
-            def on_combo_select(event):
-                selected_value = combo.get()
+            current_values = list(self.tree.item(item)['values'])
+            entry.insert(0, str(current_values[col_idx]) if len(current_values) > col_idx else '')
+
+            def commit(event=None):
+                # Blank means the label's own name, so a label never shows empty
+                new_text = entry.get().strip() or label_text
                 values = list(self.tree.item(item)['values'])
-                
-                # Update the selected column
-                col_idx = int(column[1])-1
-                values[col_idx] = selected_value
-                
-                # Update opposite column
-                other_col = 2 if col_idx == 1 else 1
-                values[other_col] = 'OFF' if selected_value == 'ON' else 'ON'
-                
-                # Update the tree
+                values[col_idx] = new_text
                 self.tree.item(item, values=tuple(values))
-                combo.destroy()
-            
-            combo.bind('<<ComboboxSelected>>', on_combo_select)
-            combo.bind('<FocusOut>', lambda e: combo.destroy())
-            combo.focus()
+
+                if col_idx == 2:
+                    label_widget = self.placed_labels[label_text]
+                    label_widget.config(text=new_text, width=max(4, len(new_text) + 2))
+
+                entry.destroy()
+
+            entry.bind('<Return>', commit)
+            entry.bind('<FocusOut>', commit)
+            entry.focus()
 
     def edit_cell(self, item, column):
         current_value = self.label_tree.item(item, 'values')
@@ -922,11 +880,7 @@ class WorkspaceApp:
             # Key by the bare number ("1"), not "L1" - that is the format both
             # load_label_positions and the Test console read back.
             label_num = label_text.lstrip('L')
-            positions[label_num] = {
-                'x': label_widget.winfo_x(),
-                'y': label_widget.winfo_y(),
-                'text': label_widget.cget('text')  # Store the label text as well
-            }
+            positions[label_num] = self.label_coordinate(label_text, label_widget)
         
         try:
             # Convert positions to JSON string
@@ -1108,16 +1062,18 @@ class WorkspaceApp:
             label_text = self.tree.item(item)['values'][0]
             existing_labels.add(label_text)
         
-        # Update or add entries
+        # Update or add entries. Placed labels keep the ON/OFF text already
+        # entered for them; unplaced ones have none.
         for i in range(1, 17):
             label_text = f'L{i}'
             if label_text in self.placed_labels:
-                on_status = 'OFF'
-                off_status = 'ON'
+                on_status, off_status = self.label_texts(label_text)
+                on_status = on_status or label_text
+                off_status = off_status or label_text
             else:
                 on_status = ''
                 off_status = ''
-            
+
             # If label exists, update it. If not, create new entry
             if label_text in existing_labels:
                 # Find and update existing item
@@ -1188,21 +1144,40 @@ class WorkspaceApp:
         messagebox.showinfo("Success", "All label details have been cleared!")
 
     def update_label_status(self, label_text):
-        # Find the item for this label
+        """Give a newly placed label its ON/OFF text, keeping any already set."""
+        on_text, off_text = self.label_texts(label_text)
+        on_text = on_text or label_text
+        off_text = off_text or label_text
         for item in self.tree.get_children():
             if self.tree.item(item)['values'][0] == label_text:
-                current_values = self.tree.item(item)['values']
-                # Preserve any existing OFF status name when updating status
-                off_status_name = current_values[2] if len(current_values) > 2 else 'ON'
-                self.tree.item(item, values=(label_text, 'OFF', off_status_name))
-                
-                # Update label on image with just the OFF status name if it exists
-                if label_text in self.placed_labels:
-                    if off_status_name and off_status_name != 'ON':
-                        self.placed_labels[label_text].config(text=off_status_name)
-                    else:
-                        self.placed_labels[label_text].config(text=label_text)
+                self.tree.item(item, values=(label_text, on_text, off_text))
                 break
+
+        # The caption on the image is the OFF text
+        if label_text in self.placed_labels:
+            self.placed_labels[label_text].config(text=off_text)
+
+    def label_texts(self, label_text):
+        """The ON and OFF text in the Label Details grid for a label."""
+        for item in self.tree.get_children():
+            values = self.tree.item(item)['values']
+            if values and values[0] == label_text:
+                # Treeview hands numeric-looking cells back as ints
+                on_text = str(values[1]) if len(values) > 1 else ''
+                off_text = str(values[2]) if len(values) > 2 else ''
+                return on_text, off_text
+        return '', ''
+
+    def label_coordinate(self, label_text, label_widget):
+        """What MM_LABEL_COORDINATES stores for one placed label."""
+        on_text, off_text = self.label_texts(label_text)
+        return {
+            'x': float(label_widget.winfo_x()),
+            'y': float(label_widget.winfo_y()),
+            'text': str(label_widget.cget('text')),
+            'on_text': on_text or label_text,
+            'off_text': off_text or label_text,
+        }
 
     def init_database(self):
         """Create the database and any missing tables."""
@@ -1515,11 +1490,7 @@ class WorkspaceApp:
                 }
                 
                 # Label coordinates JSON
-                label_coordinates[label_num] = {
-                    'x': float(label_widget.winfo_x()),
-                    'y': float(label_widget.winfo_y()),
-                    'text': str(label_widget.cget('text'))
-                }
+                label_coordinates[label_num] = self.label_coordinate(label_text, label_widget)
             
             positions_json = json.dumps(label_positions, ensure_ascii=False)
             coordinates_json = json.dumps(label_coordinates, ensure_ascii=False)
@@ -1599,11 +1570,7 @@ class WorkspaceApp:
                 }
                 
                 # Label coordinates JSON
-                label_coordinates[label_num] = {
-                    'x': float(label_widget.winfo_x()),
-                    'y': float(label_widget.winfo_y()),
-                    'text': str(label_widget.cget('text'))
-                }
+                label_coordinates[label_num] = self.label_coordinate(label_text, label_widget)
             
             positions_json = json.dumps(label_positions, ensure_ascii=False)
             coordinates_json = json.dumps(label_coordinates, ensure_ascii=False)
@@ -1907,8 +1874,19 @@ class WorkspaceApp:
                         print(f"Error placing label L{label_num}: {label_error}")
                         continue
                 
-                # Update the treeview to reflect label positions
+                # Update the treeview to reflect label positions, then put back
+                # each label's ON/OFF text. Parts saved before labels had them
+                # use their caption for both.
                 self.update_treeview()
+                for label_num, coord_data in coordinates.items():
+                    label_text = f'L{label_num}'
+                    caption = coord_data.get('text') or label_text
+                    on_text = coord_data.get('on_text') or caption
+                    off_text = coord_data.get('off_text') or caption
+                    for item in self.tree.get_children():
+                        if self.tree.item(item)['values'][0] == label_text:
+                            self.tree.item(item, values=(label_text, on_text, off_text))
+                            break
                 print(f"Successfully placed {labels_placed} labels")
             else:
                 print(f"No label coordinates found for part: {part_number}")

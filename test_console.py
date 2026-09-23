@@ -2574,16 +2574,19 @@ class EOLTesterGUI:
                         print(f"Processing label L{label_num} at coordinates ({x}, {y})")
                         
                         # Create label with enhanced visibility. label_text is
-                        # the canonical key; the caption may have been renamed in
-                        # Model Settings, so show the stored text when there is one.
+                        # the canonical key. Model Settings sets the text shown
+                        # while the sensor is off and while it is on; parts saved
+                        # before that use their caption for both.
                         label_text = f'L{label_num}'
-                        display_text = coord_data.get('text', label_text)
+                        caption = coord_data.get('text') or label_text
+                        off_text = coord_data.get('off_text') or caption
+                        on_text = coord_data.get('on_text') or caption
                         new_label = tk.Label(self.image_frame,
-                                           text=display_text,
+                                           text=off_text,
                                            bg="yellow",  # Initial background color
                                            fg="black",
                                            font=("Arial", 12, "bold"),
-                                           width=4,
+                                           width=max(4, len(on_text), len(off_text)),
                                            relief="raised",
                                            borderwidth=2)
                         
@@ -2601,6 +2604,9 @@ class EOLTesterGUI:
                         
                         # Store the label and its position
                         new_label.label_key = label_text
+                        new_label.caption = caption
+                        new_label.on_text = on_text
+                        new_label.off_text = off_text
                         self.placed_labels[label_text] = new_label
                         self.label_positions[label_text] = (x, y)
                         
@@ -2680,10 +2686,14 @@ class EOLTesterGUI:
         for label_text, label in self.placed_labels.items():
             if label_text.startswith('L'):
                 label_num = label_text[1:]  # Extract number from "L1", "L2", etc.
+                # The label's text follows its sensor, so save the texts set
+                # in Model Settings rather than whatever it shows right now.
                 positions[label_num] = {
                     'x': label.winfo_x(),
                     'y': label.winfo_y(),
-                    'text': label.cget('text')  # Preserve the caption from Model Settings
+                    'text': label.caption,
+                    'on_text': label.on_text,
+                    'off_text': label.off_text,
                 }
 
         try:
@@ -3607,16 +3617,19 @@ class EOLTesterGUI:
         self.sensor_states = states
 
     def apply_sensor_states(self):
-        """Show each sensor on its label: steady green when made, blinking when not."""
+        """Show each sensor on its label: its ON text in steady green when made,
+        its OFF text blinking when not."""
         for key, is_on in self.sensor_states.items():
             label = self.placed_labels.get(key)
             if label is None:
                 continue
             if is_on:
                 self.stop_label_blinking(key)
-                label.configure(bg="#00FF00")
-            elif key not in getattr(self, 'blinking_jobs', {}):
-                self.blink_label(label, key)
+                label.configure(bg="#00FF00", text=label.on_text)
+            else:
+                label.configure(text=label.off_text)
+                if key not in getattr(self, 'blinking_jobs', {}):
+                    self.blink_label(label, key)
 
     def update_camera_status(self, status_values):
         """Show camera 1's verdict from its OK, NG and ON/OFF coils.
