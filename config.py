@@ -75,6 +75,9 @@ DEFAULTS = {
         'PRINTED_LABEL_SCAN_TIME_INTERVAL': '4000',
         'PRINTED_LABEL_SCAN_WAIT_TIME': '6000',
         'ALERT_ON_TIME_INTERVAL': '5000',
+        # Windows printer that barcode labels are sent to, as raw printer
+        # commands
+        'LABEL_PRINTER_NAME': 'EOL_LABEL_PRNTR',
     },
     'Flags': {
         'PLC_SIMULATION_MODE': 'false',

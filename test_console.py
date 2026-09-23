@@ -23,6 +23,66 @@ import db
 import ui
 import customtkinter as ctk
 
+
+class SerializedModbusClient:
+    """A Modbus client that lets one request through at a time.
+
+    The status worker thread and the Tk thread both talk to the PLC. On a
+    serial line two requests in flight at once garble each other's frames,
+    so every call on the client goes through one lock.
+    """
+
+    def __init__(self, client):
+        self._client = client
+        self._lock = threading.RLock()
+
+    def __getattr__(self, name):
+        attr = getattr(self._client, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            with self._lock:
+                return attr(*args, **kwargs)
+        return call
+
+
+def send_raw_to_printer(printer_name, data):
+    """Send bytes to a Windows printer untranslated.
+
+    Label templates are printer command language, so they must reach the
+    printer as-is rather than through a driver's page rendering.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class DOC_INFO_1(ctypes.Structure):
+        _fields_ = [("pDocName", wintypes.LPWSTR),
+                    ("pOutputFile", wintypes.LPWSTR),
+                    ("pDatatype", wintypes.LPWSTR)]
+
+    winspool = ctypes.WinDLL("winspool.drv", use_last_error=True)
+    handle = wintypes.HANDLE()
+    if not winspool.OpenPrinterW(printer_name, ctypes.byref(handle), None):
+        raise OSError(f"Printer '{printer_name}' not found (error {ctypes.get_last_error()})")
+    try:
+        doc = DOC_INFO_1("EOL BARCODE LABEL", None, "RAW")
+        if not winspool.StartDocPrinterW(handle, 1, ctypes.byref(doc)):
+            raise OSError(f"Could not start print job (error {ctypes.get_last_error()})")
+        try:
+            winspool.StartPagePrinter(handle)
+            written = wintypes.DWORD()
+            ok = winspool.WritePrinter(handle, data, len(data), ctypes.byref(written))
+            winspool.EndPagePrinter(handle)
+            if not ok or written.value != len(data):
+                raise OSError(f"Printer accepted {written.value} of {len(data)} bytes "
+                              f"(error {ctypes.get_last_error()})")
+        finally:
+            winspool.EndDocPrinter(handle)
+    finally:
+        winspool.ClosePrinter(handle)
+
+
 class EOLTesterGUI:
     def __init__(self, root):
         self.root = root
@@ -211,6 +271,19 @@ class EOLTesterGUI:
         self.rcvdTestRslt = False
         self.awaiting_result_clear = False
         self.plc_status_loop_running = False
+
+        # Labels on the part image and the sensors behind them. The worker
+        # thread reads sensor_label_keys and writes sensor_states; the Tk
+        # thread owns placed_labels.
+        self.placed_labels = {}
+        self.sensor_label_keys = []
+        self.sensor_states = {}
+        self.input_sensor_addresses = []
+
+        # The printed label waiting to be scanned, if any
+        self.current_alc_code = ""
+        self.awaiting_label_scan = False
+        self.label_scan_code = ""
         self.loadcell01Value = 0.0
         self.loadcell02Value = 0.0
         self.loadcell03Value = 0.0
@@ -276,8 +349,10 @@ class EOLTesterGUI:
         
         # EOL Testing Variables
         self.alcInput_TimeInterval = 3000  # 3000ms for manual entry
-        self.printedLabelScanDataInput_TimeInterval = 4000  # 4000ms for barcode scanner
-        self.printedLabelScanDataInput_WaitTime = 6000  # 6 secs wait for printed label scan
+        # Label scan timings come from the Testing section of .config
+        self.printedLabelScanDataInput_TimeInterval = config.get_int('PRINTED_LABEL_SCAN_TIME_INTERVAL', 4000)
+        self.printedLabelScanDataInput_WaitTime = config.get_int('PRINTED_LABEL_SCAN_WAIT_TIME', 6000)
+        self.alertOn_TimeInterval = config.get_int('ALERT_ON_TIME_INTERVAL', 5000)
         self.alertOn_TimeInterval = 5000  # 5 secs alert duration
         self.printedLabelScanDataInput_Received = False
         
@@ -612,7 +687,7 @@ class EOLTesterGUI:
             # ===================================================================
             # 1. Write Program Selection to PLC ONCE
             # 2. Write Machine On to PLC ONCE  
-            # 3. Start ReadCoils() loop - ONLY READ, NO WRITES
+            # 3. Start the coil read loop - ONLY READ, NO WRITES
             # NO P0000 keep-alive, NO continuous writes - PLC runs autonomously
             # ===================================================================
             
@@ -645,7 +720,7 @@ class EOLTesterGUI:
                     print(f"⚠️ Machine On write error: {e}")
             
             # STEP 3: That's ALL the writes! Now just READ coils
-            # start_CheckAsync calls ReadCoils and ReadSensorInputs
+            # start_check_async starts the coil and sensor reads
             # Then enters a continuous read loop until test completes
             
             print("✅ PLC initialization complete - entering READ-ONLY monitoring mode")
@@ -667,11 +742,11 @@ class EOLTesterGUI:
             # Start continuous PLC coil reading (continuous coil read loop - lines 470-553)
             self.status_monitoring_active = True
             self.rcvdTestRslt = False  # test completion flag
-            print("✅ Starting continuous ReadCoils loop...")
+            print("✅ Starting continuous coil read loop...")
             self.start_plc_status_monitoring()
             
             print("✅ EOL Testing process initialized")
-            print("   📊 ReadCoils() monitoring active - updates every 200ms")
+            print("   📊 Coil monitoring active - updates every 200ms")
             print("   ⏳ Waiting for test result (rcvdTestRslt = True)")
             print("   🎯 Monitoring addresses: {', '.join(self.process_addresses[:8])}")
                 
@@ -777,12 +852,12 @@ class EOLTesterGUI:
             # Try TCP connection first if IP is configured
             if self.plc_tcp_ip:
                 try:
-                    self.plc_client = ModbusTcpClient(
+                    self.plc_client = SerializedModbusClient(ModbusTcpClient(
                         host=self.plc_tcp_ip,
                         port=self.plc_tcp_port,
                         timeout=10,  # Increased from 5 to 10 seconds
                         retries=2  # Reduce retries to prevent connection closure
-                    )
+                    ))
                     connection_result = self.plc_client.connect()
                     if connection_result:
                         self.plc_connected = True
@@ -801,7 +876,7 @@ class EOLTesterGUI:
             
             # Try serial connection
             try:
-                self.plc_client = ModbusSerialClient(
+                self.plc_client = SerializedModbusClient(ModbusSerialClient(
                     port=self.plc_com_port,
                     baudrate=self.plc_baud_rate,
                     bytesize=8,
@@ -809,7 +884,7 @@ class EOLTesterGUI:
                     stopbits=1,
                     timeout=10,  # Increased from 5 to 10 seconds
                     retries=2  # Reduce retries to prevent connection closure
-                )
+                ))
                 connection_result = self.plc_client.connect()
                 if connection_result:
                     self.plc_connected = True
@@ -1152,7 +1227,15 @@ class EOLTesterGUI:
             
             # Reset test result saved flag
             self.test_result_saved = False
-            
+
+            # The sensor labels belong to the part that just left
+            self.stop_all_label_blinking()
+            for label in self.placed_labels.values():
+                label.destroy()
+            self.placed_labels = {}
+            self.sensor_label_keys = []
+            self.sensor_states = {}
+
             # Show ready message
             self.safe_update_message(f"Cycle restarted. Employee {self.current_employee_id} - Enter new Part Number", "green")
             
@@ -1365,25 +1448,26 @@ class EOLTesterGUI:
         camera_container.grid_columnconfigure(3, weight=1)  # Text box
 
         def camera_slot(column):
-            """A rounded, empty preview box - nothing ever feeds these two
-            a real image, so the placeholder inside is all they ever show."""
+            """A rounded box for a camera. No images are fed in; camera 1's
+            caption shows the verdict its PLC coils report."""
             frame = ctk.CTkFrame(camera_container, width=cam_width, height=cam_height,
                                  corner_radius=ui.CORNER_RADIUS_SMALL,
                                  fg_color=ui.SURFACE, border_width=1,
                                  border_color=ui.BORDER)
             frame.grid(row=1, column=column, padx=10, pady=(0, 5))
             frame.grid_propagate(False)
-            ctk.CTkLabel(frame, text="No image", fg_color=ui.SURFACE,
-                        text_color=ui.TEXT_MUTED, font=ui.FONT_SMALL,
-                        compound='top',
-                        image=ui.icon_image('camera', ui.BORDER_STRONG, 28)).place(
-                            relx=0.5, rely=0.5, anchor='center')
+            frame.status = ctk.CTkLabel(frame, text="No image", fg_color=ui.SURFACE,
+                                        text_color=ui.TEXT_MUTED, font=ui.FONT_SMALL,
+                                        compound='top',
+                                        image=ui.icon_image('camera', ui.BORDER_STRONG, 28))
+            frame.status.place(relx=0.5, rely=0.5, anchor='center')
             return frame
 
         # Camera 1 section
         tk.Label(camera_container, text="CAM 1", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
                 font=ui.FONT_SMALL).grid(row=0, column=0, pady=(0, 5))
         self.cam1_frame = camera_slot(0)
+        self.cam1_status = self.cam1_frame.status
 
         # Camera 2 section
         tk.Label(camera_container, text="CAM 2", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
@@ -1398,6 +1482,20 @@ class EOLTesterGUI:
                                     fg_color=ui.SURFACE, border_width=1,
                                     border_color=ui.BORDER)
         textbox_slot.grid(row=1, column=3, padx=10, pady=1, sticky="nsew")
+
+        # Where the printed label gets scanned back in. It only opens while a
+        # freshly printed label is waiting to be checked.
+        self.label_scan_entry = tk.Entry(textbox_slot, bg=ui.SURFACE, fg=ui.TEXT,
+                                         disabledbackground=ui.SUBTLE,
+                                         font=ui.FONT_BODY_BOLD, justify="center",
+                                         relief="flat", highlightthickness=1,
+                                         highlightbackground=ui.BORDER,
+                                         highlightcolor=ui.ACCENT)
+        self.label_scan_entry.pack(fill="x", padx=4, pady=(4, 0))
+        self.label_scan_entry.configure(state='disabled')
+        self.label_scan_entry.bind("<Return>", self.submit_label_scan)
+        self.label_scan_entry.bind("<KeyRelease>", self.on_label_scan_key)
+
         self.cam_textbox = tk.Text(textbox_slot, width=40, height=5,
                                    bg=ui.SURFACE, fg=ui.TEXT, font=ui.FONT_BODY,
                                    relief="flat", borderwidth=0,
@@ -2080,9 +2178,8 @@ class EOLTesterGUI:
     def test_result_command(self):
         """Score and record the test the PLC just finished.
 
-        The tail of start_CheckAsync in TestConsole.cs: every spec row is
-        judged against its limits, then the result either settles an NG
-        cable check or is saved as a production part.
+        Every spec row is judged against its limits, then the result either
+        settles an NG cable check or is saved as a production part.
         """
         try:
             print("=== TEST COMPLETION DETECTED ===")
@@ -2384,7 +2481,16 @@ class EOLTesterGUI:
         barcode = ''.join(c for c in self.barcode_data if c.isprintable()).strip()
         if not barcode:
             return
-            
+
+        # A printed label waiting to be checked takes the scan, even if the
+        # scan box lost focus - otherwise it would be read as an ALC code.
+        if self.awaiting_label_scan:
+            self.label_scan_entry.delete(0, tk.END)
+            self.label_scan_entry.insert(0, barcode)
+            self.barcode_data = ""
+            self.submit_label_scan()
+            return
+
         # Check if we're waiting for employee code
         if not self.emp_entry.get() or self.emp_entry.get() == "EMP CODE":
             self.emp_entry.delete(0, tk.END)
@@ -3017,7 +3123,7 @@ class EOLTesterGUI:
         """
         Read process status values from PLC - Enhanced Error Handling
         
-        Matches testconsole.cs ReadCoils() method logic with improved error handling:
+        Reads the process status coils:
         - Read coils individually
         - Return dictionary of address:value pairs
         - Return an empty dict when the PLC cannot be read. Never invent
@@ -3377,6 +3483,11 @@ class EOLTesterGUI:
                 finally:
                     self.loadcell2_client = None
             
+            # Release the part's program so the PLC is not left running it
+            # after the console closes.
+            if self.programSelectionPLCAddress and self.plc_client:
+                self.write_program_selection_to_plc(False)
+
             # PLC client cleanup
             self.disconnect_plc()
             
@@ -3693,6 +3804,10 @@ class EOLTesterGUI:
             
             # Start blinking effect for all placed labels
             self.start_label_blinking()
+
+            # Hand the worker thread the sensors to read for these labels
+            self.sensor_states = {}
+            self.sensor_label_keys = list(self.placed_labels)
             
             # Update label info
             if self.placed_labels:
@@ -3852,7 +3967,7 @@ class EOLTesterGUI:
                 self.emp_entry.configure(bg="white")
 
     def validate_employee_code(self, event=None):
-        """Validate employee code against EmployeeCodes.txt - the reference flow Implementation"""
+        """Validate employee code against EmployeeCodes.txt"""
         emp_code = self.emp_entry.get().strip()
         if emp_code == "EMP CODE" or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
@@ -3908,7 +4023,6 @@ class EOLTesterGUI:
                 self.test_database_connection()
                 
             else:
-                # Exact error message from the reference flow
                 messagebox.showerror(
                     "Unauthorized Employee", 
                     f"Employee code: {emp_code} is NOT AUTHORIZED to operate this machine, please consult SUPERVISOR."
@@ -3926,11 +4040,8 @@ class EOLTesterGUI:
             return
 
     def process_alc_code_cs_style(self, alc_code):
-        """Process ALC code with the reference flow logic"""
+        """Load the part for a scanned ALC code and start testing it."""
         try:
-            # Wait for complete input
-            time.sleep(self.alcInput_TimeInterval / 1000.0)  # Convert ms to seconds
-            
             # Make ALC entry read-only
             self.alc_entry.configure(state='readonly')
             
@@ -3958,7 +4069,8 @@ class EOLTesterGUI:
                 MM_SUPPLIER_SECTION,
                 MM_IMAGE_PATH,
                 MM_BARCODE_LABEL_CODE,
-                MM_PLC_ADDRESS
+                MM_PLC_ADDRESS,
+                MM_LABEL_COORDINATES
             FROM TBL_MODEL_MASTER 
             WHERE MM_ALC_CODE = %s AND MM_STATUS = %s
             """
@@ -3967,6 +4079,7 @@ class EOLTesterGUI:
             
             if model_result:
                 # Store part information
+                self.current_alc_code = alc_code
                 self.partNumber = model_result['MM_PART_NUMBER']
                 self.modelName = model_result['MM_MODEL_NAME'] 
                 self.vendorCode = model_result['MM_VENDOR_CODE'] or ""
@@ -3979,10 +4092,15 @@ class EOLTesterGUI:
                 if hasattr(self, 'model_header'):
                     self.model_header.configure(text=f"{self.modelName} - {self.partNumber}")
                 
-                # Load part image
-                image_path = model_result['MM_IMAGE_PATH']
-                if image_path and os.path.exists(image_path):
-                    self.load_image_with_path(image_path)
+                # Load part image, then the sensor labels that sit on it
+                image_path = self.get_absolute_image_path(model_result['MM_IMAGE_PATH'])
+                if image_path and os.path.exists(image_path) and self.load_image_with_path(image_path):
+                    coordinates = model_result['MM_LABEL_COORDINATES']
+                    if coordinates:
+                        try:
+                            self.place_labels_from_positions(json.loads(coordinates))
+                        except json.JSONDecodeError:
+                            messagebox.showwarning("Warning", "Invalid label coordinate data")
                 
                 # Handle barcode print file
                 self.barcodePrintFileName = model_result['MM_BARCODE_LABEL_CODE'] or ""
@@ -3994,7 +4112,6 @@ class EOLTesterGUI:
                 
                 # ===================================================================
                 # NOTE: Write to PLC during ALC code processing
-                # testconsole.cs lines 315-328
                 # These writes TRIGGER the PLC to start the test automatically
                 # ===================================================================
                 
@@ -4051,7 +4168,7 @@ class EOLTesterGUI:
                 
                 # ===================================================================
                 # NOTE: Auto-start test after ALC code processing
-                # Immediately calls start_CheckAsync
+                # Immediately calls start_check_async
                 # Test begins automatically without button click
                 # ===================================================================
                 
@@ -4519,7 +4636,7 @@ class EOLTesterGUI:
                     self.process_status_labels['1st'].config(bg="#00BFFF")
                 
                 # Start the test)
-                print("🔄 Calling start_CheckAsync() - ReadCoils() loop will begin...")
+                print("🔄 Calling start_check_async() - coil read loop will begin...")
                 self.start_check_async()
                 
             else:
@@ -4595,9 +4712,9 @@ class EOLTesterGUI:
         self.safe_update_message("Starting test process...", "blue")
         
         # In full implementation, this would start:
-        # 1. ReadCoils() - PLC status monitoring
-        # 2. ReadSensorInputs() - Sensor monitoring  
-        # 3. ReadInputRegisters() - Load cell/pressure monitoring
+        # 1. PLC status coils
+        # 2. Part-presence sensors
+        # 3. Load cell/position registers
         
         # Start real PLC monitoring process
         self.root.after(1000, self.start_real_plc_test_process)
@@ -4605,7 +4722,6 @@ class EOLTesterGUI:
     def start_real_plc_test_process(self):
         """
         Start real PLC-controlled testing process
-        Equivalent to: ReadCoils and ReadSensorInputs loops (lines 454-559)
         
         NOTE: PLC writes already done in process_alc_code_cs_style()
               This method ONLY starts the continuous read loops
@@ -4622,7 +4738,7 @@ class EOLTesterGUI:
                 self.safe_update_message("PLC not connected - cannot start test", "red")
                 return
             
-            print("✅ PLC connected - starting ReadCoils() loop")
+            print("✅ PLC connected - starting coil read loop")
             
             # ===================================================================
             # PLC LABEL COLORING: Set Test label to GREEN when test process starts
@@ -4645,7 +4761,7 @@ class EOLTesterGUI:
             # This would monitor input sensors if configured
             
             print("✅ Monitoring loops started")
-            print("   📖 ReadCoils() - monitoring process status")
+            print("   📖 Monitoring process status coils")
             print("   📖 Reading coils every 200ms")
             print("   ⏳ Waiting for rcvdTestRslt = True")
             
@@ -4695,14 +4811,93 @@ class EOLTesterGUI:
                 
                 # Also read input registers for loadcell/pressure data (the input register step)
                 self._read_all_input_registers()
-                
+
+                # And the part-presence sensors behind the labels on the image
+                self._read_sensor_inputs()
+
                 # Wait 200ms between reads
                 time.sleep(0.2)
-                
+
             except Exception as e:
                 print(f"Error in PLC read worker: {e}")
                 time.sleep(1)  # Wait longer on error
-    
+
+        # Let start_plc_status_monitoring() start a fresh worker next time.
+        self.plc_thread_running = False
+
+    def load_input_sensor_addresses(self):
+        """PLC input addresses from InputSensors.txt; label Ln reads the nth one."""
+        path = os.path.join(os.path.dirname(__file__), 'txt_files', 'InputSensors.txt')
+        try:
+            with open(path, 'r') as f:
+                return [a.strip() for a in f.read().split(',') if a.strip()]
+        except OSError as e:
+            print(f"Could not read input sensor addresses: {e}")
+            return []
+
+    def _read_sensor_inputs(self):
+        """Read the sensor behind each placed label - runs in the worker thread."""
+        if not self.plc_client or not self.sensor_label_keys:
+            return
+        if not self.input_sensor_addresses:
+            self.input_sensor_addresses = self.load_input_sensor_addresses()
+
+        states = {}
+        for key in self.sensor_label_keys:
+            index = int(key[1:]) - 1
+            if index >= len(self.input_sensor_addresses):
+                continue
+            try:
+                address = int(self.input_sensor_addresses[index][1:], 16)
+                result = self.plc_client.read_discrete_inputs(
+                    address, count=1, device_id=self.plc_station_id)
+                if not result.isError():
+                    states[key] = bool(result.bits[0])
+            except Exception as e:
+                print(f"Error reading sensor for {key}: {e}")
+        self.sensor_states = states
+
+    def apply_sensor_states(self):
+        """Show each sensor on its label: steady green when made, blinking when not."""
+        for key, is_on in self.sensor_states.items():
+            label = self.placed_labels.get(key)
+            if label is None:
+                continue
+            if is_on:
+                self.stop_label_blinking(key)
+                label.configure(bg="#00FF00")
+            elif key not in getattr(self, 'blinking_jobs', {}):
+                self.blink_label(label, key)
+
+    def update_camera_status(self, status_values):
+        """Show camera 1's verdict from its OK, NG and ON/OFF coils.
+
+        ProcessStatus.txt lists them after the eight process steps. Lines
+        without them have no camera, and cam1Result stays blank.
+        """
+        if len(self.process_addresses) < 11:
+            return
+
+        cam_ok = status_values.get(self.process_addresses[8], False)
+        cam_ng = status_values.get(self.process_addresses[9], False)
+        cam_on = status_values.get(self.process_addresses[10], False)
+
+        if not cam_on:
+            text, color = "CAMERA OFF", ui.TEXT_MUTED
+            self.cam1Result = "OFF"
+        elif cam_ok and cam_ng:
+            text, color = "CAMERA ERROR", "#FFA500"
+        elif cam_ok:
+            text, color = "CAMERA PASS", "#00AA00"
+            self.cam1Result = "PASS"
+        elif cam_ng:
+            text, color = "CAMERA NG", "#FF0000"
+            self.cam1Result = "NG"
+        else:
+            text, color = "CAMERA ON", ui.ACCENT
+
+        self.cam1_status.configure(text=text, text_color=color)
+
     def _read_all_input_registers(self):
         """Read all input registers and update internal values - runs in background thread"""
         try:
@@ -4710,7 +4905,7 @@ class EOLTesterGUI:
                 return
 
             # Once the PLC has reported a result the readings are frozen for
-            # scoring, as ReadInputRegisters stops on rcvdTestRslt.
+            # scoring.
             if self.rcvdTestRslt:
                 return
 
@@ -4754,8 +4949,7 @@ class EOLTesterGUI:
                         register_data[reg_addr_str] = raw
 
                         # Registers hold signed 16-bit values scaled by the
-                        # PLC: load in tenths, position in hundredths
-                        # (TestConsole.cs ReadInputRegisters).
+                        # PLC: load in tenths, position in hundredths.
                         signed = raw - 0x10000 if raw >= 0x8000 else raw
                         value = signed / 10.0 if i < 4 else signed / 100.0
 
@@ -4792,9 +4986,8 @@ class EOLTesterGUI:
     
     def monitor_plc_status(self):
         """
-        Continuously monitor PLC status and update UI - the reference flow Implementation Style
+        Continuously monitor PLC status and update UI
         
-        Matches testconsole.cs ReadCoils() method (lines 454-554):
         - Simple do-while loop that reads all coils
         - Updates label colors immediately (Lime/Green, OrangeRed/Red, DeepSkyBlue/Blue)
         - Continues until test result is received
@@ -4812,15 +5005,16 @@ class EOLTesterGUI:
             try:
                 status_values = self.plc_status_queue.get_nowait()
             except queue.Empty:
-                # No new data available, try direct read as fallback
-                try:
-                    status_values = self.read_process_status_values()
-                except Exception as e:
-                    print(f"⚠️ Fallback PLC read failed: {e}")
-                    status_values = {}
-            
+                # Nothing new from the worker yet. Reading the PLC from here
+                # instead would stall the window behind the worker's request.
+                status_values = {}
+
+            self.apply_sensor_states()
+
             # Update UI labels based on coil values
             if status_values and hasattr(self, 'process_addresses') and self.process_addresses:
+                self.update_camera_status(status_values)
+
                 # mapping: processStatusArray indices
                 # [0]=AUTO, [1]=HOME, [2]=PULL1_OK, [3]=PULL1_NG, 
                 # [4]=PULL2_OK, [5]=PULL2_NG, [6]=TESTRESULT_OK, [7]=TESTRESULT_NG
@@ -4909,7 +5103,6 @@ class EOLTesterGUI:
                         self.awaiting_result_clear = False
             
             # Continue monitoring loop (a 200ms pause)
-            # Use 200ms delay to match the reference flow
             if self.status_monitoring_active:
                 self.root.after(200, self.monitor_plc_status)
             else:
@@ -5231,6 +5424,8 @@ class EOLTesterGUI:
         # Reset flags
         self.rcvdTestRslt = False
         self.cam1Result = ""
+        if hasattr(self, 'cam1_status'):
+            self.cam1_status.configure(text="No image", text_color=ui.TEXT_MUTED)
 
     def reset_measurements(self):
         """Zero the readings so the next test's peaks start from nothing."""
@@ -5392,7 +5587,9 @@ class EOLTesterGUI:
             
             # Replace all placeholders with actual values
             replacements = {
-                '@alcCode@': self.alc_entry.get() if hasattr(self, 'alc_entry') else '',
+                # The ALC box is cleared once the part loads, so use the
+                # code the part was loaded with.
+                '@alcCode@': self.current_alc_code,
                 '@partNumber@': self.partNumber,
                 '@modelName@': self.modelName,
                 '@vendorCode@': self.vendorCode,
@@ -5419,87 +5616,93 @@ class EOLTesterGUI:
             for placeholder, value in replacements.items():
                 print_file_text = print_file_text.replace(placeholder, str(value))
             
-            # Create temporary file for printing
-            import tempfile
-            import uuid
-            
-            temp_filename = os.path.join(tempfile.gettempdir(), f"EOL_LABEL_{uuid.uuid4().hex}.prn")
-            
-            try:
-                with open(temp_filename, 'w') as f:
-                    f.write(print_file_text)
-                
-                # Simulate printing delay
-                time.sleep(0.2)
-                
-                # Here you would send to actual printer
-                # For simulation, just print the file path
-                print(f"Barcode label printed to: {temp_filename}")
-                
-                # Start waiting for barcode scan verification
-                self.wait_for_barcode_scan()
-                
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_filename):
-                    try:
-                        os.remove(temp_filename)
-                    except:
-                        pass
-                        
+            printer_name = config.get('LABEL_PRINTER_NAME', 'EOL_LABEL_PRNTR')
+            send_raw_to_printer(printer_name, print_file_text.encode('utf-8'))
+            print(f"Barcode label sent to printer: {printer_name}")
+
+            # Start waiting for barcode scan verification
+            self.wait_for_barcode_scan()
+
         except Exception as e:
             print(f"Error printing barcode label: {e}")
             messagebox.showerror("Print Error", f"Printing failed: {e}")
 
     def wait_for_barcode_scan(self):
-        """Wait for barcode scan verification"""
-        try:
-            print("Waiting for barcode scan verification...")
-            
-            # Enable barcode scan input (simulated)
-            self.printedLabelScanDataInput_Received = False
-            
-            # Wait for scan input with timeout. There is no scanner input
-            # yet, so an unscanned label is recorded as '***' - never as a
-            # made-up OK.
-            self.root.after(self.printedLabelScanDataInput_WaitTime, self.check_barcode_scan_timeout)
-            
-        except Exception as e:
-            print(f"Error waiting for barcode scan: {e}")
+        """Open the scan box for the label just printed and start its timeout."""
+        self.printedLabelScanDataInput_Received = False
+        self.awaiting_label_scan = True
+        self.label_scan_code = self.traceabilityCode
 
-    def check_barcode_scan_timeout(self):
-        """Check if barcode scan timed out"""
-        if not self.printedLabelScanDataInput_Received:
-            # Scanner could not detect any barcode - update scan result as '***'
-            self.update_scan_result("***")
+        self.label_scan_entry.configure(state='normal')
+        self.label_scan_entry.delete(0, tk.END)
+        self.label_scan_entry.focus_set()
+        self.safe_update_message("Scan the printed label...", "blue")
+
+        code = self.label_scan_code
+        self.root.after(self.printedLabelScanDataInput_WaitTime,
+                        lambda: self.check_barcode_scan_timeout(code))
+
+    def check_barcode_scan_timeout(self, code):
+        """Record '***' when the label printed for code was never scanned."""
+        if self.awaiting_label_scan and self.label_scan_code == code                 and not self.printedLabelScanDataInput_Received:
+            self.close_label_scan()
+            self.update_scan_result("***", code)
             print("Barcode scan timed out - marked as '***'")
 
-    def process_barcode_scan_result(self, scanned_text):
-        """Process barcode scan result"""
+    def on_label_scan_key(self, event=None):
+        """Treat the first character as the scan starting.
+
+        Scanners that send no Enter are read once PRINTED_LABEL_SCAN_TIME_INTERVAL
+        has passed, which is long enough for the whole code to arrive.
+        """
+        if (not self.awaiting_label_scan or self.printedLabelScanDataInput_Received
+                or not self.label_scan_entry.get()):
+            return
+        self.printedLabelScanDataInput_Received = True
+        self.root.after(self.printedLabelScanDataInput_TimeInterval, self.submit_label_scan)
+
+    def submit_label_scan(self, event=None):
+        """Check the scanned label against the code it was printed with."""
+        if not self.awaiting_label_scan:
+            return "break"
+        scanned = self.label_scan_entry.get().strip()
+        if not scanned:
+            return "break"
+        self.printedLabelScanDataInput_Received = True
+        code = self.label_scan_code
+        self.close_label_scan()
+        self.process_barcode_scan_result(scanned, code)
+        return "break"
+
+    def close_label_scan(self):
+        self.awaiting_label_scan = False
+        self.label_scan_entry.delete(0, tk.END)
+        self.label_scan_entry.configure(state='disabled')
+
+    def process_barcode_scan_result(self, scanned_text, code):
+        """Record OK when the scanned label carries code, otherwise NG and alert."""
         try:
-            self.printedLabelScanDataInput_Received = True
-            
-            if self.traceabilityCode in scanned_text:
-                self.update_scan_result("OK")
+            if code and code in scanned_text:
+                self.update_scan_result("OK", code)
+                self.safe_update_message("Label scan OK", "green")
                 print("Barcode scan successful - marked as 'OK'")
             else:
-                self.update_scan_result("NG")
+                self.update_scan_result("NG", code)
                 print("Barcode scan failed - marked as 'NG'")
                 
-                # Activate PLC alert if configured
-                if self.alertOnPLCCoilAddress:
-                    self.activate_plc_alert()
+                # Sound the line alert
+                self.activate_plc_alert()
                 
                 messagebox.showwarning(
                     "Scan NG",
-                    "Barcode Scan found NG.\\nDo NOT fix the Barcode Label to the part.\\nPaste it on Production Log Book as NG."
+                    "Barcode Scan found NG.\nDo NOT fix the Barcode Label to the part.\nPaste it on Production Log Book as NG."
                 )
             
         except Exception as e:
             print(f"Error processing barcode scan result: {e}")
 
-    def update_scan_result(self, result):
-        """Update barcode scan result in database"""
+    def update_scan_result(self, result, code):
+        """Record the scan result against the test whose label carries code."""
         try:
             connection = self.get_database_connection()
             if not connection:
@@ -5512,7 +5715,7 @@ class EOLTesterGUI:
             SET TD_BARCODE_SCAN_RESULT = %s
             WHERE TD_PART_NUMBER = %s AND TD_TRACEABILITY_CODE = %s
             """
-            cursor.execute(update_query, (result, self.partNumber, self.traceabilityCode))
+            cursor.execute(update_query, (result, self.partNumber, code))
             connection.commit()
             
             cursor.close()
@@ -5535,7 +5738,7 @@ class EOLTesterGUI:
                     coil_address = int(self.alertOnPLCCoilAddress[1:], 16)
                     
                     # Turn alert ON
-                    result = self.plc_client.write_coil(coil_address, True, device_id=self.slaveAddress)
+                    result = self.plc_client.write_coil(coil_address, True, device_id=self.plc_station_id)
                     if result.isError():
                         print(f"Error activating PLC alert: {result}")
                     else:
@@ -5543,6 +5746,9 @@ class EOLTesterGUI:
                         
                         # Schedule alert OFF after timeout
                         self.root.after(self.alertOn_TimeInterval, lambda: self.deactivate_plc_alert(coil_address))
+                else:
+                    messagebox.showerror("Error", f"Alert On PLC Coil Address '{self.alertOnPLCCoilAddress}' "
+                                                  "is not an M coil address (e.g. M1001).")
             else:
                 messagebox.showerror("Error", "Alert On PLC Coil Address text file is either missing or empty!!")
                 
@@ -5553,7 +5759,7 @@ class EOLTesterGUI:
         """Deactivate PLC alert signal"""
         try:
             if self.plc_client:
-                result = self.plc_client.write_coil(coil_address, False, device_id=self.slaveAddress)
+                result = self.plc_client.write_coil(coil_address, False, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error deactivating PLC alert: {result}")
                 else:
@@ -5594,8 +5800,10 @@ class EOLTesterGUI:
         # Log part number entry attempt
         self.log_operator_action("PART_NUMBER_ENTRY", f"ALC Code: {alc_code}", self.current_employee_id)
         
-        # Call the test flow
-        threading.Thread(target=self.process_alc_code_cs_style, args=(alc_code,), daemon=True).start()
+        # Look the part up on the Tk thread: the lookup builds widgets and
+        # shows dialogs, which Tkinter only allows from this thread. The code
+        # arrives complete on Enter, so there is no settling wait.
+        self.process_alc_code_cs_style(alc_code)
         return
 
         try:
@@ -6758,38 +6966,20 @@ class EOLTesterGUI:
             self.root.destroy()
 
     def next_label_command(self):
-        """Process test results, save to database, disconnect PLC, wait 2s, reconnect, and reset for next cycle"""
-        try:
-            print("=== CYCLE COMPLETION STARTED ===")
-            
-            # Get current iteration number
-            current_iteration = getattr(self, 'iteration_count', 1)
-            
-            # Check if we have a valid lot number, auto-generate if needed
-            lot_number = getattr(self, 'current_lot_number', None)
-            print(f"LOT Number: {lot_number}")
-            
-            if not lot_number:
-                # Auto-generate lot number if not already generated
-                if (hasattr(self, 'current_part_number') and self.current_part_number and 
-                    self.emp_entry.get() and self.emp_entry.get() != "EMP CODE"):
-                    lot_number = self.generate_lot_number()
-                    self.current_lot_number = lot_number
-                    print(f"Auto-generated LOT number {lot_number} for cycle completion")
-                else:
-                    messagebox.showwarning("Warning", "Cannot generate LOT number - missing part number or employee code")
-                    return
-                
-            # Check if we have a current part number
-            part_number = getattr(self, 'current_part_number', None)
-            print(f"Part Number: {part_number}")
-            
-            # Save test results first
-            self.save_test_results_and_cycle_reset(lot_number, part_number)
-            
-        except Exception as e:
-            print(f"Error in cycle completion: {e}")
-            messagebox.showerror("Error", f"Cycle completion failed: {str(e)}")
+        """Record the test on the machine now, without waiting for the PLC.
+
+        It goes through the same scoring and saving as a result the PLC
+        reports, so the test lands in the same tables either way.
+        """
+        if not getattr(self, 'current_part_number', None):
+            messagebox.showwarning("Next Label", "Load a part before recording a test.")
+            return
+        if self.rcvdTestRslt:
+            return  # a result is already being recorded
+
+        # Freeze the readings, as a PLC-reported result does
+        self.rcvdTestRslt = True
+        self.test_result_command()
 
     def save_test_results_and_cycle_reset(self, lot_number, part_number):
         """Save test results, disconnect PLC, wait 2s, reconnect, and reset for next cycle"""
