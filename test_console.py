@@ -262,6 +262,8 @@ class EOLTesterGUI:
         self.rcvdTestRslt = False
         self.awaiting_result_clear = False
         self.plc_status_loop_running = False
+        # Why the last coil write failed, for the START button to report
+        self.last_plc_error = ""
         # Most recent coil snapshot from the worker thread, for code on the
         # Tk thread that must not wait on the PLC itself
         self.latest_plc_status = {}
@@ -584,17 +586,22 @@ class EOLTesterGUI:
             messagebox.showerror("Start Test", "The PLC is not connected.")
             return
 
+        # Each failed write says which coil it tried and what the PLC answered
+        not_m_coil = "address missing or not an M coil (e.g. M1000)"
         failed = []
+        self.last_plc_error = not_m_coil
         if not self.write_program_selection_to_plc():
-            failed.append(f"Program Select ({self.programSelectionPLCAddress or 'not set'})")
+            failed.append(f"Program Select {self.programSelectionPLCAddress or '(not set)'}"
+                          f" - {self.last_plc_error}")
+        self.last_plc_error = not_m_coil
         if not self.write_machine_on_to_plc():
-            failed.append(f"Machine On ({self.machineOnPLCCoilAddress or 'not set'})")
+            failed.append(f"Machine On {self.machineOnPLCCoilAddress or '(not set)'}"
+                          f" - {self.last_plc_error}")
         if failed:
             messagebox.showerror(
                 "Start Test",
                 "The test was not started. Could not write:\n\n"
-                + "\n".join(f"  - {item}" for item in failed)
-                + "\n\nCoil addresses must be M coils, e.g. M1000.")
+                + "\n".join(f"  - {item}" for item in failed))
             return
 
         self.log_operator_action("TEST_START", "Started from the START button")
@@ -2758,6 +2765,7 @@ class EOLTesterGUI:
                 result = self.plc_client.write_coil(coil_address, value, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error writing program selection to PLC: {result}")
+                    self.last_plc_error = f"coil {coil_address}: {result}"
                     return False
                 else:
                     print(f"✅ Program selection written: {self.programSelectionPLCAddress} = {value}")
@@ -2765,6 +2773,7 @@ class EOLTesterGUI:
             return False
         except Exception as e:
             print(f"Error writing program selection to PLC: {e}")
+            self.last_plc_error = str(e)
             return False
 
     def write_machine_on_to_plc(self):
@@ -2782,6 +2791,7 @@ class EOLTesterGUI:
                 result = self.plc_client.write_coil(coil_address, True, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error writing machine on signal to PLC: {result}")
+                    self.last_plc_error = f"coil {coil_address}: {result}"
                     return False
                 else:
                     print(f"✅ Machine On written: {self.machineOnPLCCoilAddress}")
@@ -2791,6 +2801,7 @@ class EOLTesterGUI:
                 return False
         except Exception as e:
             print(f"Error writing machine on signal to PLC: {e}")
+            self.last_plc_error = str(e)
             return False
 
     def display_data(self):
