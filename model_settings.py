@@ -44,7 +44,7 @@ class WorkspaceApp:
 
         # Style configuration
         self.style = ttk.Style()
-        self.style.configure("Header.TLabel", font=('Arial', 12, 'bold'), background='navy', foreground='white')
+        self.style.configure("Header.TLabel", font=ui.FONT_SECTION, background=ui.NAVY, foreground=ui.TEXT_ON_DARK)
         self.style.configure("Custom.TEntry", padding=5)
         
         self.image_uploaded = False  # Flag to track image upload
@@ -70,9 +70,13 @@ class WorkspaceApp:
         self.disable_components()
 
     def setup_ui(self):
+        # The pink title bar every console carries, outside the scrolling
+        # area so it stays in view
+        ui.page_header(self.root, "Model Settings")
+
         # The page is laid out at fixed sizes and is taller and wider than a
         # smaller screen, so it scrolls rather than losing the edges.
-        self.page_scroller = ui.scrollable(self.root, horizontal=True)
+        self.page_scroller= ui.scrollable(self.root, horizontal=True)
         self.page_scroller.pack(fill=tk.BOTH, expand=True)
         
         # Create main container
@@ -116,7 +120,8 @@ class WorkspaceApp:
         self.quadrants = []
         
         # First quadrant (Image Display)
-        first_quadrant = tk.Frame(self.workspace_frame, bg=ui.SURFACE)
+        first_quadrant = tk.Frame(self.workspace_frame, bg=ui.SURFACE,
+                                  highlightthickness=1, highlightbackground=ui.BORDER)
         first_quadrant.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         first_quadrant.grid_propagate(False)
         first_quadrant.config(width=800, height=600)  # This sets the overall quadrant size
@@ -131,7 +136,7 @@ class WorkspaceApp:
         self.coord_label = tk.Label(first_quadrant, 
                                   text="Coordinates: ", 
                                   bg=ui.SURFACE,
-                                  font=('Arial', 10))
+                                  font=(ui.FONT_FAMILY, 10))
         self.coord_label.place(relx=0.02, rely=0.95)
         
         # Create second quadrant
@@ -175,11 +180,12 @@ class WorkspaceApp:
             container.grid_columnconfigure(i, weight=1)
             
             # Header
-            header_label = tk.Label(section_frame, 
+            header_label = tk.Label(section_frame,
                                   text=header,
-                                  bg="navy",
-                                  fg="white",
-                                  font=("Arial", 12, "bold"))
+                                  bg=ui.NAVY,
+                                  fg=ui.TEXT_ON_DARK,
+                                  pady=ui.PAD,
+                                  font=ui.FONT_SECTION)
             header_label.pack(fill=tk.X)
             
             # Content frame
@@ -368,9 +374,9 @@ class WorkspaceApp:
         # Create header label "PART DETAILS"
         header_label = tk.Label(main_container, 
                               text="PART DETAILS",
-                              font=('Arial', 12, 'bold'),
-                              bg='deepskyblue',
-                              fg='navy',
+                              font=ui.FONT_SECTION,
+                              bg=ui.NAVY,
+                              fg=ui.TEXT_ON_DARK,
                               anchor='w',
                               padx=10,
                               pady=5)
@@ -464,7 +470,7 @@ class WorkspaceApp:
                 activebackground=active_bg,
                 activeforeground=fg_color,
                 highlightbackground=bg_color,
-                font=('Arial', 10, 'bold')  # Make text bold
+                font=(ui.FONT_FAMILY, 10, 'bold')  # Make text bold
             )
             btn.pack(pady=5)
 
@@ -496,19 +502,6 @@ class WorkspaceApp:
         else:
             entry.config(fg='black')  # Keep actual text black
 
-    def on_text_focus_in(self, event, text_widget, placeholder):
-        """Handle text widget focus in - remove placeholder text"""
-        if text_widget.get("1.0", "end-1c") == placeholder:
-            text_widget.delete("1.0", tk.END)
-            text_widget.config(fg='white')
-
-    def on_text_focus_out(self, event, text_widget, placeholder):
-        """Handle text widget focus out - restore placeholder if empty"""
-        if text_widget.get("1.0", "end-1c").strip() == '':
-            text_widget.delete("1.0", tk.END)
-            text_widget.insert("1.0", placeholder)
-            text_widget.config(fg='white')
-
     def create_moveable_labels(self):
         # Create 16 moveable labels
         self.moveable_labels = []
@@ -530,24 +523,24 @@ class WorkspaceApp:
         button_styles = [
             {
                 'text': "RESET IMAGE LABELS",  # Clarified purpose
-                'main_color': "#ff4757",      
-                'hover_color': "#ff6b81",      
+                'main_color': ui.DANGER,
+                'hover_color': ui.DANGER_HOVER,
                 'width': 15,
                 'icon': "��",                 
                 'command': self.reset_labels   # Only resets the image labels
             },
             {
                 'text': "SAVE LABEL POSITIONS",  # Clarified purpose
-                'main_color': "#2ed573",      
-                'hover_color': "#7bed9f",      
+                'main_color': ui.SUCCESS,
+                'hover_color': ui.SUCCESS_HOVER,
                 'width': 15,
                 'icon': "💾",                 
                 'command': lambda: self.update_positions()  # Only saves label positions
             },
             {
                 'text': "UPLOAD NEW IMAGE",    # Clarified purpose
-                'main_color': "#1e90ff",      
-                'hover_color': "#70a1ff",      
+                'main_color': ui.SKY,
+                'hover_color': ui.ACCENT_HOVER,
                 'width': 15,
                 'icon': "📁",                 
                 'command': self.upload_image   # Only handles image upload
@@ -570,11 +563,11 @@ class WorkspaceApp:
 
             # Create the actual button
             btn = tk.Button(btn_frame,
-                          text=f"{style['icon']} {style['text']}",
-                          width=style['width'],
+                          text=style['text'],
+                          width=18,
                           bg=style['main_color'],
-                          fg="white",
-                          font=('Arial', 9, 'bold'),
+                          fg=ui.readable_on(style['main_color']),
+                          font=(ui.FONT_FAMILY, 10, 'bold'),
                           relief="flat",
                           bd=0,
                           padx=10,
@@ -1014,7 +1007,7 @@ class WorkspaceApp:
         # Reset the colors of all labels in the labels_frame back to original
         for child in self.labels_frame.winfo_children():
             if isinstance(child, tk.Label):
-                child.config(bg="lightblue")  # Reset to original color
+                child.config(bg="lightgray")  # Reset to original color
         
         # Clear the coordinates display
         self.coordinates_text.delete(1.0, tk.END)
