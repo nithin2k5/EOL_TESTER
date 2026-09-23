@@ -1236,6 +1236,11 @@ class EOLTesterGUI:
             self.sensor_label_keys = []
             self.sensor_states = {}
 
+            # next_model_command() disabled this while the closing NG cable
+            # check ran; with the part released, the next one can use it.
+            if getattr(self, 'next_model_btn', None):
+                self.next_model_btn.configure(state='normal')
+
             # Show ready message
             self.safe_update_message(f"Cycle restarted. Employee {self.current_employee_id} - Enter new Part Number", "green")
             
@@ -2394,10 +2399,16 @@ class EOLTesterGUI:
         Moving to another model closes out the current part, and the machine
         is not allowed to simply stop: the operator has to pull a known-bad
         cable through first, which proves the rig still reports a failure.
-        So this breaks the running check loop, clears the readings, and
-        restarts the loop in ending-validation mode, where validate_ng_cable()
-        waits for that failure before the part is released.
+        So this clears the readings and restarts the check in
+        ending-validation mode, where test_result_command() waits for that
+        failure before the part is released.
         """
+        # With no part loaded there is nothing to close out, and the check
+        # would never release the button again.
+        if not getattr(self, 'current_part_number', None):
+            messagebox.showinfo("Next Model", "No part is loaded.")
+            return
+
         if not messagebox.askyesno("Confirm Move",
                                    "Do you really want to move on to a different part?"):
             return
@@ -2405,8 +2416,8 @@ class EOLTesterGUI:
         try:
             self.breakLoop = True
 
-            # One closing validation at a time - the button comes back when
-            # the next part is loaded and the page resets.
+            # One closing validation at a time - execute_cycle_restart()
+            # turns the button back on once the check releases the part.
             if getattr(self, 'next_model_btn', None):
                 self.next_model_btn.configure(state='disabled')
 
