@@ -18,7 +18,6 @@ import math
 import config
 import db
 import ui
-import customtkinter as ctk
 
 
 class SerializedModbusClient:
@@ -78,6 +77,45 @@ def send_raw_to_printer(printer_name, data):
             winspool.EndDocPrinter(handle)
     finally:
         winspool.ClosePrinter(handle)
+
+
+class FooterMessage(tk.Label):
+    """The machine status line in the footer.
+
+    show(message, colour) takes the colour words the console passes. While
+    there is a message it blinks, so it catches the eye from across the cell.
+    """
+
+    INK = {'green': '#008000', 'red': '#FF0000', 'orange': '#FF8C00',
+           'blue': '#0000FF', 'black': '#000000'}
+    SHOWN_MS = 800
+    HIDDEN_MS = 600
+
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._message = ''
+        self._visible = True
+        self._blink_job = None
+
+    def show(self, message, color='blue'):
+        ink = self.INK.get(str(color).lower(), color if str(color).startswith('#') else '#0000FF')
+        self._message = message
+        self._visible = True
+        self.configure(text=message, fg=ink)
+        if self._blink_job is not None:
+            self.after_cancel(self._blink_job)
+            self._blink_job = None
+        if message:
+            self._blink_job = self.after(self.SHOWN_MS, self._blink)
+
+    def _blink(self):
+        try:
+            self._visible = not self._visible
+            self.configure(text=self._message if self._visible else '')
+            delay = self.SHOWN_MS if self._visible else self.HIDDEN_MS
+            self._blink_job = self.after(delay, self._blink)
+        except tk.TclError:
+            self._blink_job = None  # the window has closed
 
 
 class EOLTesterGUI:
@@ -423,220 +461,697 @@ class EOLTesterGUI:
         self.loop_mode = "MANUAL"   # "MANUAL" or "MONITOR" 
         self.step_duration = 3.0    # Duration for each step in manual mode
 
+    # ------------------------------------------------------------------
+    # Layout
+    #
+    # The Test console is drawn to a fixed scheme - pink title and footer
+    # bars, a navy part header, sky-blue step lamps, black trend charts -
+    # that operators know from the line. Everything under main_container is
+    # built with exact_colors, so it keeps these colours rather than taking
+    # the dark theme the other pages use.
+    # ------------------------------------------------------------------
+
+    FONT = 'Cambria'
+    TITLE_PINK = '#FFB6C1'      # LightPink
+    FOOTER_PINK = '#FFC0CB'     # Pink
+    PANEL = '#F0F0F0'           # window grey behind the panels
+    NAVY = '#191970'            # MidnightBlue part header
+    SKY = '#00BFFF'             # DeepSkyBlue - an idle step lamp
+    AQUA = '#00FFFF'
+    YELLOW = '#FFFF00'
+    SILVER = '#C0C0C0'
+    POWDER = '#B0E0E6'          # PowderBlue counter strip
+    EDGE = '#A0A0A0'            # thin panel borders
+    PLACEHOLDER_INK = '#A9A9A9'
+    EMP_PLACEHOLDER = 'EMPLOYEE CODE'
+    ALC_PLACEHOLDER = 'ALC CODE'
+    SCAN_PLACEHOLDER = 'PRINTED LABEL SCAN DATA'
+    LABEL_COUNT = 16            # labels L1-L16, as Model Settings offers
+    IMAGE_WIDTH = 750           # the canvas Model Settings places labels on
+    IMAGE_HEIGHT = 450
+    # Screen height taken by everything but the part image: title, footer,
+    # part header, label row, lamps, window chrome, and the least the charts
+    # and results grid below can work with.
+    CHROME_HEIGHT = 590
+
     def setup_window(self):
         """Set up the window after initialization"""
         # Change from fullscreen to maximized state
         self.root.state('zoomed')  # Replace fullscreen with maximized state
         self.root.lift()  # Bring window to front
         self.root.focus_force()  # Force focus
-        
-        # Create the main_container first to ensure it exists before other operations
-        # Create main container
-        self.main_container = tk.Frame(self.root, bg=ui.APP_BG)
+
+        # Everything the console draws lives in here, in its own colours
+        self.main_container = tk.Frame(self.root, bg=self.PANEL, exact_colors=True)
         self.main_container.pack(fill="both", expand=True)
 
-        # The machine status line. This is what an operator looks at first
-        # when the line stops, so it is a filled, iconed strip rather than a
-        # word of coloured text - legible from standing distance at the cell.
-        self.message_label = ui.StatusBanner(self.main_container)
-        self.message_label.pack(fill="x", padx=ui.PAD, pady=(ui.PAD, 0))
-        
         # Make sure the settings file exists and is freshly read
         self.ensure_settings_file_exists()
-        
+
         # Load data after the settings are loaded
         self.load_configuration_data()
-        
+
         # Set up GUI components before connecting to devices
         self.setup_gui()
         self.setup_barcode_listener()
-        
+
         # Connect to devices after GUI is set up
         self.connect_to_devices()
-        
+
         # Connect to PLC after GUI setup
         self.root.after(2000, self.connect_to_plc)
-        
+
         # Initialize employee validation after GUI setup
         self.root.after(1000, self.initialize_employee_validation)
-        
+
         # Ensure window stays on top during initialization
         self.root.after(500, lambda: self.root.attributes('-topmost', False))
 
     def setup_gui(self):
-        # Main container and message label are already created in setup_window
-        # Do not recreate them here
-        
-        # Process control bar
+        self.configure_grid_styles()
         self.create_title_bar()
-        
-        # Main workspace
-        self.workspace = tk.Frame(self.main_container)
-        self.workspace.pack(fill="both", expand=True, padx=2, pady=2)
-        
-        # Force the workspace to update its geometry
-        self.root.update_idletasks()
-        
-        # Create quadrants
-        self.create_quadrants()
-        
-        # Footer
+        # The footer is packed before the workspace so the workspace takes
+        # whatever height is left between the two bars.
         self.create_footer()
 
+        self.workspace = tk.Frame(self.main_container, bg=self.PANEL)
+        self.workspace.pack(fill="both", expand=True, padx=3, pady=(3, 0))
+        self.create_quadrants()
+
+    def configure_grid_styles(self):
+        """White grids with a sky-blue header row, for the spec and results tables."""
+        style = ttk.Style()
+        for name, row_font, row_height in (("Spec.Eol.Treeview", (self.FONT, 13), 30),
+                                           ("Data.Eol.Treeview", (self.FONT, 10), 22)):
+            style.configure(name, background='white', fieldbackground='white',
+                            foreground='black', font=row_font, rowheight=row_height,
+                            borderwidth=1, bordercolor=self.EDGE)
+            style.map(name, background=[('selected', '#CCE8FF')],
+                      foreground=[('selected', 'black')])
+            style.configure(f"{name}.Heading", background=self.SKY, foreground='black',
+                            font=(self.FONT, 11, 'bold'), relief='flat', padding=(4, 6))
+            style.map(f"{name}.Heading", background=[('active', '#33CCFF')])
+
     def create_title_bar(self):
-        title_frame = tk.Frame(self.main_container, bg=ui.SURFACE)
-        title_frame.pack(fill="x")
+        bar = tk.Frame(self.main_container, bg=self.TITLE_PINK, height=60)
+        bar.pack(fill="x", padx=3, pady=(3, 0))
+        bar.pack_propagate(False)
 
-        # PLC Process Control Button
-        self.create_plc_control_section(title_frame)
-
-        # Process Status Indicator
-        self.create_process_status_indicator(title_frame)
-
-        # A hairline separating the bar from the workspace below
-        tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x")
-
-    def create_plc_control_section(self, parent_frame):
-        """Create PLC process control section in the title frame"""
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'assets', 'infac_india.png')
         try:
-            # Control card
-            control_frame = ui.ctk_card(parent_frame, corner_radius=ui.CORNER_RADIUS_SMALL)
-            control_frame.pack(side="left", padx=(0, ui.PAD), pady=ui.PAD)
+            logo = Image.open(logo_path)
+            logo.thumbnail((150, 54))
+            self.logo_image = ImageTk.PhotoImage(logo)
+            tk.Label(bar, image=self.logo_image, bg=self.TITLE_PINK).pack(side="left", padx=(8, 0))
+        except OSError as e:
+            print(f"Logo not shown: {e}")
 
-            # Control label
-            control_label = tk.Label(control_frame, text="Process Control",
-                                   font=ui.FONT_SMALL, bg=ui.SURFACE,
-                                   fg=ui.TEXT_MUTED)
-            control_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
+        # The machine this console runs, so photos and reports of the screen
+        # say which line they came from
+        tk.Label(bar, text=config.get('MACHINE_ID', ''), bg=self.TITLE_PINK, fg='black',
+                 font=(self.FONT, 24, 'bold')).pack(side="right", padx=12)
 
-            # Initialize process status
-            self.process_status = "LOW"  # HIGH or LOW
+        tk.Label(bar, text="EOL (END OF LINE) TESTER", bg=self.TITLE_PINK, fg='black',
+                 font=(self.FONT, 30, 'bold')).place(relx=0.5, rely=0.5, anchor='center')
 
-            # Process control button - starts disabled until ALC code is
-            # processed; toggle_process_status() and the monitoring loop
-            # recolour it live via fg_color, same as any other CTkButton.
-            self.process_control_btn = ui.ctk_button(
-                control_frame, text="START TESTING", icon='play', kind='success',
-                width=150, command=self.toggle_process_status, state='disabled')
-            self.process_control_btn.pack(padx=ui.PAD, pady=(0, ui.PAD))
+    def create_footer(self):
+        bar = tk.Frame(self.main_container, bg=self.FOOTER_PINK, height=34)
+        bar.pack(fill="x", side="bottom", padx=3, pady=3)
+        bar.pack_propagate(False)
 
-        except Exception as e:
-            print(f"Error creating PLC control section: {e}")
+        tk.Label(bar, text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
+                 bg=self.FOOTER_PINK, fg='black',
+                 font=(self.FONT, 11, 'bold')).pack(side="left", padx=8)
+        tk.Label(bar, text="*** Scan Result denotes Scanner NOT IN USE or Invalid/Unreadable Barcode Label",
+                 bg=self.FOOTER_PINK, fg='black',
+                 font=(self.FONT, 11, 'bold')).pack(side="right", padx=8)
 
-    def create_process_status_indicator(self, parent_frame):
-        """Create process status indicator in the title frame"""
-        try:
-            # Status card
-            status_frame = ui.ctk_card(parent_frame, corner_radius=ui.CORNER_RADIUS_SMALL)
-            status_frame.pack(side="left", padx=(0, ui.PAD_LARGE), pady=ui.PAD)
+        # The machine status line, between the two
+        self.message_label = FooterMessage(bar, bg=self.FOOTER_PINK,
+                                           font=(self.FONT, 14, 'bold'))
+        self.message_label.pack(side="left", fill="x", expand=True)
 
-            # Status label
-            status_label = tk.Label(status_frame, text="Process Status",
-                                  font=ui.FONT_SMALL, bg=ui.SURFACE,
-                                  fg=ui.TEXT_MUTED)
-            status_label.pack(padx=ui.PAD_LARGE, pady=(ui.PAD, 2))
+    def create_quadrants(self):
+        # Part and charts on the left, specs and results on the right; the
+        # top row sizes to the part image, the bottom row takes the rest.
+        self.workspace.grid_columnconfigure(0, weight=56, uniform='column')
+        self.workspace.grid_columnconfigure(1, weight=44, uniform='column')
+        self.workspace.grid_rowconfigure(0, weight=0)
+        self.workspace.grid_rowconfigure(1, weight=1)
 
-            # Initialize process indicator status
-            self.process_indicator_status = "IDLE"  # IDLE, RUNNING, COMPLETED, FAILED
+        self.q1 = self.create_first_quadrant()
+        self.q2 = self.create_second_quadrant()
+        self.q3 = self.create_third_quadrant()
+        self.q4 = self.create_fourth_quadrant()
 
-            # Status indicator (LED-style) - update_process_indicator()
-            # recolours this via text_color.
-            self.status_indicator = ctk.CTkLabel(
-                status_frame, text="● IDLE", font=ui.FONT_BODY_BOLD,
-                fg_color=ui.SURFACE, text_color=ui.TEXT_MUTED, width=100)
-            self.status_indicator.pack(padx=ui.PAD, pady=(0, ui.PAD))
+        self.q1.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=(0, 2))
+        self.q2.grid(row=0, column=1, sticky="nsew", padx=(2, 0), pady=(0, 2))
+        self.q3.grid(row=1, column=0, sticky="nsew", padx=(0, 2), pady=(2, 0))
+        self.q4.grid(row=1, column=1, sticky="nsew", padx=(2, 0), pady=(2, 0))
 
-        except Exception as e:
-            print(f"Error creating process status indicator: {e}")
+    def create_first_quadrant(self):
+        """Part header, part image with its labels, and the five step lamps."""
+        panel = tk.Frame(self.workspace, bg=self.PANEL)
 
-    def toggle_process_status(self):
+        self.model_header = tk.Label(panel, text="MODEL NAME / PART NAME - PART NUMBER",
+                                     bg=self.NAVY, fg='white', pady=6,
+                                     font=(self.FONT, 18, 'bold'))
+        self.model_header.pack(fill="x")
+
+        picture = tk.Frame(panel, bg='white', highlightthickness=1,
+                           highlightbackground=self.EDGE)
+        picture.pack(fill="x")
+
+        # Model Settings places labels on a 750x450 canvas. This one is that
+        # size scaled to the screen, and label positions scale with it.
+        self.image_scale = self.pick_image_scale()
+        self.image_frame = tk.Frame(picture, bg='white',
+                                    width=round(self.IMAGE_WIDTH * self.image_scale),
+                                    height=round(self.IMAGE_HEIGHT * self.image_scale))
+        self.image_frame.pack(pady=(4, 0))
+        self.image_frame.pack_propagate(False)
+        self.show_image_placeholder()
+
+        # The labels a part can use. One moves up onto the image while its
+        # part is loaded, as it does in Model Settings.
+        row = tk.Frame(picture, bg='white')
+        row.pack(fill="x", padx=8, pady=(2, 4))
+        self.label_row = {}
+        for number in range(1, self.LABEL_COUNT + 1):
+            key = f"L{number}"
+            tag = tk.Label(row, text=key, bg='white', fg='black',
+                           font=(self.FONT, 11, 'bold'))
+            tag.pack(side="left", padx=(0, 12))
+            self.label_row[key] = tag
+
+        lamps = tk.Frame(panel, bg=self.PANEL)
+        lamps.pack(fill="x", pady=(4, 0))
+        self.process_status_labels = {}
+        steps = (('auto', 'AUTO'), ('home', 'HOME'),
+                 ('1st', '1st PULL\n(Load Test)'), ('2nd', '2nd PULL\n(Length Test)'),
+                 ('test', 'TEST\nRESULT'))
+        for column, (key, text) in enumerate(steps):
+            lamps.grid_columnconfigure(column, weight=1, uniform='lamp')
+            lamp = tk.Label(lamps, text=text, bg=self.SKY, fg='black', height=2,
+                            font=(self.FONT, 16, 'bold'))
+            lamp.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 0))
+            self.process_status_labels[key] = lamp
+            # The monitoring loop addresses them as auto_label, home_label ...
+            setattr(self, f"{key}_label", lamp)
+
+        return panel
+
+    def create_second_quadrant(self):
+        """Specification grid over the camera and printed-label scan boxes."""
+        panel = tk.Frame(self.workspace, bg=self.PANEL)
+
+        # Cameras first, packed to the bottom, so the grid takes the rest
+        cameras = tk.Frame(panel, bg=self.PANEL)
+        cameras.pack(fill="x", side="bottom", pady=(4, 0))
+        cameras.grid_columnconfigure(0, weight=1, uniform='camera')
+        cameras.grid_columnconfigure(1, weight=1, uniform='camera')
+        cameras.grid_columnconfigure(2, weight=2, uniform='camera')
+
+        def group(column, title):
+            box = tk.LabelFrame(cameras, text=title, bg=self.PANEL, fg='black',
+                                font=(self.FONT, 9, 'bold'), bd=1, relief='groove')
+            box.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 4, 0))
+            return box
+
+        self.cam1_status = tk.Label(group(0, "CAMERA 1"), text="CAMERA ONE\nSTATUS",
+                                    bg=self.SKY, fg='black', height=2,
+                                    font=(self.FONT, 15, 'bold'))
+        self.cam1_status.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        # Camera 2 has no PLC signals yet, so it stays at rest
+        self.cam2_status = tk.Label(group(1, "CAMERA 2"), text="CAMERA TWO\nSTATUS",
+                                    bg=self.SILVER, fg='black', height=2,
+                                    font=(self.FONT, 15, 'bold'))
+        self.cam2_status.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        # Where the printed label gets scanned back in. It only opens while a
+        # freshly printed label is waiting to be checked.
+        self.label_scan_entry = tk.Entry(group(2, "PRINTED LABEL SCAN DATA"),
+                                         bg=self.AQUA, fg='black',
+                                         disabledbackground=self.AQUA,
+                                         disabledforeground=self.PLACEHOLDER_INK,
+                                         insertbackground='black',
+                                         font=(self.FONT, 11, 'bold'), justify="center",
+                                         relief="sunken", bd=1)
+        self.label_scan_entry.pack(fill="both", expand=True, padx=6, pady=(0, 6), ipady=16)
+        self.label_scan_entry.insert(0, self.SCAN_PLACEHOLDER)
+        self.label_scan_entry.configure(state='disabled')
+        self.label_scan_entry.bind("<Return>", self.submit_label_scan)
+        self.label_scan_entry.bind("<KeyRelease>", self.on_label_scan_key)
+
+        spec_frame = tk.Frame(panel, bg='white', highlightthickness=1,
+                              highlightbackground=self.EDGE)
+        spec_frame.pack(fill="both", expand=True)
+
+        # Column ids stay as the scoring code knows them; the headings are
+        # what the operator reads.
+        headings = {"Description": "DESCRIPTION", "Device": "DEVICE", "Unit": "UNIT",
+                    "Min": "SPEC MIN", "Max": "SPEC MAX", "Actual": "ACTUAL",
+                    "Result": "RESULT"}
+        # Small starting widths that stretch to fill, so the grid fits
+        # whatever width the screen leaves it
+        widths = {"Description": 170, "Device": 60, "Unit": 55, "Min": 65,
+                  "Max": 65, "Actual": 65, "Result": 65}
+        self.spec_tree = ttk.Treeview(spec_frame, columns=tuple(headings), show="headings",
+                                      height=8, style="Spec.Eol.Treeview")
+        for column, heading in headings.items():
+            self.spec_tree.heading(column, text=heading)
+            self.spec_tree.column(column, width=widths[column], minwidth=40, stretch=True,
+                                  anchor='w' if column == "Description" else 'center')
+        self.spec_tree.pack(fill="both", expand=True)
+
+        return panel
+
+    def create_third_quadrant(self):
+        """The load and length trend charts, stacked on black."""
+        panel = tk.Frame(self.workspace, bg='black', highlightthickness=1,
+                         highlightbackground=self.EDGE)
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(0, weight=1)
+        panel.grid_rowconfigure(1, weight=1)
+
+        self.load_canvas = tk.Canvas(panel, bg='black', highlightthickness=0, height=120)
+        self.load_canvas.grid(row=0, column=0, sticky="nsew")
+        self.length_canvas = tk.Canvas(panel, bg='black', highlightthickness=0, height=120)
+        self.length_canvas.grid(row=1, column=0, sticky="nsew")
+
+        self.load_canvas.bind('<Configure>', lambda e: self.draw_load_graph())
+        self.length_canvas.bind('<Configure>', lambda e: self.draw_length_graph())
+        return panel
+
+    def create_fourth_quadrant(self):
+        """Today's results, the scan counters, and the operator's inputs."""
+        panel = tk.Frame(self.workspace, bg=self.PANEL)
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(0, weight=1)
+
+        self.grid_frame = tk.Frame(panel, bg='white', highlightthickness=1,
+                                   highlightbackground=self.EDGE)
+        self.grid_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.current_columns = self.lot_columns(())
+        self.create_lot_tree(self.grid_frame, self.current_columns)
+
+        self.create_scan_counters(panel)
+
+        inputs = tk.Frame(panel, bg=self.PANEL)
+        inputs.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        inputs.grid_columnconfigure(0, weight=5)
+        inputs.grid_columnconfigure(1, weight=2)
+        inputs.grid_columnconfigure(2, weight=3)
+
+        # Ends the run on this part so another can be loaded. Kept as an
+        # attribute because next_model_command() disables it while the
+        # closing NG cable check is outstanding.
+        self.next_model_btn = tk.Button(inputs, text="CLICK HERE TO MOVE TO NEXT MODEL",
+                                        bg=self.YELLOW, fg='black', activebackground='#E6E600',
+                                        activeforeground='black', disabledforeground='#808080',
+                                        font=(self.FONT, 13, 'bold'), relief='raised', bd=1,
+                                        cursor='hand2', command=self.next_model_command)
+        self.next_model_btn.grid(row=0, column=0, sticky="nsew")
+
+        def code_box(column, fill):
+            entry = tk.Entry(inputs, bg=fill, fg='black', disabledbackground=fill,
+                             readonlybackground=fill, disabledforeground=self.PLACEHOLDER_INK,
+                             insertbackground='black', font=(self.FONT, 13, 'bold'),
+                             justify="center", relief="sunken", bd=1, width=12)
+            entry.grid(row=0, column=column, sticky="nsew", padx=(4, 0), ipady=4)
+            return entry
+
+        # ALC Code Entry, disabled until an employee code is accepted
+        self.alc_entry = code_box(1, self.AQUA)
+        self.show_placeholder(self.alc_entry, self.ALC_PLACEHOLDER)
+        self.alc_entry.config(state='disabled')
+
+        self.emp_entry = code_box(2, self.YELLOW)
+        self.show_placeholder(self.emp_entry, self.EMP_PLACEHOLDER)
+
+        # Bind events
+        self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
+        self.emp_entry.bind("<FocusOut>", lambda e: self.on_emp_entry_focus(False))
+        self.emp_entry.bind("<Return>", self.validate_employee_code)
+
+        self.alc_entry.bind("<FocusIn>", lambda e: self.on_alc_entry_focus(True))
+        self.alc_entry.bind("<FocusOut>", lambda e: self.on_alc_entry_focus(False))
+        self.alc_entry.bind("<Return>", self.process_alc_code)
+
+        return panel
+
+    def create_scan_counters(self, parent_frame):
+        """Build the OK / NG / invalid / total strip shown under the results grid."""
+        box = tk.LabelFrame(parent_frame, text="SCAN RESULT COUNTERS", bg=self.POWDER,
+                            fg='black', font=(self.FONT, 9, 'bold'), bd=1, relief='groove')
+        box.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+
+        definitions = (("OK", "OK Count :"), ("NG", "NG Count :"),
+                       ("INVALID", "*** Count :"), ("TOTAL", "Total Count :"))
+        self.scan_count_labels = {}
+        for column, (key, caption) in enumerate(definitions):
+            box.grid_columnconfigure(column, weight=1)
+            cell = tk.Frame(box, bg=self.POWDER)
+            cell.grid(row=0, column=column, sticky="w", padx=8, pady=(0, 4))
+            tk.Label(cell, text=caption, bg=self.POWDER, fg='black',
+                     font=(self.FONT, 9, 'bold')).pack(side="left")
+            value = tk.Label(cell, text="", bg='#E0FFFF', fg='black', width=7,
+                             relief='sunken', bd=1, font=(self.FONT, 9, 'bold'))
+            value.pack(side="left", padx=(4, 0))
+            self.scan_count_labels[key] = value
+
+        self.ok_count_label = self.scan_count_labels["OK"]
+        self.ng_count_label = self.scan_count_labels["NG"]
+        self.invalid_count_label = self.scan_count_labels["INVALID"]
+        self.total_count_label = self.scan_count_labels["TOTAL"]
+
+    def create_lot_tree(self, parent_frame, columns):
+        """Create the lot tree with specified columns"""
+        # Starting widths; every column stretches to fill the grid, so all
+        # eight readings still fit on a narrow screen
+        column_widths = {"Sl.No": 45, "LOT NUMBER": 100, "CAM1": 55,
+                         "RESULT": 60, "SCAN RESULT": 90}
+
+        self.tree = ttk.Treeview(parent_frame,
+                                 columns=columns,
+                                 show="headings",
+                                 height=10,
+                                 style="Data.Eol.Treeview")
+
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=column_widths.get(col, 42), minwidth=30,
+                             stretch=True, anchor="center")
+
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        # Configure scrolling using only the mouse wheel
+        def on_mousewheel(event):
+            self.tree.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def on_mousewheel_linux(event):
+            if event.num == 4:
+                self.tree.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.tree.yview_scroll(1, "units")
+
+        def scroll(units):
+            def handler(event):
+                self.tree.yview_scroll(units, "units")
+                return "break"
+            return handler
+
+        if sys.platform == "win32":
+            self.tree.bind("<MouseWheel>", on_mousewheel)
+        else:
+            self.tree.bind("<Button-4>", on_mousewheel_linux)
+            self.tree.bind("<Button-5>", on_mousewheel_linux)
+
+        self.tree.bind("<Up>", scroll(-1))
+        self.tree.bind("<Down>", scroll(1))
+        self.tree.bind("<Prior>", scroll(-10))  # Page Up
+        self.tree.bind("<Next>", scroll(10))    # Page Down
+
+        # Bind double-click event to view details
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
+
+    def lot_columns(self, devices):
+        """Results grid columns: L2-L4 and P3-P4 only when the part's spec lists them."""
+        devices = set(devices or ())
+        return (["Sl.No", "LOT NUMBER", "L1"]
+                + [d for d in ("L2", "L3", "L4") if d in devices]
+                + ["P1", "P2"]
+                + [d for d in ("P3", "P4") if d in devices]
+                + ["CAM1", "RESULT", "SCAN RESULT"])
+
+    def update_tree_columns(self, devices=None):
+        """Rebuild the results grid for the devices this part reports.
+
+        display_data() fills it again once the part is loaded.
         """
-        Toggle process status between HIGH and LOW
-        
-        NOTE: test starts automatically after ALC code entry
-              This button is mainly for STOPPING the test or manual restart
-        """
-        try:
-            # Check if employee validation is complete
-            if not getattr(self, 'employee_validation_complete', False):
-                self.safe_update_message("Employee validation required before process control", "red")
-                messagebox.showwarning("Employee Validation Required", 
-                                     "Please validate your Employee ID before starting the process")
-                return
-            
-            # Toggle status
-            if self.process_status == "LOW":
-                # Manual start/restart (test auto-starts after ALC)
-                if not hasattr(self, 'current_part_number') or not self.current_part_number:
-                    self.safe_update_message("Part Number selection required", "red")
-                    messagebox.showwarning("Part Number Required", 
-                                         "Please enter a valid ALC code first")
-                    return
-                
-                print("Manual test start/restart requested...")
-                
-                # If PLC writes haven't been done yet, do them now
-                if hasattr(self, 'programSelectionPLCAddress') and self.programSelectionPLCAddress:
-                    self.write_program_selection_to_plc()
-                if hasattr(self, 'machineOnPLCCoilAddress') and self.machineOnPLCCoilAddress:
-                    self.write_machine_on_to_plc()
-                
-                # Start monitoring
-                self.process_status = "HIGH"
-                self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
-                self.start_check_async()
-            else:
-                # Stop EOL testing process
-                self.stop_eol_testing_process()
-                
-        except Exception as e:
-            print(f"Error toggling process status: {e}")
-            self.safe_update_message(f"Error controlling process: {e}", "red")
+        new_columns = self.lot_columns(devices)
+        if new_columns != self.current_columns:
+            self.tree.destroy()
+            self.create_lot_tree(self.grid_frame, new_columns)
+            self.current_columns = new_columns
 
-    def stop_eol_testing_process(self):
-        """Stop the EOL testing process - PLC connection remains active"""
+    def on_tree_double_click(self, event):
+        """Show the chosen result row on the status line."""
         try:
-            print("[*] Stopping EOL Testing Process")
-            
-            # Set operator stop flag to prevent monitoring from continuing
-            self.operator_stop_requested = True
-            
-            # Update status variables
-            self.process_status = "LOW"
-            self.process_control_btn.configure(text="START TESTING", fg_color=ui.SUCCESS, hover_color=ui.SUCCESS_HOVER)
-                
-            # CRITICAL: Stop P0000 keep-alive first
-            self.p0000_keepalive_active = False
-            print("🔄 Stopping P0000 keep-alive...")
-            time.sleep(0.5)  # Let keep-alive stop
-            
-            # Send PLC command to stop testing (ONLY P0000 - don't touch M coils)
-            print("🔄 Writing P0000 (Start Signal) to LOW...")
-            print("   (Not writing to M coils - letting PLC control them)")
-            success = self.write_plc_command("P0000", False)
-            if success:
-                self.update_process_indicator("IDLE")
-                self.safe_update_message("EOL Testing Stopped by operator. PLC remains connected.", "orange")
-                print("✅ PLC Command: Set P0000 LOW - EOL Testing Stopped")
-                
-                # Log the testing stop
-                self.log_plc_command("WRITE", "P0000", "LOW", "EOL Testing Stop Command")
-                self.log_operator_action("TEST_STOP", "Testing stopped by operator", 
-                                       getattr(self, 'current_employee_id', 'UNKNOWN'))
-                
-                # Stop test execution monitoring but keep PLC status monitoring active
-                self.continuous_testing_active = False
-                # DO NOT set self.status_monitoring_active = False
-                # PLC monitoring continues for status updates
-                print("[*] Test execution stopped - PLC monitoring continues")
-                
-            else:
-                self.safe_update_message("Failed to send stop command to PLC", "red")
-                print("[ERROR] Failed to send PLC stop command")
-                
+            item = self.tree.selection()[0]
+            values = self.tree.item(item, "values")
+            pairs = [f"{col}: {value}" for col, value in zip(self.current_columns, values)
+                     if col != "Sl.No"]
+            self.safe_update_message(", ".join(pairs), "blue")
+        except IndexError:
+            # No item selected
+            pass
         except Exception as e:
-            print(f"Error stopping EOL testing process: {e}")
-            self.safe_update_message(f"Error stopping testing: {e}", "red")
+            print(f"Error on tree double-click: {str(e)}")
+            self.safe_update_message(f"Error displaying details: {str(e)}", "red")
+
+    def populate_data_grid(self, rows):
+        """Fill the results grid, banding every five rows so they are easy to scan."""
+        try:
+            self.tree.tag_configure('band', background='#FFFF99')
+            self.tree.tag_configure('plain', background='#FFFFFF')
+
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+
+            fields = {"LOT NUMBER": 'TD_LOT_NUMBER', "RESULT": 'TD_OVERALL_STATUS',
+                      "SCAN RESULT": 'TD_BARCODE_SCAN_RESULT'}
+            for position, row in enumerate(rows):
+                values = []
+                for column in self.current_columns:
+                    if column == "Sl.No":
+                        values.append(position + 1)
+                    else:
+                        value = row.get(fields.get(column, column))
+                        values.append('' if value is None else value)
+
+                # Rows alternate in blocks of five
+                tag = 'band' if (position // 5) % 2 == 0 else 'plain'
+                self.tree.insert('', 'end', values=tuple(values), tags=(tag,))
+
+            self.tree.selection_remove(self.tree.selection())
+
+        except Exception as e:
+            print(f"Error populating data grid: {e}")
+
+    # Trend chart colours, fixed per channel so L1 and P1 keep theirs whether
+    # or not the part reports L2-L4
+    SERIES_COLORS = ('#418CF0', '#FCB441', '#E0400A', '#056492')
+    LOAD_COLORS = dict(zip(['L1', 'L2', 'L3', 'L4'], SERIES_COLORS))
+    LENGTH_COLORS = dict(zip(['P1', 'P2', 'P3', 'P4'], SERIES_COLORS))
+    CHART_GRID = '#DCDCDC'      # Gainsboro
+
+    def draw_graph(self, canvas, names, colors, default_labels, title):
+        """Draw one chart: title, grid, y-axis scale, plotted series and legend."""
+        canvas.delete("all")
+
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
+            width = canvas.winfo_reqwidth()   # not mapped yet
+        if height <= 1:
+            height = canvas.winfo_reqheight()
+        if width <= 1 or height <= 1:
+            return
+
+        left_margin = 44
+        right_margin = 80   # room for the legend
+        top_margin = 22     # room for the title
+        bottom_margin = 20
+
+        graph_width = width - (left_margin + right_margin)
+        graph_height = height - (top_margin + bottom_margin)
+        if graph_width <= 0 or graph_height <= 0:
+            return
+
+        label_font = (self.FONT, 8, 'bold')
+        canvas.create_text(left_margin + graph_width / 2, top_margin / 2 + 1, text=title,
+                           fill='white', font=(self.FONT, 9, 'bold'))
+
+        names = self.visible_series(names)
+        bounds = self.series_bounds(names)
+
+        # Number of points across the x-axis, at least one grid span.
+        point_count = max((len(self.chart_series.get(n, [])) for n in names), default=0)
+        span = max(point_count - 1, 1)
+
+        baseline = height - bottom_margin
+        plot_right = width - right_margin
+        dash = (6, 2, 2, 2, 2, 2)   # dash-dot-dot
+
+        # Vertical grid on whole sample numbers, at most about eight of them,
+        # so every label is a distinct test. An empty chart shows 1 to 8.
+        first = self.dataPointX - point_count + 1 if point_count else 1
+        x_span = span if point_count > 1 else 7
+        tick = max(1, math.ceil(x_span / 8))
+        for index in range(0, x_span + 1, tick):
+            x = left_margin + (index * graph_width / x_span)
+            canvas.create_line(x, top_margin, x, baseline, fill=self.CHART_GRID, dash=dash)
+            canvas.create_text(x, baseline + 10, text=str(first + index),
+                               fill='white', font=label_font)
+
+        divisions = self.Y_DIVISIONS
+        for i in range(divisions + 1):
+            y = baseline - (i * graph_height / divisions)
+            canvas.create_line(left_margin, y, plot_right, y, fill=self.CHART_GRID, dash=dash)
+            if bounds:
+                low, high = bounds
+                value = low + (high - low) * i / divisions
+                # Whole numbers lose the trailing ".00"; fine steps keep
+                # enough places to stay distinct from their neighbours.
+                step = (high - low) / divisions
+                places = 0 if step >= 1 else (1 if step >= 0.1 else 2)
+                label = f"{value:,.{places}f}"
+            else:
+                label = str(default_labels[i])
+            canvas.create_text(left_margin - 6, y, text=label, anchor="e",
+                               fill='white', font=label_font)
+
+        # Plot each series as a smooth curve.
+        if bounds and point_count > 1:
+            low, high = bounds
+            value_range = high - low
+
+            for name in names:
+                points = self.chart_series.get(name, [])
+                if len(points) < 2:
+                    continue
+
+                coordinates = []
+                for index, value in enumerate(points):
+                    if value is None:
+                        continue
+                    x = left_margin + (index * graph_width / span)
+                    y = baseline - ((value - low) / value_range) * graph_height
+                    coordinates.extend((x, y))
+
+                if len(coordinates) >= 4:
+                    canvas.create_line(*coordinates, fill=colors[name], width=2,
+                                       smooth=True, capstyle="round", joinstyle="round")
+
+        # Legend in a white box, showing only the series this part reports.
+        if names:
+            legend_left = plot_right + 12
+            legend_top = top_margin + 4
+            canvas.create_rectangle(legend_left, legend_top, width - 8,
+                                    legend_top + 8 + 14 * len(names),
+                                    fill='white', outline=self.EDGE)
+            y = legend_top + 11
+            for name in names:
+                canvas.create_line(legend_left + 6, y, legend_left + 22, y,
+                                   fill=colors[name], width=2)
+                canvas.create_text(legend_left + 28, y, text=name, anchor="w",
+                                   fill='black', font=label_font)
+                y += 14
+
+    def draw_load_graph(self):
+        self.draw_graph(self.load_canvas,
+                        ['L1', 'L2', 'L3', 'L4'],
+                        self.LOAD_COLORS,
+                        [0, 20, 40, 60, 80, 100],
+                        "LOAD - GRAPH")
+
+    def draw_length_graph(self):
+        self.draw_graph(self.length_canvas,
+                        ['P1', 'P2', 'P3', 'P4'],
+                        self.LENGTH_COLORS,
+                        [-5, -3, -1, 1, 3, 5],
+                        "LENGTH - GRAPH")
+
+    def show_placeholder(self, entry, text):
+        """Put the grey watermark text in an empty code box."""
+        state = entry.cget('state')
+        entry.configure(state='normal')
+        entry.delete(0, tk.END)
+        entry.insert(0, text)
+        entry.configure(fg=self.PLACEHOLDER_INK, state=state)
+
+    def clear_placeholder(self, entry, text):
+        """Take the watermark out so the operator types into an empty box."""
+        if entry.get() == text:
+            entry.delete(0, tk.END)
+        entry.configure(fg='black')
+
+    def on_emp_entry_focus(self, is_focused):
+        """Handle employee code entry focus"""
+        if is_focused:
+            self.clear_placeholder(self.emp_entry, self.EMP_PLACEHOLDER)
+        elif not self.emp_entry.get():
+            self.show_placeholder(self.emp_entry, self.EMP_PLACEHOLDER)
+
+    def on_alc_entry_focus(self, is_focused):
+        """Handle ALC entry focus"""
+        if str(self.alc_entry.cget('state')) != 'normal':
+            return
+        if is_focused:
+            self.clear_placeholder(self.alc_entry, self.ALC_PLACEHOLDER)
+        elif not self.alc_entry.get():
+            self.show_placeholder(self.alc_entry, self.ALC_PLACEHOLDER)
+
+    def pick_image_scale(self):
+        """How much of the 750x450 part image this screen has room for.
+
+        A 1920x1080 screen shows it full size. A smaller one draws it, and the
+        labels on it, smaller, so the charts and results grid below keep a
+        usable height. Stored label positions stay in 750x450 terms.
+        """
+        room = self.root.winfo_screenheight() - self.CHROME_HEIGHT
+        return max(0.5, min(1.0, room / self.IMAGE_HEIGHT))
+
+    def show_image_placeholder(self):
+        """Empty the part image area, ready for the next part."""
+        if getattr(self, 'image_label', None) is not None:
+            self.image_label.destroy()
+        self.image_label = tk.Label(self.image_frame, text="No part loaded",
+                                    bg='white', fg=self.PLACEHOLDER_INK,
+                                    font=(self.FONT, 14, 'bold'))
+        self.image_label.place(relx=0.5, rely=0.5, anchor='center')
+
+    def update_label_row(self):
+        """Blank each label in the row under the image while it sits on the image."""
+        for key, tag in self.label_row.items():
+            tag.configure(fg='white' if key in self.placed_labels else 'black')
+
+    def update_camera_status(self, status_values):
+        """Show camera 1's verdict from its OK, NG and ON/OFF coils.
+
+        ProcessStatus.txt lists them after the eight process steps. Lines
+        without them have no camera, and cam1Result stays blank.
+        """
+        if len(self.process_addresses) < 11:
+            return
+
+        cam_ok = status_values.get(self.process_addresses[8], False)
+        cam_ng = status_values.get(self.process_addresses[9], False)
+        cam_on = status_values.get(self.process_addresses[10], False)
+
+        if not cam_on:
+            text, fill = "CAMERA ONE\nOFF", self.SILVER
+            self.cam1Result = "OFF"
+        elif cam_ok and cam_ng:
+            text, fill = "CAMERA ONE\nERROR", '#FFA500'
+        elif cam_ok:
+            text, fill = "CAMERA ONE\nPASS", '#00FF00'
+            self.cam1Result = "PASS"
+        elif cam_ng:
+            text, fill = "CAMERA ONE\nNG", '#FF0000'
+            self.cam1Result = "NG"
+        else:
+            text, fill = "CAMERA ONE\nON", self.SKY
+
+        self.cam1_status.configure(text=text, bg=fill)
+
+    def connect_to_devices(self):
+        """Report the console ready once its window is built."""
+        self.safe_update_message("System ready.", "green")
 
     def connect_to_plc(self):
         """Connect to PLC using configuration from .env file"""
@@ -719,99 +1234,7 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error disconnecting PLC: {e}")
 
-    def write_plc_command(self, address, value):
-        """Write command to PLC using actual Modbus communication with enhanced error handling"""
-        try:
-            # Check PLC connection status
-            if not self.plc_connected or not self.plc_client:
-                print(f"⚠️ PLC not connected - cannot write: Address {address} = {'HIGH' if value else 'LOW'}")
-                return False
-            
-            # CRITICAL: Verify socket is still open before writing
-            try:
-                if not self.plc_client.is_socket_open():
-                    print(f"⚠️ PLC socket closed - attempting reconnection...")
-                    if not self.connect_to_plc():
-                        print(f"❌ Failed to reconnect PLC")
-                        return False
-                    print(f"✅ PLC reconnected successfully")
-            except Exception as e:
-                print(f"⚠️ Socket check error: {e} - attempting reconnection...")
-                if not self.connect_to_plc():
-                    print(f"❌ Failed to reconnect PLC")
-                    return False
-            
-            # Convert P0000 style address to coil number (P addresses are coils, not registers)
-            if address.startswith('P'):
-                coil_address = int(address[1:])  # P0000 -> 0, P0001 -> 1, etc.
-            else:
-                coil_address = 0
-            
-            # Write to coil (not holding register - P addresses are digital coils)
-            coil_value = True if value else False
-            result = self.plc_client.write_coil(
-                address=coil_address,
-                value=coil_value,
-                device_id=self.plc_station_id
-            )
-            
-            if not result.isError():
-                print(f"[OK] PLC WRITE SUCCESS: {address} = {'HIGH' if value else 'LOW'}")
-                return True
-            else:
-                print(f"[ERROR] PLC WRITE FAILED: {address} - {result}")
-                return False
-            
-        except Exception as e:
-            print(f"Error writing PLC command: {e}")
-            return False
 
-    def update_process_indicator(self, status):
-        """Update the process status indicator"""
-        try:
-            self.process_indicator_status = status
-            
-            if status == "IDLE":
-                self.status_indicator.configure(text="● IDLE", text_color=ui.TEXT_MUTED)
-            elif status == "RUNNING":
-                self.status_indicator.configure(text="● RUNNING", text_color=ui.SUCCESS)
-            elif status == "COMPLETED":
-                self.status_indicator.configure(text="● COMPLETED", text_color=ui.ACCENT)
-            elif status == "FAILED":
-                self.status_indicator.configure(text="● FAILED", text_color=ui.DANGER)
-            else:
-                self.status_indicator.configure(text="● UNKNOWN", text_color=ui.WARNING)
-                
-            print(f"Process indicator updated to: {status}")
-            
-        except Exception as e:
-            print(f"Error updating process indicator: {e}")
-
-    def log_plc_command(self, command_type, address, value, description=""):
-        """Log PLC commands for audit trail"""
-        try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            employee_id = getattr(self, 'current_employee_id', 'UNKNOWN')
-            
-            log_entry = {
-                'timestamp': timestamp,
-                'employee_id': employee_id,
-                'command_type': command_type,
-                'address': address,
-                'value': value,
-                'description': description
-            }
-            
-            # Log to console
-            print(f"PLC LOG: {timestamp} | {employee_id} | {command_type} {address}={value} | {description}")
-            
-            # In a real implementation, this would also:
-            # 1. Write to log file
-            # 2. Store in database
-            # 3. Send to monitoring system
-            
-        except Exception as e:
-            print(f"Error logging PLC command: {e}")
 
     def log_operator_action(self, action_type, description, employee_id=None):
         """Record an operator action in TBL_OPERATOR_LOG for the audit trail.
@@ -862,16 +1285,17 @@ class EOLTesterGUI:
             self.current_employee_id = None
             self.employee_validation_complete = False
             self.employee_validated = False
-            self.emp_entry.configure(state='normal', bg='white')
-            self.emp_entry.delete(0, tk.END)
+            self.emp_entry.configure(state='normal')
+            self.show_placeholder(self.emp_entry, self.EMP_PLACEHOLDER)
             self.emp_entry.focus_set()
 
-            # The ALC box waits, disabled, for that login. The placeholder has
-            # to go in first - Tk ignores insert() on a disabled Entry.
-            self.alc_entry.configure(state='normal')
-            self.alc_entry.delete(0, tk.END)
-            self.alc_entry.insert(0, "ALC CODE")
+            # The ALC box waits, disabled, for that login
+            self.show_placeholder(self.alc_entry, self.ALC_PLACEHOLDER)
             self.alc_entry.configure(state='disabled')
+
+            # Nothing on show belongs to a loaded part any more
+            self.model_header.configure(text="MODEL NAME / PART NAME - PART NUMBER")
+            self.show_image_placeholder()
 
             # Reset spec tree
             if hasattr(self, 'spec_tree'):
@@ -888,6 +1312,7 @@ class EOLTesterGUI:
             self.placed_labels = {}
             self.sensor_label_keys = []
             self.sensor_states = {}
+            self.update_label_row()
 
             # next_model_command() disabled this while the closing NG cable
             # check ran; with the part released, the next one can use it.
@@ -907,649 +1332,6 @@ class EOLTesterGUI:
             print(f"Error executing cycle restart: {e}")
             self.safe_update_message(f"Error in cycle restart: {e}", "red")
 
-    def create_quadrants(self):
-        # Configure grid weights for equal space and responsive layout
-        self.workspace.grid_columnconfigure(0, weight=1, uniform='quad')  # First column
-        self.workspace.grid_columnconfigure(1, weight=1, uniform='quad')  # Second column
-        self.workspace.grid_rowconfigure(0, weight=1, uniform='quad')     # First row
-        self.workspace.grid_rowconfigure(1, weight=1, uniform='quad')     # Second row
-        
-        # Create quadrants
-        self.q1 = self.create_first_quadrant()
-        self.q2 = self.create_second_quadrant()
-        self.q3 = self.create_third_quadrant()
-        self.q4 = self.create_fourth_quadrant()
-        
-        # Place quadrants with consistent spacing
-        self.q1.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        self.q2.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
-        self.q3.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self.q4.grid(row=1, column=1, sticky="nsew", padx=4, pady=4)
-
-    def create_first_quadrant(self):
-        """Create the image display quadrant with correct dimensions."""
-        q1 = ui.ctk_card(self.workspace)
-
-        # Header strip, inset so the card's own rounded corners show around
-        # it. model_header's text gets swapped in and out elsewhere to show
-        # the loaded model/part - so it is built here rather than through
-        # ui.ctk_card_header(), which owns its label outright.
-        header_frame = ctk.CTkFrame(q1, corner_radius=ui.CORNER_RADIUS_SMALL,
-                                    fg_color=ui.SUBTLE, height=34)
-        header_frame.pack(fill="x", padx=6, pady=(6, ui.PAD))
-        header_frame.pack_propagate(False)
-
-        ctk.CTkLabel(header_frame, text='', fg_color=ui.SUBTLE,
-                    image=ui.icon_image('box', ui.ACCENT, 18)).pack(
-                        side="left", padx=(ui.PAD_LARGE, 0))
-
-        self.model_header = ctk.CTkLabel(header_frame,
-                                    text="MODEL - PART NUMBER",
-                                    fg_color=ui.SUBTLE,
-                                    text_color=ui.ACCENT,
-                                    font=ui.FONT_SECTION)
-        self.model_header.pack(side="left", padx=ui.PAD)
-
-        # Create a frame to hold the image
-        self.image_frame = tk.Frame(q1, bg=ui.SURFACE)
-        # Pinned to 750x450 to match model_settings.py: label coordinates are
-        # stored as absolute pixels against this canvas, so it must not stretch.
-        self.image_frame.pack(expand=True, padx=ui.PAD_LARGE, pady=ui.PAD)
-        self.image_frame.pack_propagate(False)
-        self.image_frame.config(width=750, height=450)
-
-        # Create initial placeholder
-        self.image_label = tk.Label(self.image_frame,
-                                   text="☐\n\nNo image loaded\nLoad an image to start testing",
-                                   bg=ui.SURFACE,
-                                   fg=ui.TEXT_MUTED,
-                                   justify='center',
-                                   font=ui.FONT_BODY)
-        self.image_label.place(relx=0.5, rely=0.5, anchor='center')
-
-        # Create status labels frame with fixed height
-        status_frame = tk.Frame(q1, bg=ui.SURFACE, height=60)  # Increased height
-        status_frame.pack(fill="x", side="bottom", pady=ui.PAD_LARGE, before=self.image_frame)
-        status_frame.pack_propagate(False)  # Prevent frame from shrinking
-
-        # Configure grid for equal spacing
-        status_frame.grid_columnconfigure(0, weight=1)
-        status_frame.grid_columnconfigure(1, weight=1)
-        status_frame.grid_columnconfigure(2, weight=1)
-        status_frame.grid_columnconfigure(3, weight=1)
-        status_frame.grid_columnconfigure(4, weight=1)
-
-        # Define status labels with their properties. They all start on the
-        # same accent blue - the monitor loop is what tells them apart,
-        # switching a step to green on pass or red on fail as it completes.
-        status_labels = [
-            {'text': 'AUTO', 'bg': ui.ACCENT, 'icon': 'refresh'},
-            {'text': 'HOME', 'bg': ui.ACCENT, 'icon': 'home'},
-            {'text': '1st PULL\n(Load Test)', 'bg': ui.ACCENT, 'icon': 'download'},
-            {'text': '2nd PULL\n(Length Test)', 'bg': ui.ACCENT, 'icon': 'ruler'},
-            {'text': 'TEST\nRESULT', 'bg': ui.ACCENT, 'icon': 'document'}
-        ]
-
-        # Initialize process status labels dictionary
-        self.process_status_labels = {}
-
-        # One grid cell each, all of equal weight, so the five stay the
-        # same size whatever their labels say.
-        for i, label_info in enumerate(status_labels):
-            label = ui.StepLamp(status_frame, label_info['text'],
-                                label_info['icon'], color=label_info['bg'])
-            label.grid(row=0, column=i, padx=4, pady=2, sticky="nsew")
-
-            # Store reference to the label in dictionary
-            label_key = label_info['text'].split()[0].lower()
-            self.process_status_labels[label_key] = label
-
-            # Also store as attribute for backward compatibility
-            setattr(self, f"{label_key}_label", label)
-
-        # Create bottom frame for label info
-        bottom_frame = tk.Frame(q1, height=30, bg=ui.SURFACE)
-        bottom_frame.pack(fill="x", side="bottom", pady=ui.PAD)
-        bottom_frame.pack_propagate(False)
-
-        # Add label info text
-        self.label_info = tk.Label(bottom_frame,
-                                  text="Placed Labels: None",
-                                  bg=ui.SURFACE,
-                                  fg=ui.TEXT_MUTED,
-                                  font=ui.FONT_SMALL)
-        self.label_info.pack(pady=2)
-
-        return q1
-
-    def create_second_quadrant(self):
-        """Create the specifications display quadrant."""
-        q2 = ui.ctk_card(self.workspace)
-
-        # Define camera frame dimensions
-        cam_width = 120  # Width for camera frames
-        cam_height = 90  # Height for camera frames
-
-        # Add header
-        ui.ctk_card_header(q2, "TEST SPECIFICATIONS", icon='clipboard')
-
-        # Create specifications table frame
-        spec_frame = tk.Frame(q2, bg=ui.SURFACE)  # Add border to spec frame
-
-        # Create specifications table with numbered ID
-        columns = (
-            "Description",
-            "Device",
-            "Unit",
-            "Min",
-            "Max",
-            "Actual",
-            "Result"
-        )
-
-        # Configure style for Treeview
-        style = ttk.Style()
-        style.configure("Custom.Treeview",
-                       borderwidth=1,  # Border width
-                       relief="flat",  # Border style
-                       fieldbackground=ui.SURFACE,  # Background color
-                       background=ui.SURFACE,  # Row background color
-                       foreground=ui.TEXT,  # Text color
-                       font=ui.FONT_BODY,
-                       rowheight=28)  # Increase row height to fill space better
-
-        # Header band, selection colours and fonts are inherited from the
-        # base Treeview style in ui.py, so every grid in the app matches.
-
-        # Configure selection colors
-        style.map("Custom.Treeview",
-                 background=[("selected", ui.ACCENT_SOFT)],  # Soft tint for selected row
-                 foreground=[("selected", ui.ACCENT)])
-
-        # Create Treeview with custom style - LIMIT TO 8 ROWS as requested
-        self.spec_tree = ttk.Treeview(spec_frame,
-                                     columns=columns,
-                                     show="headings",
-                                     height=8,  # Fixed at 8 rows as requested
-                                     style="Custom.Treeview")
-
-        # Configure columns with specific widths
-        column_widths = {
-            "Description": 200,
-            "Device": 100,
-            "Unit": 80,
-            "Min": 50,
-            "Max": 50,
-            "Actual": 50,
-            "Result": 50
-        }
-
-        # Set up each column with borders
-        for col in columns:
-            self.spec_tree.heading(col, text=col)
-            self.spec_tree.column(col, width=column_widths.get(col, 100), anchor='center')
-
-        # Pack the treeview inside spec_frame
-        self.spec_tree.pack(fill="both", expand=True)
-
-        # Create camera frame container (fixed height at bottom)
-        camera_container = tk.Frame(q2, bg=ui.SUBTLE)
-        camera_container.pack(fill="x", side="bottom", padx=1, pady=1)
-        
-        # Pack spec_frame after camera_container so it takes the remaining space
-        spec_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)
-
-        # Configure grid for equal spacing
-        camera_container.grid_columnconfigure(0, weight=1)  # First camera
-        camera_container.grid_columnconfigure(1, weight=1)  # Second camera
-        camera_container.grid_columnconfigure(2, weight=1)  # Spacing
-        camera_container.grid_columnconfigure(3, weight=1)  # Text box
-
-        def camera_slot(column):
-            """A rounded box for a camera. No images are fed in; camera 1's
-            caption shows the verdict its PLC coils report."""
-            frame = ctk.CTkFrame(camera_container, width=cam_width, height=cam_height,
-                                 corner_radius=ui.CORNER_RADIUS_SMALL,
-                                 fg_color=ui.SURFACE, border_width=1,
-                                 border_color=ui.BORDER)
-            frame.grid(row=1, column=column, padx=10, pady=(0, 5))
-            frame.grid_propagate(False)
-            frame.status = ctk.CTkLabel(frame, text="No image", fg_color=ui.SURFACE,
-                                        text_color=ui.TEXT_MUTED, font=ui.FONT_SMALL,
-                                        compound='top',
-                                        image=ui.icon_image('camera', ui.BORDER_STRONG, 28))
-            frame.status.place(relx=0.5, rely=0.5, anchor='center')
-            return frame
-
-        # Camera 1 section
-        tk.Label(camera_container, text="CAM 1", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
-                font=ui.FONT_SMALL).grid(row=0, column=0, pady=(0, 5))
-        self.cam1_frame = camera_slot(0)
-        self.cam1_status = self.cam1_frame.status
-
-        # Camera 2 section
-        tk.Label(camera_container, text="CAM 2", fg=ui.TEXT_MUTED, bg=ui.SUBTLE,
-                font=ui.FONT_SMALL).grid(row=0, column=1, pady=(0, 5))
-        self.cam2_frame = camera_slot(1)
-
-        # Text box (moved to column 3 for equal spacing)
-        tk.Label(camera_container, text="LABEL SCAN RESULT", bg=ui.SUBTLE,
-                fg=ui.TEXT_MUTED, font=ui.FONT_SMALL).grid(
-                    row=0, column=3, pady=(0, 5))
-        textbox_slot = ctk.CTkFrame(camera_container, corner_radius=ui.CORNER_RADIUS_SMALL,
-                                    fg_color=ui.SURFACE, border_width=1,
-                                    border_color=ui.BORDER)
-        textbox_slot.grid(row=1, column=3, padx=10, pady=1, sticky="nsew")
-
-        # Where the printed label gets scanned back in. It only opens while a
-        # freshly printed label is waiting to be checked.
-        self.label_scan_entry = tk.Entry(textbox_slot, bg=ui.SURFACE, fg=ui.TEXT,
-                                         disabledbackground=ui.SUBTLE,
-                                         font=ui.FONT_BODY_BOLD, justify="center",
-                                         relief="flat", highlightthickness=1,
-                                         highlightbackground=ui.BORDER,
-                                         highlightcolor=ui.ACCENT)
-        self.label_scan_entry.pack(fill="x", padx=4, pady=(4, 0))
-        self.label_scan_entry.configure(state='disabled')
-        self.label_scan_entry.bind("<Return>", self.submit_label_scan)
-        self.label_scan_entry.bind("<KeyRelease>", self.on_label_scan_key)
-
-        self.cam_textbox = tk.Text(textbox_slot, width=40, height=5,
-                                   bg=ui.SURFACE, fg=ui.TEXT, font=ui.FONT_BODY,
-                                   relief="flat", borderwidth=0,
-                                   highlightthickness=0, padx=ui.PAD, pady=ui.PAD)
-        self.cam_textbox.pack(fill="both", expand=True, padx=4, pady=4)
-        return q2
-
-    def create_third_quadrant(self):
-        q3 = ui.ctk_card(self.workspace)
-        ui.ctk_card_header(q3, "LOAD & LENGTH GRAPH", icon='chart')
-
-        # Add graph area directly without the labels
-        self.create_graph_area(q3)
-
-        return q3
-
-    def create_fourth_quadrant(self):
-        q4 = ui.ctk_card(self.workspace)
-        ui.ctk_card_header(q4, "LOT INFORMATION", icon='list')
-
-        # Default columns: LOT NUMBER, L1, L2, P1, P2, RESULT, SCAN RESULT
-        self.default_columns = ["LOT NUMBER", "L1", "L2", "P1", "P2", "RESULT", "SR"]
-        self.current_columns = self.default_columns.copy()
-
-        # Main content frame to hold grid and entry fields
-        content_frame = tk.Frame(q4, bg=ui.SUBTLE)
-        content_frame.pack(fill="both", expand=True, padx=ui.PAD, pady=ui.PAD)
-
-        # Configure grid for main content
-        content_frame.grid_rowconfigure(0, weight=1)  # Treeview gets most space
-        content_frame.grid_rowconfigure(1, weight=0)  # Scan counters
-        content_frame.grid_rowconfigure(2, weight=0)  # Entry frame gets fixed space
-        content_frame.grid_columnconfigure(0, weight=1)  # Single column takes full width
-
-        # Create lot number tree view with frame - in the first row
-        self.grid_frame = tk.Frame(content_frame, bg=ui.SUBTLE)
-        self.grid_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 5))
-
-        # Configure style for the lot number tree view
-        style = ttk.Style()
-        style.configure("LotTree.Treeview",
-                       borderwidth=1,
-                       relief="flat",
-                       fieldbackground=ui.SURFACE,
-                       background=ui.SURFACE,
-                       foreground=ui.TEXT,
-                       rowheight=25,  # Increase row height
-                       font=ui.FONT_BODY)
-
-        # The heading row is this panel's column header - it used to have a
-        # second blue strip drawn above it saying the same things. Its
-        # appearance comes from the base Treeview style in ui.py.
-
-        # Configure selection colors
-        style.map("LotTree.Treeview",
-                 background=[("selected", ui.ACCENT_SOFT)],
-                 foreground=[("selected", ui.ACCENT)])
-
-        # Store the fixed width we want for our tree
-        self.tree_fixed_width = 780  # Slightly less than frame width to account for padding
-
-        # Create Treeview with default columns
-        self.create_lot_tree(self.grid_frame, self.current_columns)
-
-        # Scan result counters, sitting under the grid
-        self.create_scan_counters(content_frame)
-
-        # Bottom frame for entry fields - in the third row
-        entry_frame = tk.Frame(content_frame, bg=ui.SUBTLE, height=50)  # Reduced height
-        entry_frame.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
-        entry_frame.grid_propagate(False)  # Prevent shrinking
-
-        # Simplified layout with just the entry fields
-        input_frame = tk.Frame(entry_frame, bg=ui.SUBTLE)
-        input_frame.pack(fill="both", expand=True, pady=5)
-
-        # Configure equal column weights
-        input_frame.columnconfigure(0, weight=1)  # EMP CODE
-        input_frame.columnconfigure(1, weight=1)  # NEXT LABEL button
-        input_frame.columnconfigure(2, weight=1)  # NEXT MODEL button
-        input_frame.columnconfigure(3, weight=1)  # ALC CODE
-
-        # Employee Code Entry - a plain tk.Entry sitting in a rounded slot.
-        # It stays a plain Entry rather than becoming a CTkEntry because the
-        # validation flow elsewhere toggles it to a 'readonly' state, which
-        # CTkEntry does not support.
-        emp_slot = ctk.CTkFrame(input_frame, corner_radius=ui.CORNER_RADIUS_SMALL,
-                                fg_color=ui.SURFACE, border_width=1, border_color=ui.BORDER)
-        emp_slot.grid(row=0, column=0, padx=5, sticky="ew")
-        self.emp_entry = tk.Entry(emp_slot,
-                                 bg=ui.SURFACE,
-                                 fg=ui.TEXT,
-                                 font=ui.FONT_BODY_BOLD,
-                                 justify="center",
-                                 relief="flat",
-                                 highlightthickness=0,
-                                 width=15)
-        self.emp_entry.pack(fill="both", expand=True, padx=6, pady=6)
-        self.emp_entry.insert(0, "EMP CODE")
-
-        # Next Label Button
-        next_btn = ui.ctk_button(input_frame, text="NEXT LABEL", icon='arrow_right',
-                                 kind='primary', command=self.next_label_command)
-        next_btn.grid(row=0, column=1, padx=5, sticky="ew")
-
-        # Next Model Button - ends the run on this part so another can be
-        # loaded. Kept as an attribute because next_model_command() disables
-        # it while the closing NG cable check is outstanding.
-        self.next_model_btn = ui.ctk_button(input_frame, text="NEXT MODEL", icon='refresh',
-                                            kind='neutral', command=self.next_model_command)
-        self.next_model_btn.grid(row=0, column=2, padx=5, sticky="ew")
-
-        # ALC Code Entry (initially disabled), same rounded-slot treatment.
-        alc_slot = ctk.CTkFrame(input_frame, corner_radius=ui.CORNER_RADIUS_SMALL,
-                                fg_color=ui.SURFACE, border_width=1, border_color=ui.BORDER)
-        alc_slot.grid(row=0, column=3, padx=5, sticky="ew")
-        self.alc_entry = tk.Entry(alc_slot,
-                                 bg=ui.SURFACE,
-                                 fg=ui.TEXT,
-                                 font=ui.FONT_BODY_BOLD,
-                                 justify="center",
-                                 relief="flat",
-                                 highlightthickness=0,
-                                 width=15)
-        self.alc_entry.pack(fill="both", expand=True, padx=6, pady=6)
-        # The placeholder has to go in before the box is disabled - Tk
-        # silently ignores insert() on a disabled Entry, which is why this
-        # well used to come up blank and unlabelled.
-        self.alc_entry.insert(0, "ALC CODE")
-        self.alc_entry.config(state='disabled')
-        
-        # Bind events
-        self.emp_entry.bind("<FocusIn>", lambda e: self.on_emp_entry_focus(True))
-        self.emp_entry.bind("<FocusOut>", lambda e: self.on_emp_entry_focus(False))
-        self.emp_entry.bind("<Return>", self.validate_employee_code)
-        
-        self.alc_entry.bind("<FocusIn>", lambda e: self.on_alc_entry_focus(True))
-        self.alc_entry.bind("<FocusOut>", lambda e: self.on_alc_entry_focus(False))
-        self.alc_entry.bind("<Return>", self.process_alc_code)
-        
-        return q4
-        
-    def create_scan_counters(self, parent_frame):
-        """Build the OK / NG / invalid / total strip shown under the results grid."""
-        counter_frame = tk.Frame(parent_frame, bg=ui.SUBTLE, height=30)
-        counter_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 4))
-        counter_frame.grid_propagate(False)
-
-        definitions = [
-            ("OK", ui.SUCCESS),
-            ("NG", ui.DANGER),
-            ("INVALID", ui.WARNING),
-            ("TOTAL", ui.ACCENT),
-        ]
-
-        self.scan_count_labels = {}
-        for column, (caption, color) in enumerate(definitions):
-            counter_frame.columnconfigure(column, weight=1)
-
-            cell = tk.Frame(counter_frame, bg=ui.SUBTLE)
-            cell.grid(row=0, column=column, sticky="ew", padx=4)
-
-            tk.Label(cell, text=f"{caption}:", bg=ui.SUBTLE, fg=color,
-                     font=ui.FONT_BODY_BOLD).pack(side="left")
-
-            value = ctk.CTkLabel(cell, text="0", fg_color=ui.SURFACE, text_color=color,
-                                 width=44, corner_radius=8, font=ui.FONT_BODY_BOLD)
-            value.pack(side="left", padx=(4, 0))
-            self.scan_count_labels[caption] = value
-
-        self.ok_count_label = self.scan_count_labels["OK"]
-        self.ng_count_label = self.scan_count_labels["NG"]
-        self.invalid_count_label = self.scan_count_labels["INVALID"]
-        self.total_count_label = self.scan_count_labels["TOTAL"]
-
-    def create_lot_tree(self, parent_frame, columns):
-        """Create the lot tree with specified columns"""
-        # Configure base column widths
-        self.base_column_widths = {
-            "LOT NUMBER": 150,
-            "L1": 60,
-            "L2": 60,
-            "L3": 60,
-            "L4": 60,
-            "P1": 60,
-            "P2": 60,
-            "P3": 60,
-            "P4": 60,
-            "RESULT": 80,
-            "SCAN RESULT": 100
-        }
-        
-        # Get the fixed width we established
-        tree_width = self.tree_fixed_width
-        
-        # Calculate how to distribute widths
-        column_widths = self.adjust_column_widths(columns, tree_width)
-        
-        # Create Treeview with the specified columns
-        self.tree = ttk.Treeview(parent_frame, 
-                                columns=columns,
-                                show="headings",
-                                height=10,
-                                style="LotTree.Treeview")
-        
-        # Set up columns with strict widths
-        for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=column_widths.get(col, 60), anchor="center", stretch=False)
-        
-        # Pack tree without scrollbar
-        self.tree.pack(side="left", fill="both", expand=True)
-        
-        # Configure scrolling using only the mouse wheel
-        def on_mousewheel(event):
-            # For Windows
-            self.tree.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        def on_mousewheel_linux(event):
-            # For Linux
-            if event.num == 4:
-                self.tree.yview_scroll(-1, "units")
-            elif event.num == 5:
-                self.tree.yview_scroll(1, "units")
-        
-        # Add keyboard-based scrolling
-        def on_up_arrow(event):
-            self.tree.yview_scroll(-1, "units")
-            return "break"  # Prevent default behavior
-            
-        def on_down_arrow(event):
-            self.tree.yview_scroll(1, "units")
-            return "break"  # Prevent default behavior
-            
-        def on_page_up(event):
-            self.tree.yview_scroll(-10, "units")
-            return "break"
-            
-        def on_page_down(event):
-            self.tree.yview_scroll(10, "units")
-            return "break"
-        
-        # Bind wheel events based on platform
-        if sys.platform == "win32":
-            self.tree.bind("<MouseWheel>", on_mousewheel)
-        else:
-            self.tree.bind("<Button-4>", on_mousewheel_linux)
-            self.tree.bind("<Button-5>", on_mousewheel_linux)
-            
-        # Add keyboard navigation
-        self.tree.bind("<Up>", on_up_arrow)
-        self.tree.bind("<Down>", on_down_arrow)
-        self.tree.bind("<Prior>", on_page_up)  # Page Up
-        self.tree.bind("<Next>", on_page_down)  # Page Down
-        
-        # Bind double-click event to view details
-        self.tree.bind("<Double-1>", self.on_tree_double_click)
-
-    def adjust_column_widths(self, columns, available_width=800):
-        """Adjust column widths proportionally to fit within available space"""
-        # We're not accounting for scrollbar width since it's invisible now
-        adjusted_available_width = available_width
-        
-        # Calculate total width of all columns using base widths
-        total_base_width = sum(self.base_column_widths.get(col, 60) for col in columns)
-        
-        # Always adjust columns to fit the available width exactly
-        scale_factor = adjusted_available_width / total_base_width
-        adjusted_widths = {
-            col: max(40, int(self.base_column_widths.get(col, 60) * scale_factor)) 
-            for col in columns
-        }
-        
-        # Ensure the total width is exactly equal to the available width
-        total_adjusted = sum(adjusted_widths.values())
-        diff = adjusted_available_width - total_adjusted
-        
-        # Distribute any remaining pixels to priority columns
-        if diff != 0:
-            # Priority order for adjustment
-            priority_cols = ["LOT NUMBER", "RESULT", "SCAN RESULT", "L1", "P1", "L2", "P2", "L3", "L4", "P3", "P4"]
-            # Filter to only include columns that exist in our current set
-            priority_cols = [col for col in priority_cols if col in columns]
-            
-            # Add or subtract pixels one by one following priority
-            idx = 0
-            while diff != 0 and priority_cols:
-                col = priority_cols[idx % len(priority_cols)]
-                if diff > 0:
-                    adjusted_widths[col] += 1
-                    diff -= 1
-                else:
-                    if adjusted_widths[col] > 40:  # Don't go below minimum width
-                        adjusted_widths[col] -= 1
-                        diff += 1
-                idx += 1
-        
-        return adjusted_widths
-
-    def update_tree_columns(self, devices=None):
-        """Update tree columns to always include all L1-L4 and P1-P4 columns"""
-        # Always include all columns regardless of data availability
-        new_columns = ["LOT NUMBER"]
-        
-        # Always include all L1-L4 and P1-P4 devices
-        for device in ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]:
-            new_columns.append(device)
-            print(f"Including {device} column - auto-generated")
-        
-        # Always include RESULT and SCAN RESULT
-        new_columns.extend(["RESULT", "SCAN RESULT"])
-        
-        # Check if columns are different from current ones
-        if set(new_columns) != set(self.current_columns):
-            print(f"Updating columns from {self.current_columns} to {new_columns}")
-            
-            # Save current data
-            current_data = []
-            for item in self.tree.get_children():
-                values = self.tree.item(item, "values")
-                current_data.append((item, values))
-            
-            # Destroy and recreate tree with new columns
-            self.tree.destroy()
-            self.create_lot_tree(self.grid_frame, new_columns)
-            
-            # Store new columns
-            self.current_columns = new_columns
-            
-            # Try to restore data with mapping to new columns
-            self.load_history_to_treeview()
-            
-            print(f"Tree columns updated to: {new_columns}")
-        else:
-            print(f"No column update needed - columns remain: {new_columns}")
-
-    def on_tree_double_click(self, event):
-        """Handle double-click on treeview item"""
-        try:
-            item = self.tree.selection()[0]
-            values = self.tree.item(item, "values")
-            lot_number = values[0]
-            
-            # Build message based on current columns
-            message = f"Lot: {lot_number}"
-            
-            # Add values for each column except LOT NUMBER
-            for i, col in enumerate(self.current_columns[1:], 1):
-                if i < len(values):
-                    message += f", {col}: {values[i]}"
-            
-            self.safe_update_message(message, "blue")
-        except IndexError:
-            # No item selected
-            pass
-        except Exception as e:
-            print(f"Error on tree double-click: {str(e)}")
-            self.safe_update_message(f"Error displaying details: {str(e)}", "red")
-
-    def create_graph_area(self, parent):
-        """The two trend charts, stacked, sharing the card's surface."""
-        graph_container = tk.Frame(parent, bg=ui.CHART_SURFACE)
-        graph_container.pack(fill="both", expand=True, padx=ui.PAD_LARGE,
-                             pady=(0, ui.PAD))
-
-        # A title row and a plot row per chart; only the plots take height.
-        graph_container.grid_rowconfigure(0, weight=0)
-        graph_container.grid_rowconfigure(1, weight=1)
-        graph_container.grid_rowconfigure(2, weight=0)
-        graph_container.grid_rowconfigure(3, weight=1)
-        graph_container.grid_columnconfigure(0, weight=1)
-
-        def chart_title(row, text, unit):
-            strip = tk.Frame(graph_container, bg=ui.CHART_SURFACE)
-            strip.grid(row=row, column=0, sticky="ew", pady=(0, 2))
-            tk.Label(strip, text=text, bg=ui.CHART_SURFACE, fg=ui.TEXT,
-                     font=ui.FONT_BODY_BOLD).pack(side="left")
-            # The unit belongs on the chart, not in an operator's head.
-            tk.Label(strip, text=unit, bg=ui.CHART_SURFACE, fg=ui.TEXT_MUTED,
-                     font=ui.FONT_SMALL).pack(side="left", padx=(ui.PAD, 0))
-
-        def plot(row):
-            canvas = tk.Canvas(graph_container, bg=ui.CHART_SURFACE,
-                               highlightthickness=0, height=100)
-            canvas.grid(row=row, column=0, sticky="nsew", pady=(0, ui.PAD_LARGE))
-            return canvas
-
-        chart_title(0, "LOAD GRAPH", "kgf, by sample")
-        self.load_canvas = plot(1)
-
-        chart_title(2, "LENGTH GRAPH", "mm deviation, by sample")
-        self.length_canvas = plot(3)
-
-        # Bind resize events
-        self.load_canvas.bind('<Configure>', lambda e: self.draw_load_graph())
-        self.length_canvas.bind('<Configure>', lambda e: self.draw_length_graph())
 
     def visible_series(self, names):
         """Of the given series, the ones this part actually reports."""
@@ -1604,133 +1386,6 @@ class EOLTesterGUI:
         high = low + step * self.Y_DIVISIONS
         return low, high
 
-    def draw_graph(self, canvas, names, colors, default_labels):
-        """Draw one chart: grid, y-axis scale, plotted series and legend."""
-        canvas.delete("all")
-
-        width = canvas.winfo_width()
-        height = canvas.winfo_height()
-        if width <= 1:
-            width = canvas.winfo_reqwidth()   # not mapped yet
-        if height <= 1:
-            height = canvas.winfo_reqheight()
-        if width <= 1 or height <= 1:
-            return
-
-        left_margin = 52
-        right_margin = 74   # room for the legend
-        top_margin = 12
-        bottom_margin = 26
-
-        graph_width = width - (left_margin + right_margin)
-        graph_height = height - (top_margin + bottom_margin)
-        if graph_width <= 0 or graph_height <= 0:
-            return
-
-        names = self.visible_series(names)
-        bounds = self.series_bounds(names)
-
-        # Number of points across the x-axis, at least one grid span.
-        point_count = max((len(self.chart_series.get(n, [])) for n in names), default=0)
-        span = max(point_count - 1, 1)
-
-        baseline = height - bottom_margin
-        plot_right = width - right_margin
-
-        # Grid: hairline, solid and one step off the surface. The dashed
-        # grey ruling drew more attention than the traces in front of it.
-        for i in range(9):
-            x = left_margin + (i * graph_width / 8)
-            canvas.create_line(x, top_margin, x, baseline, fill=ui.CHART_GRID)
-            if point_count:
-                first = self.dataPointX - point_count + 1
-                label = str(int(first + round(i * span / 8)))
-            else:
-                label = str(i + 1)
-            canvas.create_text(x, baseline + 12, text=label,
-                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
-
-        # Horizontal grid lines, labelled from the data when there is any.
-        divisions = self.Y_DIVISIONS
-        for i in range(divisions + 1):
-            y = baseline - (i * graph_height / divisions)
-            canvas.create_line(left_margin, y, plot_right, y, fill=ui.CHART_GRID)
-            if bounds:
-                low, high = bounds
-                value = low + (high - low) * i / divisions
-                # Whole numbers lose the trailing ".00"; fine steps keep
-                # enough places to stay distinct from their neighbours.
-                step = (high - low) / divisions
-                places = 0 if step >= 1 else (1 if step >= 0.1 else 2)
-                label = f"{value:,.{places}f}"
-            else:
-                label = str(default_labels[i])
-            canvas.create_text(left_margin - 6, y, text=label, anchor="e",
-                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
-
-        # The two axes themselves, a shade stronger than the grid, so the
-        # plot reads as a framed area rather than as loose ruling.
-        canvas.create_line(left_margin, top_margin, left_margin, baseline,
-                           fill=ui.CHART_AXIS)
-        canvas.create_line(left_margin, baseline, plot_right, baseline,
-                           fill=ui.CHART_AXIS)
-
-        # Plot each series.
-        if bounds and point_count > 1:
-            low, high = bounds
-            value_range = high - low
-
-            for name in names:
-                points = self.chart_series.get(name, [])
-                if len(points) < 2:
-                    continue
-
-                coordinates = []
-                for index, value in enumerate(points):
-                    if value is None:
-                        continue
-                    x = left_margin + (index * graph_width / span)
-                    y = height - bottom_margin - ((value - low) / value_range) * graph_height
-                    coordinates.extend((x, y))
-
-                if len(coordinates) >= 4:
-                    # A casing in the surface colour under each trace, so
-                    # that where two cross the upper one stays readable.
-                    canvas.create_line(*coordinates, fill=ui.CHART_SURFACE,
-                                       width=6, capstyle="round",
-                                       joinstyle="round")
-                    canvas.create_line(*coordinates, fill=colors[name], width=2,
-                                       capstyle="round", joinstyle="round")
-
-        # Legend, showing only the series this part reports.
-        legend_x = plot_right + 18
-        legend_y = top_margin + 10
-        for name in names:
-            canvas.create_line(legend_x, legend_y, legend_x + 18, legend_y,
-                               fill=colors[name], width=3, capstyle="round")
-            # The label wears a text token and the swatch beside it carries
-            # the identity, so the pair never depends on colour alone.
-            canvas.create_text(legend_x + 26, legend_y, text=name, anchor="w",
-                               fill=ui.TEXT_MUTED, font=ui.FONT_SMALL)
-            legend_y += 18
-
-    # Categorical slots in fixed order, so L1 and P1 keep their colour
-    # whether or not the part reports L2-L4. Colour follows the channel,
-    # never its position among whichever ones happen to be on show.
-    LOAD_COLORS = dict(zip(['L1', 'L2', 'L3', 'L4'], ui.SERIES))
-    LENGTH_COLORS = dict(zip(['P1', 'P2', 'P3', 'P4'], ui.SERIES))
-
-    def draw_load_graph(self):
-        self.draw_graph(self.load_canvas,
-                        ['L1', 'L2', 'L3', 'L4'],
-                        self.LOAD_COLORS,
-                        [0, 20, 40, 60, 80, 100])
-
-    def draw_length_graph(self):
-        self.draw_graph(self.length_canvas,
-                        ['P1', 'P2', 'P3', 'P4'],
-                        self.LENGTH_COLORS,
-                        [-5, -3, -1, 1, 3, 5])
 
     def redraw_graphs(self):
         """Repaint both charts, ignoring canvases that are not on screen yet."""
@@ -1739,13 +1394,6 @@ class EOLTesterGUI:
             self.draw_length_graph()
         except Exception as e:
             print(f"Error drawing graphs: {e}")
-
-    def create_footer(self):
-        tk.Frame(self.main_container, bg=ui.BORDER, height=1).pack(fill="x", side="bottom")
-        footer = tk.Label(self.main_container,
-                        text="Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P",
-                        bg=ui.SURFACE, fg=ui.TEXT_MUTED, font=ui.FONT_SMALL, height=2)
-        footer.pack(fill="x", side="bottom")
 
     def start_label_drag(self, event):
         """Start dragging a label."""
@@ -1786,6 +1434,7 @@ class EOLTesterGUI:
         # Update position in the positions dictionary
         label_key = getattr(label, 'label_key', label.cget('text'))
         self.label_positions[label_key] = (x, y)
+        label.stored_position = (x / self.image_scale, y / self.image_scale)
         print(f"Label {label_key} dropped at x={x}, y={y}")
         
         # Save the updated positions to database
@@ -1954,7 +1603,7 @@ class EOLTesterGUI:
             return
 
         # Check if we're waiting for employee code
-        if not self.emp_entry.get() or self.emp_entry.get() == "EMP CODE":
+        if not self.emp_entry.get() or self.emp_entry.get() == self.EMP_PLACEHOLDER:
             self.emp_entry.delete(0, tk.END)
             self.emp_entry.insert(0, barcode)
             self.validate_employee_code()
@@ -1973,8 +1622,8 @@ class EOLTesterGUI:
             
         # Ready for testing when both codes are entered
         elif (hasattr(self, 'current_part_number') and self.current_part_number and 
-              self.emp_entry.get() and self.emp_entry.get() != "EMP CODE" and
-              self.alc_entry.get() and self.alc_entry.get() != "ALC CODE"):
+              self.emp_entry.get() and self.emp_entry.get() != self.EMP_PLACEHOLDER and
+              self.alc_entry.get() and self.alc_entry.get() != self.ALC_PLACEHOLDER):
             
             self.safe_update_message("Ready for testing - waiting for test completion", "green")
             print("System ready for testing")
@@ -2153,11 +1802,6 @@ class EOLTesterGUI:
             # Disable part number entry
             if hasattr(self, 'alc_entry'):
                 self.alc_entry.config(state='disabled')
-                self.alc_entry.config(bg='#f0f0f0')
-            
-            # Disable camera textbox
-            if hasattr(self, 'cam_textbox'):
-                self.cam_textbox.config(state='disabled')
             
             print("Controls disabled pending employee validation")
             
@@ -2348,27 +1992,6 @@ class EOLTesterGUI:
             print(f"Error updating message: {e}")
             print(f"Original message was: {message}")
 
-    def connect_to_devices(self):
-        """Device connection functionality simplified - PLC removed"""
-        try:
-            # Check if main_container exists
-            if not hasattr(self, 'main_container'):
-                print("Error: main_container does not exist. Creating it now.")
-                self.main_container = tk.Frame(self.root)
-                self.main_container.pack(fill="both", expand=True)
-            
-            # Check if message_label exists
-            if not hasattr(self, 'message_label'):
-                print("Error: message_label does not exist. Creating it now.")
-                self.message_label = ui.StatusBanner(self.main_container)
-                self.message_label.pack(fill="x", padx=ui.PAD, pady=(ui.PAD, 0))
-                
-            self.safe_update_message("System ready.", "green")
-            
-        except Exception as e:
-            print(f"Error connecting to devices: {str(e)}")
-            self.safe_update_message(f"Error connecting to devices: {str(e)}", "red")
-
     def cleanup(self):
         """Enhanced cleanup method with forced resource release for PLC connection"""
         try:
@@ -2522,8 +2145,8 @@ class EOLTesterGUI:
                 raise FileNotFoundError(f"Image file not found: {image_path}")
             
             # Use the same exact fixed dimensions as model_settings.py for perfect label alignment
-            target_width = 750
-            target_height = 450
+            target_width = round(self.IMAGE_WIDTH * self.image_scale)
+            target_height = round(self.IMAGE_HEIGHT * self.image_scale)
             
             print(f"Loading image with fixed dimensions: {target_width}x{target_height}")
             
@@ -2537,7 +2160,7 @@ class EOLTesterGUI:
                 self.image_label.destroy()
             
             # Create new image label with exact same dimensions
-            self.image_label = tk.Label(self.image_frame, image=photo, bg=ui.SURFACE)
+            self.image_label = tk.Label(self.image_frame, image=photo, bg='white')
             self.image_label.image = photo  # Keep a reference
             self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             
@@ -2582,14 +2205,15 @@ class EOLTesterGUI:
             self.root.update_idletasks()
             
             # Create all labels L1-L15 if they exist in coordinates_data
-            for i in range(1, 16):  # 1 to 15
+            for i in range(1, self.LABEL_COUNT + 1):
                 label_num = str(i)
                 if label_num in coordinates_data:
                     try:
                         coord_data = coordinates_data[label_num]
                         # Get coordinates from database
-                        x = float(coord_data.get('x', 0))
-                        y = float(coord_data.get('y', 0))
+                        # Stored against 750x450; drawn at the screen's scale
+                        x = float(coord_data.get('x', 0)) * self.image_scale
+                        y = float(coord_data.get('y', 0)) * self.image_scale
                         
                         print(f"Processing label L{label_num} at coordinates ({x}, {y})")
                         
@@ -2605,7 +2229,7 @@ class EOLTesterGUI:
                                            text=off_text,
                                            bg="yellow",  # Initial background color
                                            fg="black",
-                                           font=("Arial", 12, "bold"),
+                                           font=("Arial", max(8, round(12 * self.image_scale)), "bold"),
                                            width=max(4, len(on_text), len(off_text)),
                                            relief="raised",
                                            borderwidth=2)
@@ -2627,6 +2251,10 @@ class EOLTesterGUI:
                         new_label.caption = caption
                         new_label.on_text = on_text
                         new_label.off_text = off_text
+                        # Its position in Model Settings' 750x450 terms, kept
+                        # exact so re-saving never rounds it off the screen scale
+                        new_label.stored_position = (float(coord_data.get('x', 0)),
+                                                     float(coord_data.get('y', 0)))
                         self.placed_labels[label_text] = new_label
                         self.label_positions[label_text] = (x, y)
                         
@@ -2646,12 +2274,7 @@ class EOLTesterGUI:
             self.sensor_states = {}
             self.sensor_label_keys = list(self.placed_labels)
             
-            # Update label info
-            if self.placed_labels:
-                sorted_labels = sorted(self.placed_labels.keys(), key=lambda x: int(x[1:]))
-                self.label_info.config(text=f"Placed Labels: {', '.join(sorted_labels)}")
-            else:
-                self.label_info.config(text="Placed Labels: None")
+            self.update_label_row()
                 
         except Exception as e:
             print(f"Error placing labels: {e}")
@@ -2708,9 +2331,10 @@ class EOLTesterGUI:
                 label_num = label_text[1:]  # Extract number from "L1", "L2", etc.
                 # The label's text follows its sensor, so save the texts set
                 # in Model Settings rather than whatever it shows right now.
+                stored_x, stored_y = label.stored_position
                 positions[label_num] = {
-                    'x': label.winfo_x(),
-                    'y': label.winfo_y(),
+                    'x': round(stored_x),
+                    'y': round(stored_y),
                     'text': label.caption,
                     'on_text': label.on_text,
                     'off_text': label.off_text,
@@ -2745,21 +2369,10 @@ class EOLTesterGUI:
 
         # Start your monitoring threads/processes here
 
-    def on_emp_entry_focus(self, is_focused):
-        """Handle employee code entry focus"""
-        if is_focused:
-            if self.emp_entry.get() == "EMP CODE":
-                self.emp_entry.delete(0, tk.END)
-            self.emp_entry.configure(bg="white")
-        else:
-            if not self.emp_entry.get():
-                self.emp_entry.insert(0, "EMP CODE")
-                self.emp_entry.configure(bg="white")
-
     def validate_employee_code(self, event=None):
         """Validate employee code against EmployeeCodes.txt"""
         emp_code = self.emp_entry.get().strip()
-        if emp_code == "EMP CODE" or not emp_code:
+        if emp_code == self.EMP_PLACEHOLDER or not emp_code:
             messagebox.showwarning("Warning", "Please enter an employee code")
             return
         
@@ -2799,7 +2412,7 @@ class EOLTesterGUI:
                 self.employee_validated = True
                 
                 # Make employee entry read-only
-                self.emp_entry.configure(state='readonly', bg="lightgreen")
+                self.emp_entry.configure(state='readonly', fg='black')
                 
                 # Enable ALC entry and set focus
                 self.alc_entry.configure(state='normal')
@@ -2971,16 +2584,6 @@ class EOLTesterGUI:
                 self.current_part_number = self.partNumber
                 self.log_operator_action("PART_LOADED", f"ALC {alc_code}: {self.modelName}")
                 
-                # Update UI to show test is running
-                self.process_status = "HIGH"
-                if hasattr(self, 'process_control_btn'):
-                    self.process_control_btn.configure(text="STOP TESTING", fg_color=ui.DANGER, hover_color=ui.DANGER_HOVER)
-                    self.process_control_btn.configure(state='normal')
-                
-                # Update process indicator
-                if hasattr(self, 'update_process_indicator'):
-                    self.update_process_indicator("RUNNING")
-                
                 # Start NG cable validation process
                 self.startingNGCableValidation = True
                 
@@ -3000,9 +2603,7 @@ class EOLTesterGUI:
                 
                 # Reset ALC entry field for next entry
                 self.alc_entry.configure(state='normal')
-                self.alc_entry.delete(0, tk.END)
-                self.alc_entry.insert(0, "ALC CODE")
-                self.alc_entry.configure(bg="#fff9c4")
+                self.show_placeholder(self.alc_entry, self.ALC_PLACEHOLDER)
                 
             else:
                 messagebox.showwarning("Part Not Found", "Scanned Part Does NOT Exist...")
@@ -3196,36 +2797,6 @@ class EOLTesterGUI:
 
         except Exception as e:
             print(f"Error displaying test data: {e}")
-
-    def populate_data_grid(self, rows):
-        """Fill the results grid, banding every five rows so they are easy to scan."""
-        try:
-            self.tree.tag_configure('band', background='#FFFF99')
-            self.tree.tag_configure('plain', background='#FFFFFF')
-
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-
-            for position, row in enumerate(rows):
-                values = []
-                for column in self.current_columns:
-                    if column == "LOT NUMBER":
-                        values.append(row.get('TD_LOT_NUMBER', ''))
-                    elif column == "RESULT":
-                        values.append(row.get('TD_OVERALL_STATUS', ''))
-                    elif column in ("SCAN RESULT", "SR"):
-                        values.append(row.get('TD_BARCODE_SCAN_RESULT', ''))
-                    else:
-                        values.append(row.get(column, ''))
-
-                # Rows alternate in blocks of five, matching the older grid.
-                tag = 'band' if (position // 5) % 2 == 0 else 'plain'
-                self.tree.insert('', 'end', values=tuple(values), tags=(tag,))
-
-            self.tree.selection_remove(self.tree.selection())
-
-        except Exception as e:
-            print(f"Error populating data grid: {e}")
 
     def update_scan_result_counters(self, rows):
         """Count OK, NG and invalid barcode scans across the displayed rows."""
@@ -3639,35 +3210,6 @@ class EOLTesterGUI:
                 if key not in getattr(self, 'blinking_jobs', {}):
                     self.blink_label(label, key)
 
-    def update_camera_status(self, status_values):
-        """Show camera 1's verdict from its OK, NG and ON/OFF coils.
-
-        ProcessStatus.txt lists them after the eight process steps. Lines
-        without them have no camera, and cam1Result stays blank.
-        """
-        if len(self.process_addresses) < 11:
-            return
-
-        cam_ok = status_values.get(self.process_addresses[8], False)
-        cam_ng = status_values.get(self.process_addresses[9], False)
-        cam_on = status_values.get(self.process_addresses[10], False)
-
-        if not cam_on:
-            text, color = "CAMERA OFF", ui.TEXT_MUTED
-            self.cam1Result = "OFF"
-        elif cam_ok and cam_ng:
-            text, color = "CAMERA ERROR", "#FFA500"
-        elif cam_ok:
-            text, color = "CAMERA PASS", "#00AA00"
-            self.cam1Result = "PASS"
-        elif cam_ng:
-            text, color = "CAMERA NG", "#FF0000"
-            self.cam1Result = "NG"
-        else:
-            text, color = "CAMERA ON", ui.ACCENT
-
-        self.cam1_status.configure(text=text, text_color=color)
-
     def _read_all_input_registers(self):
         """Read all input registers and update internal values - runs in background thread"""
         try:
@@ -4014,7 +3556,7 @@ class EOLTesterGUI:
         self.rcvdTestRslt = False
         self.cam1Result = ""
         if hasattr(self, 'cam1_status'):
-            self.cam1_status.configure(text="No image", text_color=ui.TEXT_MUTED)
+            self.cam1_status.configure(text="CAMERA ONE\nSTATUS", bg=self.SKY)
 
     def reset_measurements(self):
         """Zero the readings so the next test's peaks start from nothing."""
@@ -4267,6 +3809,7 @@ class EOLTesterGUI:
     def close_label_scan(self):
         self.awaiting_label_scan = False
         self.label_scan_entry.delete(0, tk.END)
+        self.label_scan_entry.insert(0, self.SCAN_PLACEHOLDER)
         self.label_scan_entry.configure(state='disabled')
 
     def process_barcode_scan_result(self, scanned_text, code):
@@ -4358,20 +3901,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error deactivating PLC alert: {e}")
 
-    def on_alc_entry_focus(self, is_focused):
-        """Handle ALC entry focus with visual feedback"""
-        if is_focused:
-            if self.alc_entry.get() == "ALC CODE":
-                self.alc_entry.delete(0, tk.END)
-            self.alc_entry.configure(bg="white")
-            
-            # Remove the selection dialog trigger
-            # When the entry gets focus, don't show selection dialog anymore
-        else:
-            if not self.alc_entry.get():
-                self.alc_entry.insert(0, "ALC CODE")
-                self.alc_entry.configure(bg="#fff9c4")
-
     def process_alc_code(self, event=None):
         """Process the entered ALC code and retrieve specifications"""
         # Check employee validation first
@@ -4384,7 +3913,7 @@ class EOLTesterGUI:
         # Use the value from the entry field
         alc_code = self.alc_entry.get().strip()
         
-        if not alc_code or alc_code == "ALC CODE":
+        if not alc_code or alc_code == self.ALC_PLACEHOLDER:
             messagebox.showwarning("Warning", "Please enter a valid ALC code")
             return
             
@@ -4412,22 +3941,6 @@ class EOLTesterGUI:
             # Ensure window is destroyed even if cleanup fails
             self.root.destroy()
 
-    def next_label_command(self):
-        """Record the test on the machine now, without waiting for the PLC.
-
-        It goes through the same scoring and saving as a result the PLC
-        reports, so the test lands in the same tables either way.
-        """
-        if not getattr(self, 'current_part_number', None):
-            messagebox.showwarning("Next Label", "Load a part before recording a test.")
-            return
-        if self.rcvdTestRslt:
-            return  # a result is already being recorded
-
-        # Freeze the readings, as a PLC-reported result does
-        self.rcvdTestRslt = True
-        self.test_result_command()
-
     def reset_process_status_labels(self):
         """Reset all process status labels to default blue state"""
         try:
@@ -4443,162 +3956,6 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error resetting process status labels: {e}")
     
-    def get_lot_history(self, limit=50):
-        """Get lot test result history from database"""
-        try:
-            print(f"Getting lot history (limit: {limit})...")
-            conn = db.connect(connection_timeout=10, charset='utf8mb4', use_unicode=True, autocommit=True)
-            
-            cursor = conn.cursor()
-            
-            # Get current part number if available
-            part_number = getattr(self, 'current_part_number', '')
-            print(f"Current part number: {part_number}")
-            
-            if part_number:
-                # If part number is available, filter by it and show only PASS results
-                query = """
-                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                       RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
-                FROM TBL_TEST_RESULTS
-                WHERE PART_NUMBER = %s AND RESULT = 'PASS'
-                ORDER BY CREATED_DATE DESC
-                LIMIT %s
-                """
-                cursor.execute(query, (part_number, limit))
-                print(f"Executed query with part number filter (PASS only): {part_number}")
-            else:
-                # Otherwise get the most recent PASS results only
-                query = """
-                SELECT LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                       RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
-                FROM TBL_TEST_RESULTS
-                WHERE RESULT = 'PASS'
-                ORDER BY CREATED_DATE DESC
-                LIMIT %s
-                """
-                cursor.execute(query, (limit,))
-            
-            # Get results
-            results = cursor.fetchall()
-            
-            # Close connection
-            cursor.close()
-            conn.close()
-            
-            return results
-            
-        except mysql.connector.Error as e:
-            print(f"Database error in get_lot_history: {str(e)}")
-            return []
-        except Exception as e:
-            print(f"Error in get_lot_history: {str(e)}")
-            return []
-
-    def load_history_to_treeview(self):
-        """Load lot history from database to treeview"""
-        try:
-            print("=== LOADING HISTORY TO TREEVIEW ===")
-            
-            # Get lot history
-            history = self.get_lot_history()
-            print(f"Retrieved {len(history)} records from database")
-            
-            if not history:
-                print("No history found in database")
-                self.safe_update_message("No history found", "blue")
-                return
-            
-            # Update tree columns based on available data before loading
-            self.update_tree_columns()
-                
-            # Don't clear treeview - keep existing data
-            print("Keeping existing tree view items")
-            
-            # Count records for reporting
-            total_records = len(history)
-            displayed_records = 0
-                
-                        # Add history items to treeview (only if not already present)
-            existing_lots = set()
-            for existing_item in self.tree.get_children():
-                existing_values = self.tree.item(existing_item, "values")
-                if existing_values and len(existing_values) > 0:
-                    existing_lots.add(existing_values[0])  # LOT NUMBER is first column
-            
-            for item in history:
-                # Create a dictionary to map column names to values
-                values_dict = {}
-                values_dict["LOT NUMBER"] = item[0] if len(item) > 0 else ""
-                
-                # Skip if this lot number is already in the tree
-                if values_dict["LOT NUMBER"] in existing_lots:
-                    print(f"Skipping existing lot number: {values_dict['LOT NUMBER']}")
-                    continue
-                
-                # Track if this record has any actual values
-                has_actual_values = False
-                
-                # Map database columns to treeview columns using actual column names
-                # item structure: LOT_NUMBER, L1, L2, L3, L4, P1, P2, P3, P4, 
-                #                RESULT, SCAN_RESULT, EMP_CODE, CREATED_DATE, SPEC_DATA
-                device_columns = ["L1", "L2", "L3", "L4", "P1", "P2", "P3", "P4"]
-                for i, device in enumerate(device_columns, 1):  # Start from index 1
-                    if i < len(item):
-                        device_value = item[i]
-                        if device_value is not None:
-                            has_actual_values = True
-                            # Display the actual measurement value stored in device columns
-                            values_dict[device] = f"{device_value:.3f}" if isinstance(device_value, (int, float)) else str(device_value)
-                        else:
-                            values_dict[device] = "N/A"
-                    else:
-                        values_dict[device] = "N/A"
-                
-                # Add result and scan result from correct positions
-                if len(item) > 9:
-                    values_dict["RESULT"] = item[9] or "N/A"  # RESULT column
-                else:
-                    values_dict["RESULT"] = "N/A"
-                
-                if len(item) > 10:
-                    values_dict["SCAN RESULT"] = item[10] or f"LOT: {item[0]}"  # SCAN_RESULT column
-                else:
-                    values_dict["SCAN RESULT"] = f"LOT: {item[0]}"
-                
-                # Only display PASS records with actual values
-                result_value = item[9] if len(item) > 9 else ""
-                if result_value == "PASS" and has_actual_values:
-                    # Create values list in the same order as self.current_columns
-                    values = []
-                    for col in self.current_columns:
-                        if col == "SR":  # Handle short form of SCAN RESULT
-                            values.append(values_dict.get("SCAN RESULT", "N/A"))
-                        elif col == "SCAN RESULT":
-                            values.append(values_dict.get("SCAN RESULT", "N/A"))
-                        else:
-                            values.append(values_dict.get(col, "N/A"))
-                    
-                    # Insert the record into the tree
-                    print(f"Adding new PASS record to tree: {values}")
-                    self.tree.insert("", "end", text=values[0], values=tuple(values))
-                    displayed_records += 1
-                else:
-                    print(f"Skipping record (not PASS or no device values): {item}")
-                
-            # Display message about records
-            if displayed_records > 0:
-                self.safe_update_message(f"Loaded {displayed_records} PASS test records from database", "green")
-                print(f"Successfully displayed {displayed_records} PASS records out of {total_records} total records")
-            else:
-                print("No PASS records met display criteria")
-                self.safe_update_message(f"No PASS test records found (filtered from {total_records} total records)", "blue")
-            
-        except Exception as e:
-            print(f"Error loading history: {str(e)}")
-            traceback.print_exc()
-            self.safe_update_message(f"Error loading history: {str(e)}", "red")
-
     def flash_spec_row(self, item, final_tag):
         """Briefly flash a row to highlight it was updated"""
         # Store original tag

@@ -530,11 +530,18 @@ def _patch_one(widget_class):
     def patched_init(self, master=None, cnf=None, **kw):
         if cnf:
             kw = dict(cnf, **kw)
+        # exact_colors=True opts a widget, and everything built inside it,
+        # out of the palette: a screen drawn to a fixed colour scheme keeps
+        # the colours it asks for rather than having them themed.
+        exact = kw.pop('exact_colors', None)
+        if exact is None:
+            exact = getattr(master, '_exact_colors', False)
         # ttk.Entry and ttk.Combobox subclass tkinter.Entry, but they are
         # styled through ttk.Style and reject per-widget colour options.
-        if not isinstance(self, ttk.Widget):
+        if not isinstance(self, ttk.Widget) and not exact:
             kw = _normalise(widget_class, kw)
         original_init(self, master, {}, **kw)
+        self._exact_colors = exact
 
     def patched_configure(self, cnf=None, **kw):
         if cnf and isinstance(cnf, dict):
@@ -544,7 +551,7 @@ def _patch_one(widget_class):
             return original_configure(self, cnf, **kw)
         if not kw:
             return original_configure(self)
-        if not isinstance(self, ttk.Widget):
+        if not isinstance(self, ttk.Widget) and not getattr(self, '_exact_colors', False):
             kw = _normalise(widget_class, kw)
         return original_configure(self, **kw)
 
