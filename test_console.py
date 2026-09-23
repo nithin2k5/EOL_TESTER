@@ -180,6 +180,12 @@ class EOLTesterGUI:
             # Register settings
             self.plc_reg_address = config.get('PLC_REG_ADDRESS', '').strip("'")
             self.plc_points_to_read = int(config.get('PLC_POINTS_TO_READ', '1'))
+
+            # Per-request timeout and retries. Keep them short: every PLC
+            # request waits its turn, so one the PLC never answers holds up
+            # all the others, including the window's own.
+            self.plc_timeout = config.get_int('PLC_READ_TIMEOUT', 500) / 1000.0
+            self.plc_retries = config.get_int('PLC_RETRIES', 0)
             
             print(f"PLC Config loaded - COM: {self.plc_com_port}, Baud: {self.plc_baud_rate}, Station: {self.plc_station_id}")
             if self.plc_tcp_ip:
@@ -193,6 +199,8 @@ class EOLTesterGUI:
             self.plc_station_id = 1
             self.plc_tcp_ip = ''
             self.plc_tcp_port = 502
+            self.plc_timeout = 0.5
+            self.plc_retries = 0
 
     def initialize_variables(self):
         """Initialize all variables before window setup and ensure clean COM ports"""
@@ -271,6 +279,9 @@ class EOLTesterGUI:
         self.rcvdTestRslt = False
         self.awaiting_result_clear = False
         self.plc_status_loop_running = False
+        # Most recent coil snapshot from the worker thread, for code on the
+        # Tk thread that must not wait on the PLC itself
+        self.latest_plc_status = {}
 
         # Labels on the part image and the sensors behind them. The worker
         # thread reads sensor_label_keys and writes sensor_states; the Tk
@@ -855,8 +866,8 @@ class EOLTesterGUI:
                     self.plc_client = SerializedModbusClient(ModbusTcpClient(
                         host=self.plc_tcp_ip,
                         port=self.plc_tcp_port,
-                        timeout=10,  # Increased from 5 to 10 seconds
-                        retries=2  # Reduce retries to prevent connection closure
+                        timeout=self.plc_timeout,
+                        retries=self.plc_retries
                     ))
                     connection_result = self.plc_client.connect()
                     if connection_result:
@@ -865,7 +876,6 @@ class EOLTesterGUI:
                         self.plc_last_successful_read = time.time()  # Reset health timer
                         print(f"[OK] PLC connected via TCP - {self.plc_tcp_ip}:{self.plc_tcp_port}")
                         self.safe_update_message(f"PLC Connected via TCP: {self.plc_tcp_ip}", "green")
-                        self.start_plc_monitoring()
                         # Start automatic process status monitoring with reduced frequency
                         self.root.after(1000, self.start_plc_status_monitoring)
                         return True
@@ -882,8 +892,8 @@ class EOLTesterGUI:
                     bytesize=8,
                     parity='N',
                     stopbits=1,
-                    timeout=10,  # Increased from 5 to 10 seconds
-                    retries=2  # Reduce retries to prevent connection closure
+                    timeout=self.plc_timeout,
+                    retries=self.plc_retries
                 ))
                 connection_result = self.plc_client.connect()
                 if connection_result:
@@ -892,7 +902,6 @@ class EOLTesterGUI:
                     self.plc_last_successful_read = time.time()  # Reset health timer
                     print(f"[OK] PLC connected via Serial - {self.plc_com_port}")
                     self.safe_update_message(f"PLC Connected via Serial: {self.plc_com_port}", "green")
-                    self.start_plc_monitoring()
                     # Start automatic process status monitoring with reduced frequency
                     self.root.after(1000, self.start_plc_status_monitoring)
                     return True
@@ -914,7 +923,6 @@ class EOLTesterGUI:
         """Disconnect from PLC"""
         try:
             if self.plc_client and self.plc_connected:
-                self.plc_monitoring = False
                 self.status_monitoring_active = False  # Stop monitoring loops
                 self.plc_thread_running = False  # Stop background thread
                 self.plc_client.close()
@@ -1001,58 +1009,6 @@ class EOLTesterGUI:
             # Continue keep-alive despite errors
             if hasattr(self, 'p0000_keepalive_active') and self.p0000_keepalive_active:
                 self.root.after(2000, self.maintain_p0000_high)
-
-    def start_plc_monitoring(self):
-        """Start monitoring PLC status for HIGH signal"""
-        if not self.plc_connected:
-            return
-            
-        self.plc_monitoring = True
-        print("[*] Started PLC monitoring - waiting for HIGH signal...")
-        self.safe_update_message("PLC Monitoring: Waiting for HIGH signal...", "blue")
-        
-        # Start monitoring thread
-        monitoring_thread = threading.Thread(target=self.plc_monitor_loop, daemon=True)
-        monitoring_thread.start()
-
-    def plc_monitor_loop(self):
-        """Monitor PLC registers for status changes"""
-        try:
-            while self.plc_monitoring and self.plc_connected:
-                try:
-                    # Read P0000 register (convert to appropriate register number)
-                    register_address = 0  # P0000 = register 0
-                    
-                    if self.plc_client:
-                        result = self.plc_client.read_holding_registers(
-                            address=register_address,
-                            count=1,
-                            device_id=self.plc_station_id
-                        )
-                        
-                        if not result.isError():
-                            register_value = result.registers[0]
-                            
-                            # Check if register is HIGH (non-zero)
-                            if register_value > 0:
-                                print(f"🚨 HIGH signal detected! P0000 = {register_value}")
-                                self.root.after(0, lambda: self.safe_update_message(f"HIGH signal detected! P0000 = {register_value}", "green"))
-                                # You can add specific actions here when HIGH is detected
-                                
-                            # Update GUI with current status
-                            status_text = f"PLC Monitor: P0000 = {register_value}"
-                            self.root.after(0, lambda: self.safe_update_message(status_text, "blue"))
-                        else:
-                            print(f"Error reading PLC register: {result}")
-                            
-                except Exception as e:
-                    print(f"Error in PLC monitoring: {e}")
-                    
-                # Wait before next read
-                time.sleep(1)  # Monitor every second
-                
-        except Exception as e:
-            print(f"Error in PLC monitor loop: {e}")
 
     def write_plc_command(self, address, value):
         """Write command to PLC using actual Modbus communication with enhanced error handling"""
@@ -3174,9 +3130,6 @@ class EOLTesterGUI:
             # Parse addresses from process status array
             # Convert hex addresses to decimal
             try:
-                # Convert.ToUInt32(processStatusArray[0].Substring(1), 16)
-                # Python equivalent: int(address[1:], 16) for hex addresses
-                
                 for i, address in enumerate(self.process_addresses):
                     if not address.strip():
                         continue
@@ -3201,17 +3154,20 @@ class EOLTesterGUI:
                                 self.plc_last_successful_read = time.time()
                                 self.plc_communication_errors = 0  # Reset error counter
                             else:
-                                status_values[address] = False
+                                # A PLC that fails one read will fail the rest
+                                # too, each after a full timeout. Give up on this
+                                # snapshot rather than hold the line that long.
                                 self.plc_communication_errors += 1
                                 print(f"⚠️ PLC read error for {address}: {result}")
+                                return {}
                         
                         # Small delay to prevent overwhelming PLC
                         time.sleep(0.01)
                         
                     except Exception as e:
-                        status_values[address] = False
                         self.plc_communication_errors += 1
                         print(f"⚠️ Error reading PLC address {address}: {e}")
+                        return {}
                 
                 # Too many failed reads: this snapshot is not trustworthy
                 if self.plc_communication_errors >= 5:
@@ -4627,9 +4583,11 @@ class EOLTesterGUI:
                 self.start_check_async()
                 return
             
-            # Check current PLC status
-            status_values = self.read_process_status_values()
-            
+            # Use the worker's latest reading. This runs on the Tk thread and
+            # repeats every second, so reading the PLC here would stall the
+            # window each time the PLC was slow to answer.
+            status_values = self.latest_plc_status
+
             # Get pull1 addresses (index 2 and 3)
             pull1_ok_addr = self.process_addresses[2] if len(self.process_addresses) > 2 else None
             pull1_ng_addr = self.process_addresses[3] if len(self.process_addresses) > 3 else None
@@ -4817,7 +4775,15 @@ class EOLTesterGUI:
             try:
                 # Read PLC coil status in background thread
                 status_values = self.read_process_status_values()
-                
+                self.latest_plc_status = status_values
+
+                if not status_values:
+                    # PLC not answering. Skip the register and sensor reads,
+                    # which would each wait out a timeout, and leave the line
+                    # free for the window's writes for a while.
+                    time.sleep(1)
+                    continue
+
                 # Put result in queue (non-blocking)
                 try:
                     self.plc_status_queue.put_nowait(status_values)
