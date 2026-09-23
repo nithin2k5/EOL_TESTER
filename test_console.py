@@ -4197,11 +4197,6 @@ class EOLTesterGUI:
                 # Set current part number for testing
                 self.current_part_number = self.partNumber
                 
-                # Generate lot number for this test
-                if not hasattr(self, 'current_lot_number') or not self.current_lot_number:
-                    self.current_lot_number = self.generate_lot_number()
-                    print(f"📋 Generated LOT Number: {self.current_lot_number}")
-                
                 # Update UI to show test is running
                 self.process_status = "HIGH"
                 if hasattr(self, 'process_control_btn'):
@@ -4217,7 +4212,7 @@ class EOLTesterGUI:
                 
                 # Update status message
                 self.safe_update_message(
-                    f"Part loaded - LOT: {self.current_lot_number} - Waiting for PLC pull1 state...", 
+                    f"Part loaded - next LOT: {self.next_lot_number()} - Waiting for PLC pull1 state...", 
                     "orange"
                 )
                 
@@ -4562,6 +4557,20 @@ class EOLTesterGUI:
         except Exception as e:
             print(f"Error updating charts: {e}")
 
+    def next_lot_number(self):
+        """The lot number the next saved test will get, for showing the operator.
+
+        generate_lot_and_traceability() assigns it when the test is saved,
+        counting on from the part's running serial.
+        """
+        try:
+            last = int(self.lotNo or 0)
+        except ValueError:
+            last = 0
+        if datetime.today().date() != self.today:
+            last = 0  # the count starts again on a new day
+        return f"{last + 1:07d}"
+
     def get_lot_number(self):
         """Get lot number from database"""
         try:
@@ -4637,7 +4646,7 @@ class EOLTesterGUI:
                 # PLC is at pull1 ready state - can start test
                 print("✅ PLC at pull1 ready state - Starting test now")
                 self.safe_update_message(
-                    f"PLC ready at pull1 - Starting test for LOT: {self.current_lot_number}", 
+                    f"PLC ready at pull1 - Starting test for LOT: {self.next_lot_number()}", 
                     "green"
                 )
                 self.pull1_wait_counter = 0  # Reset counter
