@@ -12,6 +12,7 @@ import time
 import threading
 import config
 import ui
+from plc_address import bit_address
 import json
 from datetime import datetime
 
@@ -469,9 +470,9 @@ class ComPortSettings:
                     self.rx_text.insert(tk.END, f"{address} --> Invalid address format (must start with M or P)\n")
                     continue
                 
-                # Convert hex address to integer
+                # Word in decimal, bit in hex: see plc_address.py
                 try:
-                    coil_address = int(hex_part, 16)
+                    coil_address = bit_address(address)
                 except ValueError:
                     self.rx_text.insert(tk.END, f"{address} --> Invalid hex value: {hex_part}\n")
                     continue

@@ -18,6 +18,7 @@ import math
 import config
 import db
 import ui
+from plc_address import bit_address
 
 
 class SerializedModbusClient:
@@ -1908,14 +1909,8 @@ class EOLTesterGUI:
                         continue
                     
                     try:
-                        # Parse address - check if hex or decimal
-                        addr_str = address[1:] if len(address) > 1 else "0"
-                        
-                        # Try hex first (hex is expected), fallback to decimal
-                        try:
-                            addr_num = int(addr_str, 16)  # Hex conversion
-                        except ValueError:
-                            addr_num = int(addr_str)  # Decimal fallback
+                        # Word in decimal, bit in hex: see plc_address.py
+                        addr_num = bit_address(address)
                         
                         # Read coil
                         if address.startswith('M') or address.startswith('X'):
@@ -2759,9 +2754,9 @@ class EOLTesterGUI:
             if not self.programSelectionPLCAddress or not self.plc_client:
                 return False
                 
-            # Convert hex address to int (remove 'M' prefix)
+            # M address to its Modbus coil number (see plc_address.py)
             if self.programSelectionPLCAddress.startswith('M'):
-                coil_address = int(self.programSelectionPLCAddress[1:], 16)
+                coil_address = bit_address(self.programSelectionPLCAddress)
                 result = self.plc_client.write_coil(coil_address, value, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error writing program selection to PLC: {result}")
@@ -2785,9 +2780,9 @@ class EOLTesterGUI:
             if not self.machineOnPLCCoilAddress or not self.plc_client:
                 return False
                 
-            # Convert hex address to int (remove 'M' prefix)  
+            # M address to its Modbus coil number (see plc_address.py)
             if self.machineOnPLCCoilAddress.startswith('M'):
-                coil_address = int(self.machineOnPLCCoilAddress[1:], 16)
+                coil_address = bit_address(self.machineOnPLCCoilAddress)
                 result = self.plc_client.write_coil(coil_address, True, device_id=self.plc_station_id)
                 if result.isError():
                     print(f"Error writing machine on signal to PLC: {result}")
@@ -3223,7 +3218,7 @@ class EOLTesterGUI:
             if index >= len(self.input_sensor_addresses):
                 continue
             try:
-                address = int(self.input_sensor_addresses[index][1:], 16)
+                address = bit_address(self.input_sensor_addresses[index])
                 result = self.plc_client.read_discrete_inputs(
                     address, count=1, device_id=self.plc_station_id)
                 if not result.isError():
@@ -3904,9 +3899,9 @@ class EOLTesterGUI:
         """Activate PLC alert signal"""
         try:
             if self.alertOnPLCCoilAddress and self.plc_client:
-                # Convert hex address to int (remove 'M' prefix)
+                # M address to its Modbus coil number (see plc_address.py)
                 if self.alertOnPLCCoilAddress.startswith('M'):
-                    coil_address = int(self.alertOnPLCCoilAddress[1:], 16)
+                    coil_address = bit_address(self.alertOnPLCCoilAddress)
                     
                     # Turn alert ON
                     result = self.plc_client.write_coil(coil_address, True, device_id=self.plc_station_id)
