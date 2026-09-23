@@ -20,7 +20,7 @@ NOT_SET = 'Not set yet - add it to the .config file'
 
 
 class Page:
-    """A header over a scrolling body, shared by the two pages below.
+    """A title bar and footer around a scrolling body, shared by the two pages below.
 
     The body scrolls because these pages are read on whatever screen the
     line PC happens to have, and text that cannot be reached is no help.
@@ -34,7 +34,10 @@ class Page:
         ui.apply(root)
         self.root.title("EOL Tester - " + self.TITLE)
 
-        ui.page_header(root, self.TITLE, compact=True, icon=self.ICON)
+        # The pink title bar and footer every console carries; the footer is
+        # packed before the scrolling body so it keeps the foot of the window
+        ui.page_header(root, self.TITLE)
+        ui.footer_bar(root)
 
         area = ui.scrollable(root)
         area.pack(fill='both', expand=True)
