@@ -8,6 +8,7 @@ import mysql.connector
 import auth
 import config
 import db
+import ui
 
 # Employee number of the support account, whose password lives in .env as a
 # hash rather than in the EMPLOYEE_INFO table. It is checked before the table
@@ -55,16 +56,22 @@ class LoginForm(tk.Toplevel):
         self.txt_employee.focus_set()
 
     def setup_ui(self):
+        # The pink title bar the consoles carry, sized for a dialog
+        ui.title_bar(self, "EMPLOYEE LOGIN", height=50, font_size=18)
+
         container = ttk.Frame(self, padding=20)
         container.pack(fill='both', expand=True)
 
-        header = ttk.Label(container, text="EMPLOYEE LOGIN", font=('Arial', 14, 'bold'))
-        header.grid(row=0, column=0, columnspan=2, pady=(0, 15))
+        # The employee number box is yellow, as the Test console's employee
+        # code box is
+        style = ttk.Style(self)
+        style.configure('EmployeeCode.TEntry', fieldbackground=ui.YELLOW)
 
         ttk.Label(container, text="Employee Number :").grid(row=1, column=0, sticky='w', pady=5)
         self.employee_var = tk.StringVar()
         self.employee_var.trace_add('write', self.input_changed)
-        self.txt_employee = ttk.Entry(container, width=35, textvariable=self.employee_var)
+        self.txt_employee = ttk.Entry(container, width=35, textvariable=self.employee_var,
+                                      style='EmployeeCode.TEntry')
         self.txt_employee.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
         self.txt_employee.bind('<Return>', lambda event: self.txt_password.focus_set())
 
