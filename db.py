@@ -192,6 +192,21 @@ SCHEMA = [
             UNIQUE KEY unique_date_machine (DATE_STR, MACHINE_DIGIT)
         )
     """),
+
+    # Who did what on the Test console: logins, part loads, saved tests,
+    # NG cable checks and label scans.
+    ("TBL_OPERATOR_LOG", """
+        CREATE TABLE IF NOT EXISTS TBL_OPERATOR_LOG (
+            ID INT AUTO_INCREMENT PRIMARY KEY,
+            OL_DATETIME DATETIME NOT NULL,
+            OL_MACHINE_ID VARCHAR(50),
+            OL_EMPLOYEE_CODE VARCHAR(50),
+            OL_ACTION VARCHAR(50) NOT NULL,
+            OL_DESCRIPTION VARCHAR(500),
+            OL_PART_NUMBER VARCHAR(100),
+            KEY idx_operator_log_datetime (OL_DATETIME)
+        )
+    """),
 ]
 
 

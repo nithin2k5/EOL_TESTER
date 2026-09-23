@@ -814,30 +814,38 @@ class EOLTesterGUI:
             print(f"Error logging PLC command: {e}")
 
     def log_operator_action(self, action_type, description, employee_id=None):
-        """Log operator actions for audit trail"""
+        """Record an operator action in TBL_OPERATOR_LOG for the audit trail.
+
+        If the database cannot take it, the entry goes to
+        logs/operator_actions.log instead, so it is never silently lost.
+        """
+        now = datetime.now().replace(microsecond=0)
+        emp_id = employee_id or getattr(self, 'current_employee_id', None) or ''
+        part_number = getattr(self, 'current_part_number', None) or ''
+        machine_id = getattr(self, 'machineID', '') or ''
+        print(f"OPERATOR LOG: {now} | {emp_id} | {action_type} | {description} | Part: {part_number}")
+
         try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            emp_id = employee_id or getattr(self, 'current_employee_id', 'UNKNOWN')
-            part_number = getattr(self, 'current_part_number', 'N/A')
-            
-            log_entry = {
-                'timestamp': timestamp,
-                'employee_id': emp_id,
-                'action_type': action_type,
-                'description': description,
-                'part_number': part_number
-            }
-            
-            # Log to console
-            print(f"OPERATOR LOG: {timestamp} | {emp_id} | {action_type} | {description} | Part: {part_number}")
-            
-            # In a real implementation, this would also:
-            # 1. Write to log file
-            # 2. Store in database audit table
-            # 3. Send to monitoring/compliance system
-            
+            conn = db.connect(connection_timeout=5)
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO TBL_OPERATOR_LOG (OL_DATETIME, OL_MACHINE_ID, OL_EMPLOYEE_CODE, "
+                    "OL_ACTION, OL_DESCRIPTION, OL_PART_NUMBER) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (now, machine_id, emp_id, action_type, str(description)[:500], part_number))
+                conn.commit()
+                cursor.close()
+            finally:
+                conn.close()
         except Exception as e:
-            print(f"Error logging operator action: {e}")
+            print(f"Operator log not saved to database ({e}) - writing to file")
+            try:
+                log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+                os.makedirs(log_dir, exist_ok=True)
+                with open(os.path.join(log_dir, 'operator_actions.log'), 'a', encoding='utf-8') as f:
+                    f.write(f"{now}\t{machine_id}\t{emp_id}\t{action_type}\t{description}\t{part_number}\n")
+            except OSError as file_error:
+                print(f"Operator log not saved to file either: {file_error}")
 
     def execute_cycle_restart(self):
         """Execute the actual cycle restart"""
@@ -1806,17 +1814,21 @@ class EOLTesterGUI:
                 if self.failCounter > 0:
                     self.safe_update_message("NG Validation successful, continue to testing...", "green")
                     self.startingNGCableValidation = False
+                    self.log_operator_action("NG_CHECK_START_PASSED", f"{self.failCounter} device(s) failed as expected")
                 else:
                     self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
+                    self.log_operator_action("NG_CHECK_START_FAILED", "Known-bad cable passed every device")
             elif self.endingNGCableValidation:
                 if self.failCounter > 0:
                     self.safe_update_message("NG Validation successful.", "green")
+                    self.log_operator_action("NG_CHECK_END_PASSED", f"{self.failCounter} device(s) failed as expected")
                     self.endingNGCableValidated = True
                     self.endingNGCableValidation = False
                     self.write_program_selection_to_plc(False)
                 else:
                     self.safe_update_message("NG Validation NOT OK, please repeat NG Validation...", "red")
                     self.endingNGCableValidated = False
+                    self.log_operator_action("NG_CHECK_END_FAILED", "Known-bad cable passed every device")
             else:
                 self.complete_test_cycle()
 
@@ -1879,6 +1891,7 @@ class EOLTesterGUI:
             return
 
         try:
+            self.log_operator_action("NEXT_MODEL", "Closing NG cable check started")
             self.breakLoop = True
 
             # One closing validation at a time - execute_cycle_restart()
@@ -2798,12 +2811,14 @@ class EOLTesterGUI:
                 
                 # Initialize database connection test
                 self.test_database_connection()
+                self.log_operator_action("LOGIN", "Employee code accepted", emp_code)
                 
             else:
                 messagebox.showerror(
                     "Unauthorized Employee", 
                     f"Employee code: {emp_code} is NOT AUTHORIZED to operate this machine, please consult SUPERVISOR."
                 )
+                self.log_operator_action("LOGIN_REFUSED", "Employee code not authorised", emp_code)
                 self.emp_entry.delete(0, tk.END)
                 self.emp_entry.focus_set()
                 return
@@ -2954,6 +2969,7 @@ class EOLTesterGUI:
                 
                 # Set current part number for testing
                 self.current_part_number = self.partNumber
+                self.log_operator_action("PART_LOADED", f"ALC {alc_code}: {self.modelName}")
                 
                 # Update UI to show test is running
                 self.process_status = "HIGH"
@@ -4092,6 +4108,7 @@ class EOLTesterGUI:
             connection.commit()
 
             print(f"Test data saved: {status} - Lot: {self.lotNo}, Traceability: {self.traceabilityCode}")
+            self.log_operator_action("TEST_SAVED", f"{status} - lot {self.lotNo}, {self.traceabilityCode}")
             
             # Update or insert part running serial
             if status == "OK":
@@ -4276,6 +4293,7 @@ class EOLTesterGUI:
 
     def update_scan_result(self, result, code):
         """Record the scan result against the test whose label carries code."""
+        self.log_operator_action("LABEL_SCAN", f"{result} - {code}")
         try:
             connection = self.get_database_connection()
             if not connection:
