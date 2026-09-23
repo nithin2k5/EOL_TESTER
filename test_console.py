@@ -471,17 +471,18 @@ class EOLTesterGUI:
     # the dark theme the other pages use.
     # ------------------------------------------------------------------
 
-    FONT = 'Cambria'
-    TITLE_PINK = '#FFB6C1'      # LightPink
-    FOOTER_PINK = '#FFC0CB'     # Pink
-    PANEL = '#F0F0F0'           # window grey behind the panels
-    NAVY = '#191970'            # MidnightBlue part header
-    SKY = '#00BFFF'             # DeepSkyBlue - an idle step lamp
-    AQUA = '#00FFFF'
-    YELLOW = '#FFFF00'
-    SILVER = '#C0C0C0'
-    POWDER = '#B0E0E6'          # PowderBlue counter strip
-    EDGE = '#A0A0A0'            # thin panel borders
+    # The shared palette (ui.py) is this console's; these are its names here
+    FONT = ui.FONT_FAMILY
+    TITLE_PINK = ui.TITLE_PINK
+    FOOTER_PINK = ui.FOOTER_PINK
+    PANEL = ui.APP_BG           # window grey behind the panels
+    NAVY = ui.NAVY              # part header
+    SKY = ui.SKY                # an idle step lamp
+    AQUA = ui.AQUA
+    YELLOW = ui.YELLOW
+    SILVER = ui.SILVER
+    POWDER = ui.POWDER          # counter strip
+    EDGE = ui.BORDER            # thin panel borders
     PLACEHOLDER_INK = '#A9A9A9'
     EMP_PLACEHOLDER = 'EMPLOYEE CODE'
     ALC_PLACEHOLDER = 'ALC CODE'
@@ -553,27 +554,7 @@ class EOLTesterGUI:
             style.map(f"{name}.Heading", background=[('active', '#33CCFF')])
 
     def create_title_bar(self):
-        bar = tk.Frame(self.main_container, bg=self.TITLE_PINK, height=60)
-        bar.pack(fill="x", padx=3, pady=(3, 0))
-        bar.pack_propagate(False)
-
-        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 'assets', 'infac_india.png')
-        try:
-            logo = Image.open(logo_path)
-            logo.thumbnail((150, 54))
-            self.logo_image = ImageTk.PhotoImage(logo)
-            tk.Label(bar, image=self.logo_image, bg=self.TITLE_PINK).pack(side="left", padx=(8, 0))
-        except OSError as e:
-            print(f"Logo not shown: {e}")
-
-        # The machine this console runs, so photos and reports of the screen
-        # say which line they came from
-        tk.Label(bar, text=config.get('MACHINE_ID', ''), bg=self.TITLE_PINK, fg='black',
-                 font=(self.FONT, 24, 'bold')).pack(side="right", padx=12)
-
-        tk.Label(bar, text="EOL (END OF LINE) TESTER", bg=self.TITLE_PINK, fg='black',
-                 font=(self.FONT, 30, 'bold')).place(relx=0.5, rely=0.5, anchor='center')
+        ui.title_bar(self.main_container, "EOL (END OF LINE) TESTER")
 
     def create_footer(self):
         bar = tk.Frame(self.main_container, bg=self.FOOTER_PINK, height=34)
@@ -944,10 +925,10 @@ class EOLTesterGUI:
 
     # Trend chart colours, fixed per channel so L1 and P1 keep theirs whether
     # or not the part reports L2-L4
-    SERIES_COLORS = ('#418CF0', '#FCB441', '#E0400A', '#056492')
+    SERIES_COLORS = ui.SERIES
     LOAD_COLORS = dict(zip(['L1', 'L2', 'L3', 'L4'], SERIES_COLORS))
     LENGTH_COLORS = dict(zip(['P1', 'P2', 'P3', 'P4'], SERIES_COLORS))
-    CHART_GRID = '#DCDCDC'      # Gainsboro
+    CHART_GRID = ui.CHART_GRID
 
     def draw_graph(self, canvas, names, colors, default_labels, title):
         """Draw one chart: title, grid, y-axis scale, plotted series and legend."""

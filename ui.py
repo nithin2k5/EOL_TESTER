@@ -1,114 +1,111 @@
 """Shared look and feel for every console.
 
-One dark, industrial palette: slate surfaces, a single blue accent, and
-colour reserved for meaning - green passes, red failures, amber warnings.
+The palette is the Test console's, which operators know from the line:
+white panels on window grey, a navy accent, sky-blue header bands and fills
+with black text, Cambria type, and colour reserved for meaning - green
+passes, red failures, orange warnings. Each page carries the same pink
+title bar (title_bar / page_header).
 
 Pages were written with their own colour literals scattered through them,
 so rather than rewriting thousands of call sites this module translates
 those literals to palette tokens as widgets are built, and guarantees that
 whatever background a control ends up with, its text stays readable on it.
-That translation is what carries the dark theme into consoles whose own
-code still says bg='white'.
 
     import ui
     ui.apply(root)
 """
 
+import os
 import tkinter as tk
 from tkinter import ttk
 
 import customtkinter as ctk
 
+import config
 import icons
 
 # customtkinter defaults to following the OS light/dark setting, which would
 # make its rounded widgets drift from this module's fixed light palette.
-ctk.set_appearance_mode("dark")
+ctk.set_appearance_mode("light")
 
 # --------------------------------------------------------------------------
 # Palette
 # --------------------------------------------------------------------------
-#
-# One dark, industrial palette: slate surfaces, a single blue accent, and
-# colour reserved for meaning. The status hues are brightened from their
-# light-theme values - a mid green or red that reads well on white goes
-# muddy against a dark panel.
 
-APP_BG = '#000000'      # page background
-SURFACE = '#121212'     # panels and cards
-SUBTLE = '#1d1d1d'      # input wells, alternating rows, header strips
-BORDER = '#2e2e2e'
-BORDER_STRONG = '#464646'
+APP_BG = '#F0F0F0'      # window grey behind the panels
+SURFACE = '#FFFFFF'     # panels, grids and input wells
+SUBTLE = '#E8E8E8'      # caption strips, neutral buttons
+BORDER = '#A0A0A0'
+BORDER_STRONG = '#808080'
 
-TEXT = '#f2f2f0'
-TEXT_MUTED = '#a3a3a0'
-TEXT_ON_ACCENT = '#ffffff'
-# The text colour for the rare control that is filled with a bright colour
-# rather than a dark one, so `readable_on` has a genuinely dark option to
-# pick when the background is light.
-TEXT_ON_LIGHT = '#0f1419'
+TEXT = '#000000'
+TEXT_MUTED = '#555555'
+# Text on the sky-blue accent fill, as on the Test console's lamps and grid
+# headers. Black reads far better on that bright blue than white does.
+TEXT_ON_ACCENT = '#000000'
+# The two options `readable_on` chooses between.
+TEXT_ON_LIGHT = '#000000'
+TEXT_ON_DARK = '#FFFFFF'
 
-# Two tones of the one accent. On a dark theme a blue bright enough to read
-# as text against a near-black panel is too light to carry white text when
-# it is used as a fill, so surfaces get the deeper tone and text the
-# brighter one.
-ACCENT = '#3b82f6'          # text, icons and borders on dark surfaces
-ACCENT_FILL = '#2563eb'     # filled surfaces, which carry TEXT_ON_ACCENT
-ACCENT_HOVER = '#1d4ed8'
-ACCENT_ACTIVE = '#1e40af'
+# The accent in two roles: navy for text, icons and headers on light
+# panels, sky blue for filled buttons and header bands.
+ACCENT = '#191970'          # MidnightBlue
+ACCENT_FILL = '#00BFFF'     # DeepSkyBlue, carrying TEXT_ON_ACCENT
+ACCENT_HOVER = '#33CCFF'
+ACCENT_ACTIVE = '#009ACD'
 
 # Tinted backgrounds, for marking a row as selected without filling it with
-# the full accent - a whole column of solid accent reads as a wall, not a
-# list, and leaves nothing to say which entry you are actually on.
-ACCENT_SOFT = '#15263f'
-DANGER_SOFT = '#2e1315'
-SUCCESS_SOFT = '#0e2617'
+# the full accent.
+ACCENT_SOFT = '#CCE8FF'
+DANGER_SOFT = '#FFD6D6'
+SUCCESS_SOFT = '#D6F5D6'
 
-# Disabled controls: dark enough to recede, light enough to still be read
-# as a control rather than a hole in the panel.
-DISABLED_BG = '#1f1f1f'
-DISABLED_TEXT = '#70706d'
+DISABLED_BG = '#E0E0E0'
+DISABLED_TEXT = '#8C8C8C'
 
-SUCCESS = '#22c55e'
-SUCCESS_HOVER = '#16a34a'
-DANGER = '#ef4444'
-DANGER_HOVER = '#dc2626'
-WARNING = '#f59e0b'
-WARNING_HOVER = '#d97706'
+SUCCESS = '#008000'
+SUCCESS_HOVER = '#006400'
+DANGER = '#E00000'
+DANGER_HOVER = '#B00000'
+WARNING = '#FF8C00'
+WARNING_HOVER = '#E07B00'
 
-# Row shading for result grids
-ROW_BAND = '#1c1810'
+# Row shading for result grids: bands of five in light yellow
+ROW_BAND = '#FFFF99'
 ROW_PLAIN = SURFACE
+
+# The Test console's own colours, for the bars and boxes pages share with it
+TITLE_PINK = '#FFB6C1'      # LightPink title bar
+FOOTER_PINK = '#FFC0CB'     # Pink footer
+NAVY = ACCENT               # part and page header bands
+SKY = ACCENT_FILL           # idle step lamps, grid headers
+AQUA = '#00FFFF'            # code entry boxes
+YELLOW = '#FFFF00'          # the next-model button, employee code box
+SILVER = '#C0C0C0'
+POWDER = '#B0E0E6'          # counter strips
+LAMP_PASS = '#00FF00'       # a passed step
+LAMP_FAIL = '#FF4500'       # a failed step
 
 # --------------------------------------------------------------------------
 # Chart tokens
 # --------------------------------------------------------------------------
 #
-# Trend charts used to be drawn on a pure black canvas with saturated
-# primaries - which is how an oscilloscope looks, not how a panel in this
-# app looks, and a black slab in the middle of a slate page is the one
-# thing on screen that reads as broken. They now sit on the same surface
-# as everything else.
-#
-# SERIES is a categorical palette: identity, not magnitude, so the slots
-# are assigned in fixed order and never cycled. These four are validated
-# against CHART_SURFACE for lightness, chroma, contrast and colour-vision
-# separation - re-run the check before changing one:
-#
-#     node validate_palette.js "#3987e5,#d95926,#199e70,#c98500" #          --mode dark --surface "#1c222b"
-#
-CHART_SURFACE = SURFACE      # the canvas the plot is drawn on
-CHART_GRID = BORDER          # hairline grid, one step off the surface
-CHART_AXIS = BORDER_STRONG   # the axis rules themselves
-SERIES = ('#3987e5', '#d95926', '#199e70', '#c98500')
+# Trend charts are drawn black with a dash-dot grid and white labels, as on
+# the Test console. SERIES is assigned per channel in fixed order and never
+# cycled, so L1 and P1 keep their colour on every chart.
+CHART_SURFACE = '#000000'
+CHART_GRID = '#DCDCDC'       # Gainsboro
+CHART_AXIS = '#DCDCDC'
+CHART_TEXT = '#FFFFFF'
+SERIES = ('#418CF0', '#FCB441', '#E0400A', '#056492')
 
 # Type scale
-FONT_FAMILY = 'Segoe UI'
-FONT_BODY = (FONT_FAMILY, 10)
-FONT_BODY_BOLD = (FONT_FAMILY, 10, 'bold')
-FONT_SMALL = (FONT_FAMILY, 9)
-FONT_SECTION = (FONT_FAMILY, 11, 'bold')
-FONT_TITLE = (FONT_FAMILY, 20, 'bold')
+FONT_FAMILY = 'Cambria'
+FONT_BODY = (FONT_FAMILY, 11)
+FONT_BODY_BOLD = (FONT_FAMILY, 11, 'bold')
+FONT_SMALL = (FONT_FAMILY, 10)
+FONT_SECTION = (FONT_FAMILY, 12, 'bold')
+FONT_TITLE = (FONT_FAMILY, 30, 'bold')
 
 # Spacing step, so padding is consistent rather than ad hoc
 PAD = 6
@@ -118,64 +115,58 @@ PAD_LARGE = 12
 # Translating the colour literals already in the pages
 # --------------------------------------------------------------------------
 
-# Colours that carry meaning keep it; the rest collapse onto the neutrals.
-# Every light literal has to land on something dark here, or a page that
-# was written with bg='white' keeps a white panel in the middle of the
-# dark theme.
+# Colours that carry meaning keep it; neutrals and the old accent literals
+# land on the palette, so a page written with its own colour choices still
+# comes out in the Test console's scheme.
 _BACKGROUND_MAP = {
     # neutrals
     'white': SURFACE, '#ffffff': SURFACE, '#fff': SURFACE,
-    '#f0f0f0': SUBTLE, '#f5f5f5': SUBTLE, '#f8f9fa': SUBTLE,
+    '#f0f0f0': APP_BG, '#f5f5f5': APP_BG, '#f8f9fa': APP_BG,
     '#e0e0e0': SUBTLE, '#e8e8e8': SUBTLE, 'lightgray': SUBTLE,
     'lightgrey': SUBTLE, 'gray': SUBTLE, 'grey': SUBTLE,
-    '#2b2b2b': SURFACE, 'pink': SURFACE, '#ffb6c1': SUBTLE,
-    'black': SURFACE, '#000000': SURFACE,
+    '#2b2b2b': SURFACE,
     '#f5e6e8': SURFACE, '#e8f6e9': SURFACE, '#e6eef5': SURFACE,
     '#f5f0e6': SURFACE,
     'lightyellow': ROW_BAND, '#fff9c4': ROW_BAND, '#fef9c3': ROW_BAND,
     '#ffff99': ROW_BAND,
-    # accent family - as a background these are fills, so they take the
-    # deeper tone and get TEXT_ON_ACCENT written over them below.
-    'navy': ACCENT_FILL, 'darkblue': ACCENT_FILL, 'blue': ACCENT_FILL,
-    'deepskyblue': ACCENT_FILL, '#00bfff': ACCENT_FILL, '#1e88e5': ACCENT_FILL,
-    '#3498db': ACCENT_FILL, '#2980b9': ACCENT_HOVER, '#0d6efd': ACCENT_FILL,
-    '#2c3e50': ACCENT_FILL, '#add8e6': SUBTLE, 'lightblue': SUBTLE,
+    # the Test console's bars
+    'pink': FOOTER_PINK, 'lightpink': TITLE_PINK, '#ffb6c1': TITLE_PINK,
+    # accent family: navy stays a dark band, the blues become the sky fill
+    'navy': NAVY, 'darkblue': NAVY, '#2c3e50': NAVY, 'midnightblue': NAVY,
+    'blue': ACCENT_FILL, 'deepskyblue': ACCENT_FILL, '#00bfff': ACCENT_FILL,
+    '#1e88e5': ACCENT_FILL, '#3498db': ACCENT_FILL, '#2980b9': ACCENT_ACTIVE,
+    '#0d6efd': ACCENT_FILL, '#add8e6': ACCENT_SOFT, 'lightblue': ACCENT_SOFT,
     '#cce5ff': ACCENT_SOFT, '#e6f2ff': ACCENT_SOFT,
+    'aqua': AQUA, 'cyan': AQUA, 'powderblue': POWDER,
     # success family
     'green': SUCCESS, '#2ecc71': SUCCESS, '#27ae60': SUCCESS_HOVER,
-    '#4caf50': SUCCESS, '#198754': SUCCESS, '#00ff00': SUCCESS,
-    '#45a049': SUCCESS_HOVER,
+    '#4caf50': SUCCESS, '#198754': SUCCESS, '#45a049': SUCCESS_HOVER,
     'lightgreen': SUCCESS_SOFT, '#90ee90': SUCCESS_SOFT,
     # danger family
     'red': DANGER, 'darkred': DANGER, '#e74c3c': DANGER,
     '#c0392b': DANGER_HOVER, '#f44336': DANGER, '#ff4d4d': DANGER,
     '#dc3545': DANGER, '#ff3333': DANGER, '#ff0000': DANGER,
     '#ffcccb': DANGER_SOFT, '#ffe6e6': DANGER_SOFT,
-    # warning family
-    'yellow': WARNING, 'orange': WARNING, '#ffd700': WARNING,
-    '#ffeb3b': WARNING,
-    # '#ff4500' (OrangeRed) is test_console.py's fail colour, not a warning -
-    # it belongs with the danger family or a failed step reads as a caution.
-    '#ff4500': DANGER,
+    # warning family; plain yellow is the Test console's yellow
+    'yellow': YELLOW, 'orange': WARNING, '#ffeb3b': YELLOW,
     # purple used for the edit action
-    '#9b59b6': ACCENT_FILL, '#8e44ad': ACCENT_HOVER,
-    '#95a5a6': TEXT_MUTED, '#7f8c8d': TEXT_MUTED,
+    '#9b59b6': ACCENT_FILL, '#8e44ad': ACCENT_ACTIVE,
+    '#95a5a6': SILVER, '#7f8c8d': BORDER_STRONG,
 }
 
 # Fills with a designated text colour, whichever way the contrast maths
-# would otherwise fall. Blue is the one that needs saying: white on the
-# accent is the convention everywhere else in this app.
+# would otherwise fall: black on the sky-blue fills, white on navy.
 _FILL_TEXT = {
-    ACCENT: TEXT_ON_ACCENT,
+    NAVY: TEXT_ON_DARK,
     ACCENT_FILL: TEXT_ON_ACCENT,
     ACCENT_HOVER: TEXT_ON_ACCENT,
     ACCENT_ACTIVE: TEXT_ON_ACCENT,
 }
 
 _FOREGROUND_MAP = {
-    'white': TEXT_ON_ACCENT, '#ffffff': TEXT_ON_ACCENT,
+    'white': TEXT_ON_DARK, '#ffffff': TEXT_ON_DARK,
     'black': TEXT, '#000000': TEXT, '#1a1a1a': TEXT, '#2b2b2b': TEXT,
-    '#333333': TEXT, '#424242': TEXT, '#2c3e50': TEXT,
+    '#333333': TEXT, '#424242': TEXT, '#2c3e50': ACCENT,
     '#999999': TEXT_MUTED, '#666666': TEXT_MUTED,
     'gray': TEXT_MUTED, 'grey': TEXT_MUTED, 'lightgray': TEXT_MUTED,
     'green': SUCCESS, '#00ff00': SUCCESS, '#4caf50': SUCCESS,
@@ -185,9 +176,7 @@ _FOREGROUND_MAP = {
     'orange': WARNING, 'yellow': WARNING,
 }
 
-# Black used to be preserved here for the chart canvases. They draw on
-# CHART_SURFACE now, so a literal black background is just an unconverted
-# light-theme leftover and maps onto the palette like any other.
+# Backgrounds passed through untouched even if they appear above.
 _KEEP_BACKGROUND = set()
 
 _NAMED_RGB = {
@@ -242,12 +231,11 @@ def _ratio(first, second):
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def readable_on(background, dark=TEXT_ON_LIGHT, light=TEXT):
+def readable_on(background, dark=TEXT_ON_LIGHT, light=TEXT_ON_DARK):
     """Pick whichever text colour reads better on this background.
 
     `dark` is the option for light backgrounds and `light` the option for
-    dark ones - on a dark theme the body text is itself light, so both
-    defaults being TEXT would leave bright fills with unreadable text.
+    dark ones.
     """
     base = _luminance(background)
     if base is None:
@@ -380,9 +368,9 @@ def _configure_ttk():
                     foreground=TEXT_ON_ACCENT, font=FONT_BODY_BOLD,
                     relief='flat', borderwidth=0, padding=(PAD, PAD))
     style.map('Treeview',
-              background=[('selected', ACCENT_FILL)],
-              foreground=[('selected', TEXT_ON_ACCENT)])
-    style.map('Treeview.Heading', background=[('active', ACCENT)])
+              background=[('selected', ACCENT_SOFT)],
+              foreground=[('selected', TEXT)])
+    style.map('Treeview.Heading', background=[('active', ACCENT_HOVER)])
 
     style.configure('TNotebook', background=APP_BG, tabmargins=[2, 5, 2, 0])
     style.configure('TNotebook.Tab', background=SUBTLE, foreground=TEXT,
@@ -605,60 +593,80 @@ def apply(root):
 # Small building blocks pages can use directly
 # --------------------------------------------------------------------------
 
-def page_header(parent, title, right_text='', compact=False, icon=None):
-    """A titled bar across the top of a page, with optional right-hand text.
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'assets', 'infac_india.png')
+_logo_images = {}
 
-    `compact` trades the display-sized title for a single line of text,
-    giving back most of the bar's height to whatever sits below it.
-    `icon` names a glyph from icons.py to set beside the title.
+
+def _logo(max_size):
+    """The INFAC INDIA logo as a Tk image, cached so it is not collected."""
+    if max_size not in _logo_images:
+        from PIL import Image, ImageTk
+        image = Image.open(LOGO_PATH)
+        image.thumbnail(max_size)
+        _logo_images[max_size] = ImageTk.PhotoImage(image)
+    return _logo_images[max_size]
+
+
+def title_bar(parent, title, right_text=None, height=60, font_size=30):
+    """The Test console's pink title bar: logo, centred title, machine ID.
+
+    `right_text` defaults to the machine ID, so photos and reports of any
+    screen say which line they came from.
     """
-    pad = PAD if compact else PAD_LARGE
-    font = FONT_SECTION if compact else FONT_TITLE
+    if right_text is None:
+        right_text = config.get('MACHINE_ID', '')
 
-    header = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER,
-                      highlightthickness=1)
-    header.pack(fill='x')
+    bar = tk.Frame(parent, bg=TITLE_PINK, height=height, exact_colors=True)
+    bar.pack(fill='x', padx=3, pady=(3, 0))
+    bar.pack_propagate(False)
 
-    inner = tk.Frame(header, bg=SURFACE)
-    inner.pack(fill='x', padx=PAD_LARGE, pady=pad)
-
-    if icon:
-        badge = ctk.CTkFrame(inner, width=30, height=30, corner_radius=8,
-                             fg_color=ACCENT_FILL)
-        badge.pack(side='left', padx=(0, PAD))
-        badge.pack_propagate(False)
-        ctk.CTkLabel(badge, text='', fg_color=ACCENT_FILL,
-                    image=icon_image(icon, TEXT_ON_ACCENT, 18)).pack(expand=True)
-
-    tk.Label(inner, text=title, bg=SURFACE, fg=TEXT,
-             font=font).pack(side='left')
+    try:
+        tk.Label(bar, image=_logo((150, height - 6)), bg=TITLE_PINK).pack(
+            side='left', padx=(8, 0))
+    except Exception as e:
+        print(f"Logo not shown: {e}")
 
     if right_text:
-        tk.Label(inner, text=right_text, bg=SURFACE, fg=TEXT_MUTED,
-                 font=FONT_SMALL if compact else FONT_BODY_BOLD).pack(side='right')
+        tk.Label(bar, text=right_text, bg=TITLE_PINK, fg=TEXT,
+                 font=(FONT_FAMILY, max(12, font_size - 6), 'bold')).pack(
+                     side='right', padx=12)
 
-    return header
+    tk.Label(bar, text=title, bg=TITLE_PINK, fg=TEXT,
+             font=(FONT_FAMILY, font_size, 'bold')).place(
+                 relx=0.5, rely=0.5, anchor='center')
+    return bar
+
+
+def page_header(parent, title, right_text=None, compact=False, icon=None):
+    """A page's title bar, the same pink bar the Test console carries.
+
+    `compact` gives a shorter bar with smaller type. `icon` is accepted for
+    older callers and no longer drawn: the logo takes that place.
+    """
+    if compact:
+        return title_bar(parent, title.upper(), right_text, height=44, font_size=20)
+    return title_bar(parent, title.upper(), right_text)
 
 
 def section(parent, title, icon='', **kwargs):
-    """A titled card. Returns the frame to put content in.
+    """A titled panel with a navy caption band. Returns the frame to fill.
 
-    `icon` is a single glyph shown before the title, for pages that want a
-    little visual variety between cards without departing from the palette.
+    `icon` is a single glyph shown before the title.
     """
     outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER,
                      highlightthickness=1, **kwargs)
 
-    caption = tk.Frame(outer, bg=SUBTLE)
+    caption = tk.Frame(outer, bg=NAVY)
     caption.pack(fill='x')
 
     if icon:
-        tk.Label(caption, text=icon, bg=SUBTLE, fg=ACCENT,
+        tk.Label(caption, text=icon, bg=NAVY, fg=TEXT_ON_DARK,
                  font=FONT_SECTION).pack(side='left', padx=(PAD, 0), pady=PAD)
 
-    tk.Label(caption, text=title, bg=SUBTLE, fg=ACCENT,
-            font=FONT_SECTION, anchor='w', padx=PAD, pady=PAD).pack(
-                side='left', fill='x', expand=True)
+    tk.Label(caption, text=title, bg=NAVY, fg=TEXT_ON_DARK,
+             font=FONT_SECTION, anchor='w', padx=PAD, pady=PAD).pack(
+                 side='left', fill='x', expand=True)
 
     body = tk.Frame(outer, bg=SURFACE)
     body.pack(fill='both', expand=True, padx=PAD, pady=PAD)
@@ -783,22 +791,22 @@ def ctk_card(parent, **kwargs):
 
 
 def ctk_card_header(card, title, icon=None, height=34):
-    """The inset icon+title strip along the top of a ctk_card.
+    """The navy icon+title strip along the top of a ctk_card.
 
     Inset a couple of pixels from the card's own edge, so the card's
     rounded corners stay visible around it rather than being squared off
     by a banner running edge to edge.
     """
     header = ctk.CTkFrame(card, corner_radius=CORNER_RADIUS_SMALL,
-                          fg_color=SUBTLE, height=height)
+                          fg_color=NAVY, height=height)
     header.pack(fill='x', padx=6, pady=(6, 0))
     header.pack_propagate(False)
 
     if icon:
-        ctk.CTkLabel(header, text='', image=icon_image(icon, ACCENT, 18),
-                    fg_color=SUBTLE, width=18).pack(side='left', padx=(PAD_LARGE, 0))
+        ctk.CTkLabel(header, text='', image=icon_image(icon, TEXT_ON_DARK, 18),
+                    fg_color=NAVY, width=18).pack(side='left', padx=(PAD_LARGE, 0))
 
-    ctk.CTkLabel(header, text=title, fg_color=SUBTLE, text_color=ACCENT,
+    ctk.CTkLabel(header, text=title, fg_color=NAVY, text_color=TEXT_ON_DARK,
                 font=FONT_SECTION).pack(side='left', padx=PAD)
     return header
 

@@ -71,17 +71,18 @@ class PageFrame(tk.Frame):
 
 
 class NavButton(ctk.CTkButton):
-    """One entry in the navigation rail: a rounded pill, icon over label.
+    """One entry in the navy navigation rail: a rounded pill, icon over label.
 
-    Built on customtkinter so the current entry can be shown as a real
-    rounded, tinted pill (matching the reference design) rather than a
-    flat row with a marker bar down one edge. `command` runs on click;
-    `set_active` marks this as the console currently on show, tinting it
-    persistently rather than only while the pointer is over it.
+    `command` runs on click; `set_active` marks this as the console
+    currently on show, filling it sky blue like the Test console's lamps.
     """
 
     ICON_SIZE = 22
-    FONT = (ui.FONT_FAMILY, 9, 'bold')
+    FONT = (ui.FONT_FAMILY, 10, 'bold')
+    INK = ui.TEXT_ON_DARK        # white on the navy rail
+    DANGER_INK = '#FF8080'       # exit, light enough to read on navy
+    HOVER = '#2E2E8C'
+    DISABLED_INK = '#7F7FB0'
 
     def __init__(self, master, icon, label, command, danger=False):
         self.icon_name = icon
@@ -91,12 +92,12 @@ class NavButton(ctk.CTkButton):
         super().__init__(
             master, text=label, command=command, height=64,
             corner_radius=ui.CORNER_RADIUS_SMALL, compound='top',
-            font=self.FONT, fg_color='transparent',
-            hover_color=ui.DANGER_SOFT if danger else ui.SUBTLE,
-            text_color=ui.DANGER if danger else ui.TEXT,
-            text_color_disabled=ui.TEXT_MUTED,
+            font=self.FONT, fg_color='transparent', bg_color=ui.NAVY,
+            hover_color=self.HOVER,
+            text_color=self.DANGER_INK if danger else self.INK,
+            text_color_disabled=self.DISABLED_INK,
         )
-        self._apply_icon(ui.DANGER if danger else ui.TEXT)
+        self._apply_icon(self.DANGER_INK if danger else self.INK)
 
     def _apply_icon(self, color):
         self.configure(image=ui.icon_image(self.icon_name, color, self.ICON_SIZE))
@@ -106,19 +107,21 @@ class NavButton(ctk.CTkButton):
         self.configure(state='normal' if enabled else 'disabled')
         if not enabled:
             self.set_active(False)
-        self._apply_icon(ui.TEXT_MUTED if not enabled else
-                         (ui.ACCENT if self.active else
-                          (ui.DANGER if self.danger else ui.TEXT)))
+        self._apply_icon(self.DISABLED_INK if not enabled else
+                         (ui.TEXT_ON_ACCENT if self.active else
+                          (self.DANGER_INK if self.danger else self.INK)))
 
     def set_active(self, active):
         """Mark this as the console currently on show."""
         self.active = bool(active)
         if self.active:
-            self.configure(fg_color=ui.ACCENT_SOFT, text_color=ui.ACCENT)
-            self._apply_icon(ui.ACCENT)
+            self.configure(fg_color=ui.SKY, hover_color=ui.ACCENT_HOVER,
+                           text_color=ui.TEXT_ON_ACCENT)
+            self._apply_icon(ui.TEXT_ON_ACCENT)
         else:
-            text_color = ui.DANGER if self.danger else ui.TEXT
-            self.configure(fg_color='transparent', text_color=text_color)
+            text_color = self.DANGER_INK if self.danger else self.INK
+            self.configure(fg_color='transparent', hover_color=self.HOVER,
+                           text_color=text_color)
             self._apply_icon(text_color)
 
 
@@ -153,9 +156,8 @@ class MainConsole(tk.Tk):
         screen_height = self.winfo_screenheight()
         self.geometry(f"{screen_width}x{screen_height}+0+0")
         
-        # Compact: the rail and the page below want the height more
-        # than a display-sized title does.
-        ui.page_header(self, "EOL Tester", self.machine_label(), compact=True)
+        # No bar of the shell's own: every page, and the empty panel below,
+        # carries the pink title bar with the logo and machine ID.
 
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True)
@@ -180,9 +182,11 @@ class MainConsole(tk.Tk):
         self.page = None
         self.page_app = None
         self.page_closed_hook = None
-        self.placeholder = ttk.Label(
-            self.page_host, anchor="center", style='Muted.TLabel',
-            text="Choose a console from the navigation on the left.")
+        self.placeholder = tk.Frame(self.page_host, bg=ui.APP_BG)
+        ui.title_bar(self.placeholder, "EOL (END OF LINE) TESTER")
+        tk.Label(self.placeholder, bg=ui.APP_BG, fg=ui.TEXT_MUTED, font=ui.FONT_SECTION,
+                 text="Choose a console from the navigation on the left.").pack(
+                     fill="both", expand=True)
         self.show_placeholder()
 
         # Create menu. A tk.Menu is drawn by the window manager rather than
@@ -207,10 +211,6 @@ class MainConsole(tk.Tk):
 
         self.load_settings()
 
-    def machine_label(self):
-        machine_id = config.get('MACHINE_ID', '')
-        return f"Machine ID: {machine_id}" if machine_id else ''
-
     def build_side_nav(self, parent):
         """The left-hand navigation rail.
 
@@ -218,8 +218,7 @@ class MainConsole(tk.Tk):
         both edges and stay the same size whatever their label says. A
         rounded logo mark sits above them as the rail's visual anchor.
         """
-        nav = tk.Frame(parent, bg=ui.SURFACE, highlightbackground=ui.BORDER,
-                       highlightthickness=1, width=1)
+        nav = tk.Frame(parent, bg=ui.NAVY, width=1)
         # The column's width comes from the weights on the body, so the frame
         # must not ask for a width of its own: grid honours the widest child,
         # which would pull the column back open past its share.
@@ -227,10 +226,10 @@ class MainConsole(tk.Tk):
         nav.grid_columnconfigure(0, weight=1)
 
         logo = ctk.CTkFrame(nav, width=44, height=44, corner_radius=12,
-                            fg_color=ui.ACCENT)
+                            fg_color=ui.SKY, bg_color=ui.NAVY)
         logo.grid(row=0, column=0, pady=(ui.PAD_LARGE, ui.PAD))
         logo.grid_propagate(False)
-        ctk.CTkLabel(logo, text='', fg_color=ui.ACCENT,
+        ctk.CTkLabel(logo, text='', fg_color=ui.SKY,
                     image=ui.icon_image('gear', ui.TEXT_ON_ACCENT, 24)).pack(
                         expand=True)
 
