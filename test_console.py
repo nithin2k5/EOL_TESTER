@@ -2054,8 +2054,9 @@ class EOLTesterGUI:
         y = label.winfo_y()
         
         # Update position in the positions dictionary
-        self.label_positions[label.cget('text')] = (x, y)
-        print(f"Label {label.cget('text')} dropped at x={x}, y={y}")
+        label_key = getattr(label, 'label_key', label.cget('text'))
+        self.label_positions[label_key] = (x, y)
+        print(f"Label {label_key} dropped at x={x}, y={y}")
         
         # Save the updated positions to database
         self.save_label_positions()
@@ -3728,10 +3729,13 @@ class EOLTesterGUI:
                         
                         print(f"Processing label L{label_num} at coordinates ({x}, {y})")
                         
-                        # Create label with enhanced visibility
+                        # Create label with enhanced visibility. label_text is
+                        # the canonical key; the caption may have been renamed in
+                        # Model Settings, so show the stored text when there is one.
                         label_text = f'L{label_num}'
+                        display_text = coord_data.get('text', label_text)
                         new_label = tk.Label(self.image_frame,
-                                           text=label_text,
+                                           text=display_text,
                                            bg="yellow",  # Initial background color
                                            fg="black",
                                            font=("Arial", 12, "bold"),
@@ -3752,6 +3756,7 @@ class EOLTesterGUI:
                         new_label.configure(cursor="hand2")
                         
                         # Store the label and its position
+                        new_label.label_key = label_text
                         self.placed_labels[label_text] = new_label
                         self.label_positions[label_text] = (x, y)
                         
@@ -3876,7 +3881,8 @@ class EOLTesterGUI:
                 label_num = label_text[1:]  # Extract number from "L1", "L2", etc.
                 positions[label_num] = {
                     'x': label.winfo_x(),
-                    'y': label.winfo_y()
+                    'y': label.winfo_y(),
+                    'text': label.cget('text')  # Preserve the caption from Model Settings
                 }
 
         try:
