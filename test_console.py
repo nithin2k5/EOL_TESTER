@@ -2952,14 +2952,6 @@ class EOLTesterGUI:
                 print("\n✅ Part loaded successfully!")
                 print("🚀 Starting test automatically - no button click required")
                 
-                # ===================================================================
-                # PLC LABEL COLORING: Set Auto and Home labels to GREEN when part loads
-                # Labels remain green until reset (persistent)
-                # ===================================================================
-                self.set_label_color('auto', 'green', persistent=True)
-                self.set_label_color('home', 'green', persistent=True)
-                print("🟢 AUTO and HOME labels set to GREEN (part loaded - persistent)")
-                
                 # Set current part number for testing
                 self.current_part_number = self.partNumber
                 
@@ -3498,13 +3490,6 @@ class EOLTesterGUI:
             
             print("✅ PLC connected - starting coil read loop")
             
-            # ===================================================================
-            # PLC LABEL COLORING: Set Test label to GREEN when test process starts
-            # Label remains green until reset (persistent)
-            # ===================================================================
-            self.set_label_color('test', 'green', persistent=True)
-            print("🟢 TEST label set to GREEN (test process started - persistent)")
-            
             # Initialize test state flags. Readings taken while the machine
             # sat idle must not count as this test's peaks.
             self.reset_measurements()
@@ -3789,20 +3774,18 @@ class EOLTesterGUI:
                 # [4]=PULL2_OK, [5]=PULL2_NG, [6]=TESTRESULT_OK, [7]=TESTRESULT_NG
                 
                 # AUTO label update
-                # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 0:
                     auto_addr = self.process_addresses[0]
                     auto_result = status_values.get(auto_addr, False)
-                    if hasattr(self, 'auto_label') and not self.is_label_persistent('auto'):
+                    if hasattr(self, 'auto_label'):
                         # Lime if HIGH, DeepSkyBlue if LOW
                         self.auto_label.config(bg="#00FF00" if auto_result else "#00BFFF")
                 
                 # HOME label update
-                # Only update if not set to persistent green from part load
                 if len(self.process_addresses) > 1:
                     home_addr = self.process_addresses[1]
                     home_result = status_values.get(home_addr, False)
-                    if hasattr(self, 'home_label') and not self.is_label_persistent('home'):
+                    if hasattr(self, 'home_label'):
                         self.home_label.config(bg="#00FF00" if home_result else "#00BFFF")
                 
                 # PULL1 label update
@@ -3847,14 +3830,11 @@ class EOLTesterGUI:
                     test_ng_result = status_values.get(test_ng_addr, False)
                     
                     if hasattr(self, 'test_label'):
-                        # Allow updating to OK (green) or NG (red) results
-                        # But keep persistent green if test is running (before results)
                         if test_ok_result:
                             self.test_label.config(bg="#00FF00")  # Lime
                         elif test_ng_result:
                             self.test_label.config(bg="#FF4500")  # OrangeRed
-                        elif not self.is_label_persistent('test'):
-                            # Only revert to blue if not persistent (before test starts)
+                        else:
                             self.test_label.config(bg="#00BFFF")  # DeepSkyBlue
                     
                     # Check if test result received. A result coil the PLC
@@ -4430,54 +4410,9 @@ class EOLTesterGUI:
         self.rcvdTestRslt = True
         self.test_result_command()
 
-    def set_label_color(self, label_name, color, persistent=False):
-        """
-        Set the color of a process status label
-        
-        Args:
-            label_name: Name of label ('auto', 'home', '1st', '2nd', 'test')
-            color: Color to set (e.g., 'green', '#00FF00', 'red', etc.)
-            persistent: If True, label color persists until reset (used for part load indicators)
-        
-        Usage:
-            self.set_label_color('auto', 'green', persistent=True)  # Set AUTO label to green, keep it green
-            self.set_label_color('test', '#00FF00')  # Set TEST label to lime green
-        """
-        try:
-            # Initialize persistent label tracking if not exists
-            if not hasattr(self, 'persistent_label_colors'):
-                self.persistent_label_colors = {}
-            
-            # Get label object using attribute name pattern
-            label_obj = getattr(self, f"{label_name}_label", None)
-            
-            if label_obj:
-                label_obj.config(bg=color)
-                print(f"✓ Set {label_name.upper()} label color to {color}{' (persistent)' if persistent else ''}")
-                
-                # Track persistent labels
-                if persistent:
-                    self.persistent_label_colors[label_name] = color
-            else:
-                print(f"⚠️ Label '{label_name}' not found")
-                
-        except Exception as e:
-            print(f"Error setting label color for '{label_name}': {e}")
-    
-    def is_label_persistent(self, label_name):
-        """Check if a label has a persistent color set"""
-        if not hasattr(self, 'persistent_label_colors'):
-            return False
-        return label_name in self.persistent_label_colors
-    
     def reset_process_status_labels(self):
         """Reset all process status labels to default blue state"""
         try:
-            # Clear persistent label tracking
-            if hasattr(self, 'persistent_label_colors'):
-                self.persistent_label_colors.clear()
-                print("Cleared persistent label colors")
-            
             # List of status labels to reset
             status_labels = ['auto', 'home', '1st', '2nd', 'test']
             
