@@ -638,6 +638,19 @@ def title_bar(parent, title, right_text=None, height=60, font_size=30):
     return bar
 
 
+FOOTER_TEXT = "Powered By: NICE COMPUTERS AND SOFTWARE SOLUTIONS, Kavali, A.P"
+
+
+def footer_bar(parent, text=FOOTER_TEXT):
+    """The Test console's pink footer strip, for pages that sign off at the foot."""
+    bar = tk.Frame(parent, bg=FOOTER_PINK, height=34, exact_colors=True)
+    bar.pack(fill='x', side='bottom', padx=3, pady=3)
+    bar.pack_propagate(False)
+    tk.Label(bar, text=text, bg=FOOTER_PINK, fg=TEXT,
+             font=(FONT_FAMILY, 11, 'bold')).pack(side='left', padx=8)
+    return bar
+
+
 def page_header(parent, title, right_text=None, compact=False, icon=None):
     """A page's title bar, the same pink bar the Test console carries.
 

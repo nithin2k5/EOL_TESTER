@@ -20,15 +20,17 @@ class DataConsole:
         self.db_config = db.get_config()
         
         self.create_header()
+        # The footer is packed before the scrolling page so it keeps its place
+        # at the foot of the window
+        self.create_footer()
         self.create_input_section()
         self.create_table()
-        self.create_footer()
         
         # Load part numbers after UI is created
         self.load_part_numbers()
 
     def create_header(self):
-        ui.page_header(self.root, "Work Data", compact=True, icon='bars')
+        ui.page_header(self.root, "Work Data")
 
     def create_input_section(self):
         self.page_scroller = ui.scrollable(self.root, horizontal=True)
@@ -44,14 +46,14 @@ class DataConsole:
 
         # Part Number
         part_label = tk.Label(input_frame, text="PART NUMBER:", bg=ui.SURFACE,
-                              fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
+                              fg=ui.TEXT, font=ui.FONT_BODY_BOLD)
         part_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
         self.part_combobox = ttk.Combobox(input_frame, state="readonly", width=20)
         self.part_combobox.grid(row=0, column=1, padx=5, pady=5)
 
         # Start Date Label
         start_date_label = tk.Label(input_frame, text="START DATE:", bg=ui.SURFACE,
-                                    fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
+                                    fg=ui.TEXT, font=ui.FONT_BODY_BOLD)
         start_date_label.grid(row=0, column=2, padx=5, pady=5, sticky="e")
 
         # Set start date to beginning of current month and end date to current date
@@ -77,7 +79,7 @@ class DataConsole:
 
         # End Date Label
         end_date_label = tk.Label(input_frame, text="END DATE:", bg=ui.SURFACE,
-                                  fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
+                                  fg=ui.TEXT, font=ui.FONT_BODY_BOLD)
         end_date_label.grid(row=0, column=4, padx=5, pady=5, sticky="e")
 
         # Calendar widget for end date with enhanced styling
@@ -99,7 +101,7 @@ class DataConsole:
 
         # Result
         result_label = tk.Label(input_frame, text="RESULT:", bg=ui.SURFACE,
-                                fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
+                                fg=ui.TEXT, font=ui.FONT_BODY_BOLD)
         result_label.grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.result_combobox = ttk.Combobox(input_frame, state="readonly", width=20, 
                                           values=["ALL", "PASS", "NG"])
@@ -108,7 +110,7 @@ class DataConsole:
 
         # Part Status
         status_label = tk.Label(input_frame, text="PART STATUS:", bg=ui.SURFACE,
-                                fg=ui.TEXT_MUTED, font=ui.FONT_BODY_BOLD)
+                                fg=ui.TEXT, font=ui.FONT_BODY_BOLD)
         status_label.grid(row=2, column=2, padx=5, pady=5, sticky="e")
         self.status_combobox = ttk.Combobox(input_frame, state="readonly", width=20,
                                           values=["ACTIVE", "INACTIVE"])
@@ -161,14 +163,7 @@ class DataConsole:
             self.result_table.column(col, width=100, anchor="center")
 
     def create_footer(self):
-        tk.Frame(self.root, bg=ui.BORDER, height=1).pack(fill=tk.X)
-        footer_frame = tk.Frame(self.root, bg=ui.SURFACE)
-        footer_frame.pack(fill=tk.X)
-
-        footer_label = tk.Label(footer_frame,
-                              text="Designed and developed by Nice Computers & Industrial Solutions",
-                              font=ui.FONT_SMALL, bg=ui.SURFACE, fg=ui.TEXT_MUTED)
-        footer_label.pack(pady=5)
+        ui.footer_bar(self.root)
 
     def load_part_numbers(self):
         """Load part numbers from TBL_MODEL_MASTER into combobox"""
@@ -235,9 +230,13 @@ class DataConsole:
             records = cursor.fetchall()
             
             # Insert records into table
+            self.result_table.tag_configure('band', background=ui.ROW_BAND)
+            self.result_table.tag_configure('plain', background=ui.ROW_PLAIN)
             for i, record in enumerate(records, 1):
                 values = [i] + list(record)[1:]  # Add row number, skip ID
-                self.result_table.insert('', 'end', values=values)
+                # Bands of five in light yellow, as on the Test console's results
+                tag = 'band' if ((i - 1) // 5) % 2 == 0 else 'plain'
+                self.result_table.insert('', 'end', values=values, tags=(tag,))
             
             # Show count
             messagebox.showinfo("Search Complete", f"Found {len(records)} records")
