@@ -76,11 +76,8 @@ class ComPortSettings:
         self.load_device_values()
 
     def setup_ui(self):
-        # The same page header every other console uses.
-        machine_id = config.get('MACHINE_ID', 'Not Set')
-        ui.page_header(self.root, "COM Port Settings",
-                       right_text=f"Machine ID: {machine_id}",
-                       compact=True, icon='swap')
+        # The pink title bar every console carries
+        ui.page_header(self.root, "COM Port Settings")
 
         # Main content frame
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
@@ -106,7 +103,7 @@ class ComPortSettings:
                 bg=props['bg'], 
                 fg=props['fg'],
                 width=15, 
-                font=('Arial', 12, 'bold'),
+                font=(ui.FONT_FAMILY, 12, 'bold'),
                 command=props['command']
             )
             btn.pack(pady=5)
@@ -129,10 +126,10 @@ class ComPortSettings:
 
         # PLC Section
         plc_frame = self.create_section(
-            panels_frame, "PLC", '#e8f6e9',
+            panels_frame, "PLC", ui.SURFACE,
             width=400, height=400
         )
-        plc_frame.grid(row=0, column=0, padx=10, sticky='nsew')
+        plc_frame.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
         self.add_plc_content(plc_frame)
 
         # Sections are laid out three to a row, starting beside the PLC panel.
@@ -141,7 +138,7 @@ class ComPortSettings:
         # Loadcell Sections
         for i in range(1, self.LOADCELL_COUNT + 1):
             loadcell_frame = self.create_section(
-                panels_frame, f"LOADCELL - {i:02d} (L{i})", '#f5e6e8',
+                panels_frame, f"LOADCELL - {i:02d} (L{i})", ui.SURFACE,
                 width=400, height=400
             )
             loadcell_frame.grid(row=position // 3, column=position % 3,
@@ -151,7 +148,7 @@ class ComPortSettings:
 
         # LVDT Section
         lvdt_frame = self.create_section(
-            panels_frame, "LVDT", '#e6eef5',
+            panels_frame, "LVDT", ui.SURFACE,
             width=400, height=400
         )
         lvdt_frame.grid(row=position // 3, column=position % 3,
@@ -162,7 +159,7 @@ class ComPortSettings:
         # Camera Sections
         for i in range(1, self.CAMERA_COUNT + 1):
             camera_frame = self.create_section(
-                panels_frame, f"CAMERA - {i:02d}", '#f5f0e6',
+                panels_frame, f"CAMERA - {i:02d}", ui.SURFACE,
                 width=400, height=400
             )
             camera_frame.grid(row=position // 3, column=position % 3,
@@ -172,7 +169,7 @@ class ComPortSettings:
 
         # Modbus TCP Section
         modbus_tcp_frame = self.create_section(
-            panels_frame, "MODBUS TCP", '#e8f6e9',
+            panels_frame, "MODBUS TCP", ui.SURFACE,
             width=400, height=400
         )
         modbus_tcp_frame.grid(row=position // 3, column=position % 3,
@@ -186,8 +183,8 @@ class ComPortSettings:
         frame.pack_propagate(False)
         frame.configure(height=height)
         
-        # Section caption, set off from the body
-        tk.Label(frame, text=title, bg=ui.SUBTLE, fg=ui.ACCENT,
+        # Section caption: a navy band, like the Test console's part header
+        tk.Label(frame, text=title, bg=ui.NAVY, fg=ui.TEXT_ON_DARK,
                  font=ui.FONT_SECTION, anchor='w',
                  padx=ui.PAD, pady=ui.PAD).pack(fill='x')
         
@@ -204,13 +201,13 @@ class ComPortSettings:
         
         # Test Button
         self.test_button = tk.Button(buttons_frame, text="TEST", bg=ui.ACCENT_FILL, fg='white', 
-                              width=8, font=('Arial', 9, 'bold'),
+                              width=8, font=(ui.FONT_FAMILY, 9, 'bold'),
                                     command=self.read_plc_data)
         self.test_button.pack(side='left', padx=2)
         
         # Read Button (new)
         self.read_button = tk.Button(buttons_frame, text="READ", bg='navy', fg='white',
-                              width=8, font=('Arial', 9, 'bold'),
+                              width=8, font=(ui.FONT_FAMILY, 9, 'bold'),
                                     command=self.read_holding_registers)
         self.read_button.pack(side='left', padx=2)
         
@@ -241,7 +238,7 @@ class ComPortSettings:
         self.points_entry.insert(0, "1")  # Default to 1 point
         
         # Style the labels and comboboxes
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': (ui.FONT_FAMILY, 10)}
         
         # COM Port
         tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=2)
@@ -271,7 +268,7 @@ class ComPortSettings:
         
         # Connect Button
         self.connect_button = tk.Button(frame, text="Connect", bg='green', fg='white',
-                                      font=('Arial', 9, 'bold'), command=self.connect_to_plc)
+                                      font=(ui.FONT_FAMILY, 9, 'bold'), command=self.connect_to_plc)
         self.connect_button.pack(anchor='w', padx=5, pady=5)
         
         # Rx String
@@ -499,7 +496,7 @@ class ComPortSettings:
 
     def add_loadcell_content(self, frame):
         # Style settings
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': (ui.FONT_FAMILY, 10)}
         
         # Test button with consistent styling
         test_button = tk.Button(
@@ -508,7 +505,7 @@ class ComPortSettings:
             bg=ui.ACCENT_FILL, 
             fg='white', 
             width=8, 
-            font=('Arial', 9, 'bold'),
+            font=(ui.FONT_FAMILY, 9, 'bold'),
             command=lambda f=frame: self.test_loadcell(f)
         )
         test_button.pack(anchor='w', padx=5, pady=5)
@@ -556,7 +553,7 @@ class ComPortSettings:
             text="Connect", 
             bg='green', 
             fg='white',
-            font=('Arial', 9, 'bold'),
+            font=(ui.FONT_FAMILY, 9, 'bold'),
             command=lambda: self.connect_loadcell(frame, com_combo, baud_combo, test_button)
         )
         connect_button.pack(anchor='w', padx=5, pady=5)
@@ -690,20 +687,20 @@ class ComPortSettings:
 
     def add_lvdt_content(self, frame):
         """Build the LVDT panel: port, baud, connect and the four live readings."""
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': (ui.FONT_FAMILY, 10)}
 
         top_frame = tk.Frame(frame, bg=frame['bg'])
         top_frame.pack(fill='x', padx=5, pady=5)
 
         self.lvdt_connect_button = tk.Button(
             top_frame, text="CONNECT", bg='navy', fg='white',
-            width=10, font=('Arial', 9, 'bold'),
+            width=10, font=(ui.FONT_FAMILY, 9, 'bold'),
             command=self.connect_lvdt)
         self.lvdt_connect_button.pack(side='left', padx=2)
 
         self.lvdt_stop_button = tk.Button(
             top_frame, text="STOP", bg='darkred', fg='white',
-            width=8, font=('Arial', 9, 'bold'), state='disabled',
+            width=8, font=(ui.FONT_FAMILY, 9, 'bold'), state='disabled',
             command=self.disconnect_lvdt)
         self.lvdt_stop_button.pack(side='left', padx=2)
 
@@ -731,14 +728,14 @@ class ComPortSettings:
             row.grid(row=index // 2, column=index % 2, padx=4, pady=3, sticky='w')
 
             tk.Label(row, text=f"{name}:", bg=frame['bg'], fg='black',
-                     font=('Arial', 10, 'bold')).pack(side='left')
+                     font=(ui.FONT_FAMILY, 10, 'bold')).pack(side='left')
 
             entry = tk.Entry(row, width=10, justify='center', state='readonly')
             entry.pack(side='left', padx=(4, 0))
             self.lvdt_value_entries[name] = entry
 
         self.lvdt_status_label = tk.Label(frame, text="Not connected", bg=frame['bg'],
-                                          fg='#666666', font=('Arial', 9))
+                                          fg='#666666', font=(ui.FONT_FAMILY, 9))
         self.lvdt_status_label.pack(anchor='w', padx=5, pady=(5, 0))
 
     def parse_lvdt_data(self, line):
@@ -853,7 +850,7 @@ class ComPortSettings:
 
     def add_camera_content(self, frame, camera_num):
         """Build a camera panel: just the port and baud rate it is wired on."""
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': (ui.FONT_FAMILY, 10)}
         frame.camera_num = camera_num
 
         tk.Label(frame, text="COM Port", **label_style).pack(anchor='w', padx=5, pady=(10, 2))
@@ -878,7 +875,7 @@ class ComPortSettings:
         
         # Test Button
         self.test_tcp_button = tk.Button(top_frame, text="TEST", bg=ui.ACCENT_FILL, fg='white', 
-                              width=8, font=('Arial', 9, 'bold'),
+                              width=8, font=(ui.FONT_FAMILY, 9, 'bold'),
                                     command=self.read_modbus_tcp_data)
         self.test_tcp_button.pack(side='left', padx=5)
         
@@ -897,11 +894,11 @@ class ComPortSettings:
         tk.Label(port_frame, text="Port", bg=frame['bg']).pack(side='left')
         
         # Style the labels and comboboxes
-        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': ('Arial', 10)}
+        label_style = {'bg': frame['bg'], 'fg': 'black', 'font': (ui.FONT_FAMILY, 10)}
         
         # Connect Button
         self.connect_tcp_button = tk.Button(frame, text="Connect", bg='green', fg='white',
-                                      font=('Arial', 9, 'bold'), command=self.connect_to_modbus_tcp)
+                                      font=(ui.FONT_FAMILY, 9, 'bold'), command=self.connect_to_modbus_tcp)
         self.connect_tcp_button.pack(anchor='w', padx=5, pady=5)
         
         # Rx String
