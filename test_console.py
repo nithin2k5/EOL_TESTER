@@ -3674,8 +3674,8 @@ class EOLTesterGUI:
             
             # Store image dimensions for label positioning
             self.image_dimensions = {
-                'width': frame_width,
-                'height': frame_height,
+                'width': target_width,
+                'height': target_height,
                 'x_offset': 0,
                 'y_offset': 0
             }
